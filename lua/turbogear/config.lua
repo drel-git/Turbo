@@ -156,7 +156,7 @@ M.Settings = {
     headless        = false,       -- legacy setting; bg responder now uses turbogear_bg
     startMinimized  = false,
     performanceMode = "auto",      -- auto=lean when minimized/bg, rich when UI is open
-    storeBackend    = "auto",      -- auto=SQLite if lsqlite3 present else file; or "file"/"sqlite"
+    storeBackend    = "file",      -- "file" (default; SQLite ships dormant pending in-game smoke test), "auto" = SQLite if lsqlite3 present, or "sqlite"
     autoPeerRefresh = false,        -- when false, open UI uses cached peers until Sync Now/startup
     syncRosterScopeAcrossTabs = false, -- opt-in: changing roster scope in one tab updates matching roster tabs
     hideOrnament    = true,
