@@ -61,6 +61,7 @@ local function snap(server, name, opts)
         name = name, server = server, class = opts.class or "War", level = opts.level or 70,
         depth = opts.depth or "full",
         updated = opts.updated or now_time,
+        seq = opts.seq,
         inventoryUpdated = opts.inventoryUpdated,
         equipped = opts.equipped or {}, bags = opts.bags or {}, bank = opts.bank or {},
     }
@@ -202,6 +203,33 @@ do
     Store.tick()
     check(Store.get("Srv_Age").status == "offline", "aging: source goes offline after offlineSeconds")
     os.time = real_time
+end
+
+-- ---- 11. cross-box ordering prefers publisher seq over wall clock (R1) ------
+do
+    -- baseline: HIGH wall-clock stamp but LOW seq
+    Store.put(snap("Srv", "Seq", { depth = "full", inventoryUpdated = now_time + 1000, seq = 10,
+        equipped = { eqitem(701, "SeqA", "Primary") } }), "client")
+    -- delta with a NEWER seq but OLDER wall clock must still apply (seq beats clock)
+    local ok = Store.apply_delta({ name = "Seq", server = "Srv", updated = now_time + 1,
+        inventoryUpdated = now_time + 1, seq = 11,
+        changed = { equipped = { eqitem(702, "SeqB", "Primary") } } }, "client")
+    check(ok == true, "delta w/ higher seq but older wall-clock applies (seq beats clock)")
+    check(Store.get("Srv_Seq").equipped[1].id == 702, "seq-newer delta mutated inventory")
+    check(Store.get("Srv_Seq").seq == 11, "existing seq advanced to the applied delta's seq")
+    -- delta with an OLDER-or-equal seq but NEWER wall clock must be rejected
+    local ok2 = Store.apply_delta({ name = "Seq", server = "Srv", updated = now_time + 9999,
+        inventoryUpdated = now_time + 9999, seq = 11,
+        changed = { equipped = { eqitem(703, "SeqStale", "Primary") } } }, "client")
+    check(ok2 == false, "delta w/ equal seq but newer wall-clock is rejected (no regress by seq)")
+    check(Store.get("Srv_Seq").equipped[1].id == 702, "rejected-by-seq delta did not mutate")
+    -- when neither side has seq, the wall-clock fallback still guards regressions
+    Store.put(snap("Srv", "NoSeq", { depth = "full", inventoryUpdated = now_time + 500,
+        equipped = { eqitem(801, "NA", "Primary") } }), "client")
+    local ok3 = Store.apply_delta({ name = "NoSeq", server = "Srv", updated = now_time + 1,
+        inventoryUpdated = now_time + 1,
+        changed = { equipped = { eqitem(802, "NB", "Primary") } } }, "client")
+    check(ok3 == false, "no-seq delta older by wall-clock still rejected (fallback path)")
 end
 
 -- ---- 10. backend selection: falls back to the file backend here ------------

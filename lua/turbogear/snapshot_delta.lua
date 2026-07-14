@@ -89,6 +89,7 @@ function M.diff_snapshot(baseline, snap, opts)
         class = snap.class,
         level = snap.level,
         updated = snap.updated,
+        seq = tonumber(snap.seq),
         inventoryUpdated = tonumber(snap.inventoryUpdated) or tonumber(snap.updated),
         changed = {},
         removed = {},

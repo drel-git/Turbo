@@ -168,12 +168,28 @@ local function snapshot_inventory_recency(snap)
     return best
 end
 
+-- R1 cross-box ordering: prefer the publisher's monotonic seq (immune to clock
+-- skew between boxes, since we only ever compare two snapshots of the SAME key /
+-- owner) and fall back to wall-clock recency for snapshots from pre-seq
+-- responders. Additive + backward-compatible, so no protocol version bump: a box
+-- that lacks seq simply gets the recency path.
+local function snapshot_seq(snap)
+    local s = tonumber(snap and snap.seq)
+    if s and s > 0 then return s end
+    return nil
+end
+local function is_newer(candidate, existing)
+    local cs, es = snapshot_seq(candidate), snapshot_seq(existing)
+    if cs and es then return cs > es end
+    return snapshot_inventory_recency(candidate) > snapshot_inventory_recency(existing)
+end
+
 -- Select the persistence backend now that the recency comparator exists.
 -- "auto"/"sqlite": use the SQLite backend when lsqlite3 is available; fall back
 -- to the file backend otherwise (or when storeBackend="file"). The interface is
 -- identical, so the rest of the Store is agnostic to which one is active.
 do
-    local backend_opts = { recency = snapshot_inventory_recency, key_fn = my_key }
+    local backend_opts = { newer = is_newer, key_fn = my_key }
     local pref = tostring((Settings and Settings.storeBackend) or "auto"):lower()
     if pref == "auto" or pref == "sqlite" then
         local ok, sqlite_mod = pcall(require, 'store_backend_sqlite')
@@ -285,6 +301,7 @@ local function merge_lite_snapshot(existing, snap)
         zoneName = snap.zoneName or existing.zoneName,
         updated = snap.updated or existing.updated,
         inventoryUpdated = snapshot_inventory_stamp(snap) or existing.inventoryUpdated or existing.updated,
+        seq = snapshot_seq(snap) or snapshot_seq(existing),
         metaUpdated = existing.metaUpdated,
         proto = snap.proto or existing.proto,
         depth = existing.depth == "full" and "full" or "lite",
@@ -389,10 +406,16 @@ function Store.apply_delta(delta, kind)
     local existing = Store.sources[key]
     if type(existing) ~= "table" then return false end
     if not has_inventory_payload(existing) then return false end
-    -- Never regress: ignore deltas older than what we already hold.
+    -- Never regress. Prefer the publisher's monotonic seq (robust to cross-box
+    -- clock skew); fall back to wall-clock stamps for pre-seq responders.
     local stamp = tonumber(delta.inventoryUpdated) or tonumber(delta.updated) or os.time()
-    local have = tonumber(existing.inventoryUpdated) or 0
-    if stamp < have then return false end
+    local dseq, eseq = snapshot_seq(delta), snapshot_seq(existing)
+    if dseq and eseq then
+        if dseq <= eseq then return false end
+    else
+        local have = tonumber(existing.inventoryUpdated) or 0
+        if stamp < have then return false end
+    end
     local ok_sd, sd = pcall(require, 'snapshot_delta')
     if not ok_sd or not sd then return false end
     return diag.time("store.apply_delta", function()
@@ -409,6 +432,7 @@ function Store.apply_delta(delta, kind)
         if not touched then return false end
         existing.updated = tonumber(delta.updated) or os.time()
         existing.inventoryUpdated = stamp
+        existing.seq = tonumber(delta.seq) or existing.seq
         existing.class = delta.class or existing.class
         existing.level = delta.level or existing.level
         existing.status = "online"
@@ -572,7 +596,7 @@ function Store.save()
         local out = {}
         for k, s in pairs(Store.sources) do
             out[k] = { name=s.name, server=s.server, class=s.class, level=s.level,
-                       updated=s.updated, inventoryUpdated=s.inventoryUpdated,
+                       updated=s.updated, seq=s.seq, inventoryUpdated=s.inventoryUpdated,
                        metaUpdated=s.metaUpdated, actorSeenAt=s.actorSeenAt,
                        discoverySeenAt=s.discoverySeenAt, kind=s.kind, depth=s.depth,
                        equipped=s.equipped, bags=s.bags, bank=s.bank,
@@ -618,7 +642,7 @@ local function ingest_cache_table(t, mark_offline)
                 Store.content_signatures[k] = sig
                 accepted = true
                 content_changed = true
-            elseif snapshot_inventory_recency(s) > snapshot_inventory_recency(existing) then
+            elseif is_newer(s, existing) then
                 s = preserve_presence(existing, s, mark_offline and "offline" or existing.status)
                 Store.sources[k] = s
                 accepted = true

@@ -15,6 +15,18 @@ local inventory_slots = items.inventory_slots
 local make_item       = items.make_item
 local make_item_lite  = items.make_item_lite
 
+-- R1: per-publisher monotonic sequence. SEQ_EPOCH (captured once at load) makes
+-- seqs from a later session sort above an earlier one after a restart; the
+-- counter orders publishes within a session. Encoded as one comparable number
+-- that stays well under 2^53. Used ONLY to order snapshots for the SAME key
+-- (same owner), so it is immune to cross-box clock skew.
+local SEQ_EPOCH = os.time()
+local seq_counter = 0
+local function next_seq()
+    seq_counter = seq_counter + 1
+    return SEQ_EPOCH * 1000000 + seq_counter
+end
+
 local M = {}
 
 local FULL_TABS = { stats = true, focus = true, suggestions = true, live = true }
@@ -202,6 +214,7 @@ local function build_snap(depth, opts)
         zoneShortName = tostring(try_tlo_value(function() return mq.TLO.Zone.ShortName() end) or ""),
         zoneName = tostring(try_tlo_value(function() return mq.TLO.Zone.Name() end) or ""),
         updated = now,
+        seq = next_seq(),
         proto = CFG.proto,
         depth = depth,
         equipped = {},

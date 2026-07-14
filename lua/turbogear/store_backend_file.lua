@@ -12,7 +12,7 @@
 --   B:status()    -> { file=, backend= }
 --   B.kind = "file"
 --
--- opts.recency(snap) -> number  : recency comparator (from store) for the merge
+-- opts.newer(a,b) -> bool       : "a is newer than b" (seq-aware; from store) for the merge
 -- opts.key_fn()      -> string  : this box's key, for a collision-safe temp name
 
 local mq  = require('mq')
@@ -108,7 +108,7 @@ function M.new(opts)
     opts = opts or {}
     return setmetatable({
         kind = "file",
-        recency = opts.recency or function() return 0 end,
+        newer = opts.newer or function() return false end,
         key_fn = opts.key_fn or function() return "?" end,
         last_written_sig = nil,   -- sig of what WE last wrote (sole-writer skip)
         last_tmp_validate = 0,
@@ -142,7 +142,7 @@ function Backend:save(out)
             for k, disk in pairs(existing) do
                 if type(disk) == "table" then
                     local mem = out[k]
-                    if type(mem) ~= "table" or self.recency(disk) > self.recency(mem) then
+                    if type(mem) ~= "table" or self.newer(disk, mem) then
                         out[k] = disk
                     end
                 end

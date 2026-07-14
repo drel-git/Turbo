@@ -106,5 +106,15 @@ local baseline_nb = SD.baseline_from_snapshot(snap_old, { include_bank = false }
 local delta_nb = select(1, SD.diff_snapshot(baseline_nb, snap_new, { include_bank = true }))
 check(delta_nb.removed.bank == nil, 'no bank baseline -> no bank removals')
 
+-- R1: diff_snapshot carries the source snapshot's publisher seq
+do
+    local base = SD.baseline_from_snapshot({ equipped = {}, bags = {}, bank = {} })
+    local snp = { name = "X", server = "Srv", updated = 5, seq = 4242,
+        equipped = { { id = 1, name = "A", location = "Equipped", where = "Equipped", slotid = 13, slotname = "Primary" } },
+        bags = {}, bank = {} }
+    local d = SD.diff_snapshot(base, snp)
+    check(d.seq == 4242, 'diff_snapshot carries source seq into the delta')
+end
+
 io.write(string.format('snapshot_delta: %d passed, %d failed\n', passed, failed))
 os.exit(failed == 0 and 0 or 1)
