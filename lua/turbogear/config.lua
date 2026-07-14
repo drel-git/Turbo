@@ -49,6 +49,17 @@ M.CFG = {
     bg_sync_ack_deadline_s = 5.0,  -- R5: viewer waits this long for the bg readiness ack before syncing anyway
     bg_ready_ttl_s = 90.0,         -- R5: bg-ready marker is "fresh" if written within this window
     bg_ready_write_every_s = 20.0, -- R5: bg refreshes its readiness marker at most this often
+    patch_lock_poll_s = 1.0,       -- how often to check for the patcher's turbo_patch.lock
+    -- Scripts stopped (on this box) when the patch lock appears, so the updater
+    -- can replace files cleanly. The shared config dir means every box sees the
+    -- lock and stops its own Turbo. Stopping a non-running script is a harmless no-op.
+    patch_stop_scripts = {
+        "turbogear", "turbogear_bg", "turbogear_autostart",
+        "TurboMobs", "turbomobs_logic", "TurboRolls",
+        "ResearchLearn", "ResearchLearnCatalog", "ResearchLearnEngine", "ResearchLearnExport",
+        "ToggleTurboLoot", "ToggleMeleeDist",
+        "turbo_bank_all", "turbo_collect_cash", "turbo_collect_dc", "turbo_reclaim_lotto",
+    },
     save_every_bg_s = 30.0,        -- debounce bg cache writes; actors carry live updates without disk stalls
     save_every_heavy_ui_s = 120.0, -- avoid disk-pickle hitches while Inventory/TurboBiS are open
     save_every_minimized_s = 30.0, -- slower disk writes when minimized
@@ -111,6 +122,7 @@ M.SettingsFile = string.format("%s/%s_%s.lua", mq.configDir, M.CFG.script_name, 
 M.CacheFile    = string.format("%s/%s_cache.lua", mq.configDir, M.CFG.script_name)
 M.DbFile       = string.format("%s/%s_cache.db", mq.configDir, M.CFG.script_name)  -- Phase 3 SQLite backend
 M.BgReadyFile  = string.format("%s/%s_bgready", mq.configDir, M.CFG.script_name)   -- R5 bg-responder readiness ack
+M.PatchLockFile = string.format("%s/turbo_patch.lock", mq.configDir)              -- patcher writes this to stop Turbo before updating
 M.SharedSettingsFile = string.format("%s/%s_shared.lua", mq.configDir, M.CFG.script_name)
 
 -- One-time warm migration from the old TurboAugs files (so the broadcast method
@@ -895,6 +907,14 @@ function M.clear_bg_ready()
 end
 
 -- Age in seconds of the readiness marker, or nil if absent/unreadable.
+-- True when the patcher's stop sentinel is present in the (shared) config dir.
+function M.patch_lock_present()
+    local f = io.open(M.PatchLockFile, "rb")
+    if not f then return false end
+    f:close()
+    return true
+end
+
 function M.bg_ready_age()
     local f = io.open(M.BgReadyFile, "rb")
     if not f then return nil end

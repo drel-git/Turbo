@@ -689,6 +689,19 @@ local startup_bg_sync = {
     sent = false,
     deadline = 0,
 }
+-- Patcher shutdown hook: when the updater drops turbo_patch.lock in the shared
+-- config dir, every box's Turbo self-stops so files can be replaced cleanly.
+local patch_stop = { next_check = 0, stopping = false }
+local function do_patch_stop()
+    if patch_stop.stopping then return end
+    patch_stop.stopping = true
+    print("[TurboGear] patch lock detected - stopping Turbo so the updater can replace files.")
+    for _, name in ipairs(CFG.patch_stop_scripts or {}) do
+        if name ~= CFG.lua_name then pcall(function() mq.cmd('/squelch /lua stop ' .. name) end) end
+    end
+    pcall(function() mq.cmd('/squelch /endmacro') end)
+    state.run = false   -- stop this instance last
+end
 local announce_role_guard = {
     next_at = 0,
     passive = nil,
@@ -809,6 +822,12 @@ local function run_loop(inspect_tick, peer_refresh)
                 mq.cmd('/squelch /tgearbg sync')
                 startup_bg_sync.pending = false
                 startup_bg_sync.sent = true
+            end
+        end
+        if os.clock() >= patch_stop.next_check then
+            patch_stop.next_check = os.clock() + (tonumber(CFG.patch_lock_poll_s) or 1.0)
+            if guard.should_patch_stop({ lock_present = cfg.patch_lock_present(), stopping = patch_stop.stopping }) then
+                do_patch_stop()
             end
         end
         if os.clock() >= announce_role_guard.next_at then

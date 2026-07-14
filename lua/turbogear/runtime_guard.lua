@@ -104,6 +104,13 @@ function M.should_request_bg_sync(opts)
     return false, "waiting"
 end
 
+-- Decide whether to run the patch-stop routine: the patcher's lock is present
+-- and we have not already begun stopping. Pure so it is unit-testable.
+function M.should_patch_stop(opts)
+    opts = opts or {}
+    return opts.lock_present == true and opts.stopping ~= true
+end
+
 function M.script_summary(scripts)
     scripts = scripts or {}
     return string.format('main=%s bg=%s',

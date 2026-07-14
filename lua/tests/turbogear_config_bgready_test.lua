@@ -24,5 +24,13 @@ do local f = io.open(cfg.BgReadyFile, "w"); f:write("not-a-number"); f:close() e
 ck(cfg.bg_ready_age() == nil, "non-numeric marker body -> age nil")
 os.remove(cfg.BgReadyFile)
 
+-- patch lock detection
+os.remove(cfg.PatchLockFile)
+ck(cfg.patch_lock_present() == false, "no patch lock -> false")
+do local f = io.open(cfg.PatchLockFile, "w"); f:write("patching"); f:close() end
+ck(cfg.patch_lock_present() == true, "patch lock present -> true")
+os.remove(cfg.PatchLockFile)
+ck(cfg.patch_lock_present() == false, "removed patch lock -> false")
+
 print(string.format("config bgready: %d passed, %d failed", pass, fail))
 os.exit(fail == 0 and 0 or 1)

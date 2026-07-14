@@ -55,6 +55,11 @@ check(select(1, G.should_request_bg_sync({ bg_ready = false, now = 100, deadline
 check(select(2, G.should_request_bg_sync({ bg_ready = false, now = 100, deadline = 100 })) == 'deadline', 'reason is deadline')
 check(G.should_request_bg_sync({ sent = true, bg_ready = true, now = 999, deadline = 0 }) == false, 'never re-sends once sent')
 
+-- patch-stop gating
+check(G.should_patch_stop({ lock_present = true, stopping = false }) == true, 'patch stop when lock present')
+check(G.should_patch_stop({ lock_present = false, stopping = false }) == false, 'no patch stop without lock')
+check(G.should_patch_stop({ lock_present = true, stopping = true }) == false, 'no re-stop once already stopping')
+
 if failed > 0 then
     io.stderr:write(string.format('turbogear_runtime_guard_test: %d passed, %d failed\n', passed, failed))
     os.exit(1)
