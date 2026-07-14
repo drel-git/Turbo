@@ -204,6 +204,12 @@ do
     os.time = real_time
 end
 
+-- ---- 10. backend selection: falls back to the file backend here ------------
+do
+    local st = Store.cache_status()
+    check(st.backend == "file", "store falls back to file backend when lsqlite3 absent (got " .. tostring(st.backend) .. ")")
+end
+
 -- ---- results --------------------------------------------------------------
 print(string.format("store: %d passed, %d failed", pass, fail))
 os.exit(fail == 0 and 0 or 1)

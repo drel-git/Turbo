@@ -168,12 +168,28 @@ local function snapshot_inventory_recency(snap)
     return best
 end
 
--- Select the persistence backend now that the recency comparator exists. File
--- backend today; the SQLite backend is selected here in the next step.
-backend = require('store_backend_file').new({
-    recency = snapshot_inventory_recency,
-    key_fn = my_key,
-})
+-- Select the persistence backend now that the recency comparator exists.
+-- "auto"/"sqlite": use the SQLite backend when lsqlite3 is available; fall back
+-- to the file backend otherwise (or when storeBackend="file"). The interface is
+-- identical, so the rest of the Store is agnostic to which one is active.
+do
+    local backend_opts = { recency = snapshot_inventory_recency, key_fn = my_key }
+    local pref = tostring((Settings and Settings.storeBackend) or "auto"):lower()
+    if pref == "auto" or pref == "sqlite" then
+        local ok, sqlite_mod = pcall(require, 'store_backend_sqlite')
+        if ok and sqlite_mod then
+            local b = sqlite_mod.new(backend_opts)
+            if b and b:available() then
+                backend = b
+                diag.event("store.backend", "using sqlite backend")
+            end
+        end
+    end
+    if not backend then
+        backend = require('store_backend_file').new(backend_opts)
+        diag.event("store.backend", "using file backend")
+    end
+end
 
 local function item_match_key(item)
     if type(item) ~= "table" then return "" end

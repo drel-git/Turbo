@@ -106,6 +106,7 @@ M.CFG = {
 local me = mq.TLO.Me.CleanName() or "char"
 M.SettingsFile = string.format("%s/%s_%s.lua", mq.configDir, M.CFG.script_name, me)
 M.CacheFile    = string.format("%s/%s_cache.lua", mq.configDir, M.CFG.script_name)
+M.DbFile       = string.format("%s/%s_cache.db", mq.configDir, M.CFG.script_name)  -- Phase 3 SQLite backend
 M.SharedSettingsFile = string.format("%s/%s_shared.lua", mq.configDir, M.CFG.script_name)
 
 -- One-time warm migration from the old TurboAugs files (so the broadcast method
@@ -155,6 +156,7 @@ M.Settings = {
     headless        = false,       -- legacy setting; bg responder now uses turbogear_bg
     startMinimized  = false,
     performanceMode = "auto",      -- auto=lean when minimized/bg, rich when UI is open
+    storeBackend    = "auto",      -- auto=SQLite if lsqlite3 present else file; or "file"/"sqlite"
     autoPeerRefresh = false,        -- when false, open UI uses cached peers until Sync Now/startup
     syncRosterScopeAcrossTabs = false, -- opt-in: changing roster scope in one tab updates matching roster tabs
     hideOrnament    = true,
