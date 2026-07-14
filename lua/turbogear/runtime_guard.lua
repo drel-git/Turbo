@@ -90,6 +90,20 @@ function M.announce_passive(is_bg, scripts)
     return is_bg == true and scripts.main == true
 end
 
+-- R5: decide when the viewer should issue its delegated startup sync. Prefer
+-- waiting until the bg responder has acked readiness (its mailbox is live), so
+-- the sync is not fired at a machine-tuned fixed delay that may be too early on
+-- a slow box. Fall back after a deadline so a missing/late ack never blocks the
+-- sync forever (degrading to the old fixed-delay behavior). Returns (go, reason).
+function M.should_request_bg_sync(opts)
+    opts = opts or {}
+    if opts.sent then return false, "already_sent" end
+    if opts.bg_ready == true then return true, "bg_ready" end
+    local now, deadline = tonumber(opts.now), tonumber(opts.deadline)
+    if now and deadline and now >= deadline then return true, "deadline" end
+    return false, "waiting"
+end
+
 function M.script_summary(scripts)
     scripts = scripts or {}
     return string.format('main=%s bg=%s',

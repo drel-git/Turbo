@@ -22,6 +22,7 @@ local tests = {
     "turbogear_announcer_parser_test.lua",
     "turbogear_needs_index_test.lua",
     "turbogear_runtime_guard_test.lua",
+    "turbogear_config_bgready_test.lua",
     "turbogear_snapshot_delta_test.lua",
     "turbogear_spells_index_test.lua",
     "turbogear_store_test.lua",

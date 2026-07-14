@@ -671,6 +671,12 @@ local peer_autostart = {
     last_sig = "",
     sync_at = 0,
 }
+-- R5: viewer's delegated startup sync, gated on the bg readiness ack.
+local startup_bg_sync = {
+    pending = false,
+    sent = false,
+    deadline = 0,
+}
 local announce_role_guard = {
     next_at = 0,
     passive = nil,
@@ -689,6 +695,9 @@ function request_local_bg_start(reason)
     reason = tostring(reason or "start_bg")
     local scripts = refresh_local_guard_state()
     if scripts.bg == true then return true end
+    -- R5: the marker (if any) belongs to the OLD bg; drop it so the viewer only
+    -- trusts readiness once the freshly-started bg re-writes it.
+    pcall(function() cfg.clear_bg_ready() end)
     local bg_name = tostring(CFG.bg_lua_name or 'turbogear_bg')
     mq.cmd('/squelch /lua run ' .. bg_name)
     local_owner_guard.last_action = 'started local bg responder: ' .. reason
@@ -781,6 +790,15 @@ local function run_loop(inspect_tick, peer_refresh)
         end
         Engine.heartbeat()
         tick_peer_autostart()
+        if startup_bg_sync.pending then
+            local age = cfg.bg_ready_age()
+            local ready = age ~= nil and age <= (tonumber(CFG.bg_ready_ttl_s) or 90.0)
+            if guard.should_request_bg_sync({ bg_ready = ready, now = os.clock(), deadline = startup_bg_sync.deadline }) then
+                mq.cmd('/squelch /tgearbg sync')
+                startup_bg_sync.pending = false
+                startup_bg_sync.sent = true
+            end
+        end
         if os.clock() >= announce_role_guard.next_at then
             announce_role_guard.next_at = os.clock() + 1.0
             if state.bg then refresh_local_guard_state() end
@@ -875,7 +893,10 @@ if state.show then
         cfg.launch_all_online_peers()
     end
     request_local_bg_start("startup sync")
-    mq.cmd('/timed 5 /squelch /tgearbg sync')
+    -- R5: gate the delegated sync on the bg readiness ack (deadline fallback)
+    -- rather than a fixed /timed delay that may fire before the mailbox is live.
+    startup_bg_sync.pending = true
+    startup_bg_sync.deadline = os.clock() + (tonumber(CFG.bg_sync_ack_deadline_s) or 5.0)
 elseif Engine.ok then
     -- Background responder: publish our own inventory once up front; the
     -- metadata keepalive keeps it visible. Inventory changes and requests publish fresh snapshots.

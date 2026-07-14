@@ -46,6 +46,9 @@ M.CFG = {
     save_every_s = 15.0,           -- debounce cache writes (UI open)
     age_sweep_interval_s = 1.0,    -- P3: throttle source online/stale/offline aging sweep (status is second-granular)
     cache_tmp_validate_s = 30.0,   -- P1 interim: re-validate the temp cache file at most this often (not every save)
+    bg_sync_ack_deadline_s = 5.0,  -- R5: viewer waits this long for the bg readiness ack before syncing anyway
+    bg_ready_ttl_s = 90.0,         -- R5: bg-ready marker is "fresh" if written within this window
+    bg_ready_write_every_s = 20.0, -- R5: bg refreshes its readiness marker at most this often
     save_every_bg_s = 30.0,        -- debounce bg cache writes; actors carry live updates without disk stalls
     save_every_heavy_ui_s = 120.0, -- avoid disk-pickle hitches while Inventory/TurboBiS are open
     save_every_minimized_s = 30.0, -- slower disk writes when minimized
@@ -107,6 +110,7 @@ local me = mq.TLO.Me.CleanName() or "char"
 M.SettingsFile = string.format("%s/%s_%s.lua", mq.configDir, M.CFG.script_name, me)
 M.CacheFile    = string.format("%s/%s_cache.lua", mq.configDir, M.CFG.script_name)
 M.DbFile       = string.format("%s/%s_cache.db", mq.configDir, M.CFG.script_name)  -- Phase 3 SQLite backend
+M.BgReadyFile  = string.format("%s/%s_bgready", mq.configDir, M.CFG.script_name)   -- R5 bg-responder readiness ack
 M.SharedSettingsFile = string.format("%s/%s_shared.lua", mq.configDir, M.CFG.script_name)
 
 -- One-time warm migration from the old TurboAugs files (so the broadcast method
@@ -870,6 +874,32 @@ function M.apply_bis_announcing_defaults()
     M.SharedSettings.bisAnnounceIdx = 2
     M.SaveSettings()
     M.SaveSharedSettings()
+end
+
+-- R5: bg-responder readiness ack. The bg writes this marker (a unix time) once
+-- its actor mailbox is registered and refreshes it on heartbeat; the viewer
+-- reads its age to know when delegating a startup sync is safe, instead of
+-- guessing with a fixed /timed delay.
+function M.write_bg_ready()
+    pcall(function()
+        local f = io.open(M.BgReadyFile, "w")
+        if f then f:write(tostring(os.time())); f:close() end
+    end)
+end
+
+function M.clear_bg_ready()
+    pcall(function() os.remove(M.BgReadyFile) end)
+end
+
+-- Age in seconds of the readiness marker, or nil if absent/unreadable.
+function M.bg_ready_age()
+    local f = io.open(M.BgReadyFile, "rb")
+    if not f then return nil end
+    local body = f:read("*a") or ""
+    f:close()
+    local t = tonumber((tostring(body):gsub("%s+", "")))
+    if not t then return nil end
+    return os.time() - t
 end
 
 return M

@@ -387,6 +387,9 @@ function Engine.init()
     end
     Engine.mailbox = mb; Engine.ok = true
     seed_jitter()
+    -- R5: announce readiness so a viewer can safely delegate its startup sync.
+    pcall(function() if cfg.write_bg_ready then cfg.write_bg_ready() end end)
+    Engine.next_ready_write = os.clock() + (tonumber(CFG.bg_ready_write_every_s) or 20.0)
     return true
 end
 
@@ -406,6 +409,7 @@ function Engine.shutdown()
     Engine.ok = false
     Engine.next_publish = nil
     Engine.next_keepalive = nil
+    pcall(function() if cfg.clear_bg_ready then cfg.clear_bg_ready() end end)
     return released
 end
 
@@ -739,6 +743,11 @@ end
 
 function Engine.heartbeat()
     if not Engine.ok then return end
+    -- R5: keep the readiness marker fresh while we own the mailbox (throttled).
+    if os.clock() >= (Engine.next_ready_write or 0) then
+        Engine.next_ready_write = os.clock() + (tonumber(CFG.bg_ready_write_every_s) or 20.0)
+        pcall(function() if cfg.write_bg_ready then cfg.write_bg_ready() end end)
+    end
     tick_bank_capture()
     prune_dedupe_maps()
     if not Engine.next_publish then schedule_next_publish(Engine.last_publish > 0 and Engine.last_publish or os.clock()) end

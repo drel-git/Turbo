@@ -47,6 +47,14 @@ check(G.announce_passive(false, { main = false }) == false, 'ui never announce-p
 
 check(G.script_summary({ main = true, bg = false }) == 'main=running bg=off', 'script summary')
 
+-- R5: should_request_bg_sync gating
+check(select(1, G.should_request_bg_sync({ bg_ready = true, now = 0, deadline = 100 })) == true, 'sync fires when bg is ready')
+check(select(2, G.should_request_bg_sync({ bg_ready = true, now = 0, deadline = 100 })) == 'bg_ready', 'reason is bg_ready')
+check(G.should_request_bg_sync({ bg_ready = false, now = 1, deadline = 100 }) == false, 'sync waits before deadline when not ready')
+check(select(1, G.should_request_bg_sync({ bg_ready = false, now = 100, deadline = 100 })) == true, 'sync fires at the deadline fallback')
+check(select(2, G.should_request_bg_sync({ bg_ready = false, now = 100, deadline = 100 })) == 'deadline', 'reason is deadline')
+check(G.should_request_bg_sync({ sent = true, bg_ready = true, now = 999, deadline = 0 }) == false, 'never re-sends once sent')
+
 if failed > 0 then
     io.stderr:write(string.format('turbogear_runtime_guard_test: %d passed, %d failed\n', passed, failed))
     os.exit(1)
