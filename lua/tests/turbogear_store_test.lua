@@ -182,6 +182,28 @@ do
     check(shown, "un-ignored Alice visible again")
 end
 
+-- ---- 9. aging sweep: online -> stale -> offline, and 1Hz throttle (P3) -------
+do
+    local real_time = os.time
+    Store.put(snap("Srv", "Age", { equipped = { eqitem(601, "Band", "Ring1") } }), "client")
+    Store.last_save = os.clock()      -- avoid triggering a disk save during ticks
+    -- force a sweep and advance wall clock past the stale threshold
+    Store.last_age_sweep = os.clock() - 1000
+    os.time = function() return real_time() + 25 end
+    Store.tick()
+    check(Store.get("Srv_Age").status == "stale", "aging: source goes stale after staleSeconds")
+    -- within the same second the throttle blocks a re-sweep, so a jump to offline
+    -- range is NOT yet reflected
+    os.time = function() return real_time() + 100 end
+    Store.tick()
+    check(Store.get("Srv_Age").status == "stale", "aging: throttled sweep does not re-evaluate within 1s")
+    -- forcing the sweep (as ~1s later would) now flips it offline
+    Store.last_age_sweep = os.clock() - 1000
+    Store.tick()
+    check(Store.get("Srv_Age").status == "offline", "aging: source goes offline after offlineSeconds")
+    os.time = real_time
+end
+
 -- ---- results --------------------------------------------------------------
 print(string.format("store: %d passed, %d failed", pass, fail))
 os.exit(fail == 0 and 0 or 1)

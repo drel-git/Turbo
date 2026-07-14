@@ -40,6 +40,7 @@ local Store = {
     sources = {},
     dirty = false,
     last_save = 0,
+    last_age_sweep = 0,
     version = 0,
     content_version = 0,
     content_signatures = {},
@@ -601,16 +602,23 @@ function Store.discover_peer(name, provider)
 end
 
 function Store.tick()
-    local now = os.time()
-    for _, s in pairs(Store.sources) do
-        if s.last_seen and s.last_seen > 0 then
-            local age = now - s.last_seen
-            local next_status = s.status
-            if age > (Settings.offlineSeconds or 45) then next_status = "offline"
-            elseif age > (Settings.staleSeconds or 20) then next_status = "stale" end
-            if next_status ~= s.status then
-                s.status = next_status
-                Store.version = (Store.version or 0) + 1
+    -- Aging is second-granular (stale/offline thresholds are in seconds), so the
+    -- per-source sweep is throttled to ~1Hz instead of running every loop pass
+    -- (P3). The save debounce below still runs every tick.
+    local sweep_now = os.clock()
+    if (sweep_now - (Store.last_age_sweep or 0)) >= (tonumber(CFG.age_sweep_interval_s) or 1.0) then
+        Store.last_age_sweep = sweep_now
+        local now = os.time()
+        for _, s in pairs(Store.sources) do
+            if s.last_seen and s.last_seen > 0 then
+                local age = now - s.last_seen
+                local next_status = s.status
+                if age > (Settings.offlineSeconds or 45) then next_status = "offline"
+                elseif age > (Settings.staleSeconds or 20) then next_status = "stale" end
+                if next_status ~= s.status then
+                    s.status = next_status
+                    Store.version = (Store.version or 0) + 1
+                end
             end
         end
     end
