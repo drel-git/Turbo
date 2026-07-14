@@ -115,6 +115,39 @@ function M.grouped_item_key(item_name, item_id, item_link, is_link)
     return "name:"
 end
 
+-- Needers in a grouped announce whose need came from CACHED peer snapshots and
+-- should be live-confirmed over actors before the [TG] line goes out. Skips:
+--   * the local character (needers_for already live-confirms it), and
+--   * "actor-reply" needers (the peer just self-evaluated on its own box).
+-- order: bucket.order (display names); sources: lower(name) -> source string.
+function M.confirmable_needers(order, sources, me_name)
+    local out = {}
+    local me = M.normalize_item_name(me_name)
+    sources = type(sources) == "table" and sources or {}
+    for _, name in ipairs(order or {}) do
+        local key = M.normalize_item_name(name)
+        if key ~= "" and key ~= me and tostring(sources[key] or "") ~= "actor-reply" then
+            out[#out + 1] = name
+        end
+    end
+    return out
+end
+
+-- Remove one character from a grouped announce bucket's needer tables.
+-- names: lower(name) -> display name; order: array of display names.
+-- Returns true when the character was present and removed.
+function M.remove_needer(names, order, character)
+    local key = M.normalize_item_name(character)
+    if key == "" or type(names) ~= "table" or not names[key] then return false end
+    names[key] = nil
+    for i = #(order or {}), 1, -1 do
+        if M.normalize_item_name(order[i]) == key then
+            table.remove(order, i)
+        end
+    end
+    return true
+end
+
 -- Coordinator beacon freshness: the driver UI stamps shared settings while it
 -- is announce-active; bg responders defer to it while the stamp is fresh.
 function M.beacon_fresh(seen_at, now, ttl_s)

@@ -81,6 +81,29 @@ check(R.parse_tg_line("Drel tells the group, 'grats on the sword'") == nil, 'tg 
 check(R.parse_tg_line("") == nil, 'tg parse: empty line is nil')
 check(R.parse_tg_line("[TG] - Solo Item") == "Solo Item", 'tg parse: payload without names segment')
 
+-- confirmable_needers: cache-derived peer needers only (skip self + actor-reply)
+do
+    local order = { "Gears", "Hez", "Captaain", "Drel" }
+    local sources = { gears = "index", hez = "index", captaain = "actor-reply", drel = "targeted" }
+    local out = R.confirmable_needers(order, sources, "Gears")
+    check(#out == 2 and out[1] == "Hez" and out[2] == "Drel", 'confirm: skips self and actor-reply needers')
+    out = R.confirmable_needers(order, nil, "Gears")
+    check(#out == 3, 'confirm: nil sources treats all remote needers as cache-derived')
+    check(#R.confirmable_needers(nil, sources, "Gears") == 0, 'confirm: nil order safe')
+    check(#R.confirmable_needers({ "Gears" }, {}, "gears") == 0, 'confirm: self match is case-insensitive')
+end
+
+-- remove_needer: drops one character from bucket needer tables
+do
+    local names = { hez = "Hez", drel = "Drel" }
+    local order = { "Hez", "Drel" }
+    check(R.remove_needer(names, order, "HEZ") == true, 'remove: case-insensitive hit')
+    check(names.hez == nil and #order == 1 and order[1] == "Drel", 'remove: cleared from both tables')
+    check(R.remove_needer(names, order, "Hez") == false, 'remove: absent character returns false')
+    check(R.remove_needer(names, order, "") == false, 'remove: empty character safe')
+    check(R.remove_needer(nil, order, "Drel") == false, 'remove: nil names safe')
+end
+
 -- beacon_fresh: driver-first coordinator beacon freshness
 check(R.beacon_fresh(1000, 1050, 90) == true, 'beacon: fresh within ttl')
 check(R.beacon_fresh(1000, 1091, 90) == false, 'beacon: stale past ttl')

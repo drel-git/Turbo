@@ -603,6 +603,7 @@ local function ensure_group_announce(item_name, item_link, item_id, source)
             source = tostring(source or ""),
             names = {},
             order = {},
+            sources = {},
             created = now,
             due = now + group_window_s(),
             pending_targets = 0,
@@ -650,6 +651,13 @@ local function add_group_need(item_name, item_link, item_id, character, source)
     if not bucket.names[key] then
         bucket.names[key] = character
         bucket.order[#bucket.order + 1] = character
+    end
+    -- Track WHERE each needer came from: actor-reply needers were just
+    -- live-confirmed on their own box; cache/index needers may be stale and
+    -- get a confirm round before the announce goes out.
+    bucket.sources = bucket.sources or {}
+    if source == "actor-reply" or not bucket.sources[key] then
+        bucket.sources[key] = tostring(source or "")
     end
     return true
 end
@@ -1142,6 +1150,50 @@ local function drain_targeted_checks()
     runtime.target_checks_pending = #targeted_checks
 end
 
+local function confirms_enabled()
+    if CFG.announce_confirm_needers == false then return false end
+    if SharedSettings.announceUseActor == false then return false end
+    local ok, Engine = pcall(function() return require('engine').Engine end)
+    return ok and Engine ~= nil and Engine.ok == true
+        and type(Engine.send_need_confirm) == "function"
+end
+
+-- Live-confirm round for a due bucket: cache-derived peer needers get one
+-- actor round-trip ("do you still own/need this?") before the [TG] line goes
+-- out, so a stale peer snapshot cannot announce someone who looted the item
+-- minutes ago. Runs at most once per bucket; FAIL-OPEN by design - peers that
+-- do not answer within announce_confirm_wait_s stay announced (current
+-- behavior). Returns true when the bucket should be held for replies.
+local function try_start_confirm_round(bucket, now)
+    if type(bucket) ~= "table" or type(bucket.order) ~= "table" or #bucket.order == 0 then
+        return false
+    end
+    if bucket.confirms_sent then return false end -- due passed again = wait expired
+    bucket.confirms_sent = true
+    if not confirms_enabled() then return false end
+    local targets = rules.confirmable_needers(bucket.order, bucket.sources, me_name())
+    if #targets == 0 then return false end
+    local Engine = require('engine').Engine
+    local sent = 0
+    for _, character in ipairs(targets) do
+        local ok, did = pcall(function()
+            return Engine.send_need_confirm(character, {
+                item_name = bucket.item_name,
+                item_id = bucket.item_id,
+                bucket_key = bucket.key,
+            })
+        end)
+        if ok and did then sent = sent + 1 end
+    end
+    if sent == 0 then return false end
+    bucket.pending_confirms = sent
+    bucket.confirm_started = now
+    bucket.due = now + math.max(0.25, tonumber(CFG.announce_confirm_wait_s) or 2.0)
+    runtime.confirm_requests = (runtime.confirm_requests or 0) + sent
+    diag.count("announce.confirm_requests", sent)
+    return true
+end
+
 local function drain_group_announces()
     local now = os.clock()
     for key, bucket in pairs(group_announces) do
@@ -1157,19 +1209,23 @@ local function drain_group_announces()
         if bucket and (pending_targets > 0 or pending_text) and not target_wait_expired then
             bucket.due = math.max(tonumber(bucket.due) or 0, now + group_window_s())
         elseif not bucket or (tonumber(bucket.due) or 0) <= now then
-            group_announces[key] = nil
-            clear_targeted_seen(key)
-            if target_wait_expired then
-                bucket.pending_targets = 0
-                if batch then
-                    batch.expired = true
-                    batch.pending = 0
+            if bucket and not target_wait_expired and try_start_confirm_round(bucket, now) then
+                -- held: confirm replies (or the confirm wait) will re-due it
+            else
+                group_announces[key] = nil
+                clear_targeted_seen(key)
+                if target_wait_expired then
+                    bucket.pending_targets = 0
+                    if batch then
+                        batch.expired = true
+                        batch.pending = 0
+                    end
+                    runtime.target_checks_pending = #targeted_checks
+                    note_skip(bucket.item_name, "targeted peer checks timed out")
+                    diag.count("announce.target_checks_timed_out")
                 end
-                runtime.target_checks_pending = #targeted_checks
-                note_skip(bucket.item_name, "targeted peer checks timed out")
-                diag.count("announce.target_checks_timed_out")
+                send_group_announce(bucket)
             end
-            send_group_announce(bucket)
         end
     end
     for batch_key, batch in pairs(text_batches) do
@@ -1764,6 +1820,81 @@ function M.on_loot_need(msg)
     local item_id = tonumber(msg.item_id) or 0
     add_group_need(item_name, item_link, item_id, from, "actor-reply")
     diag.count("announce.need_reports_received")
+end
+
+-- Peer side of the confirm round: another box is about to announce US as a
+-- needer based on its cached copy of our inventory; answer with a LIVE
+-- ownership check so a just-looted item never gets announced as needed.
+-- Deliberately not gated on announce/passive state - this is an inventory
+-- question, not an announce.
+function M.on_need_confirm(msg)
+    if type(msg) ~= "table" then return end
+    local from = trim(msg.from or "")
+    if from == "" or from:lower() == me_name():lower() then return end
+    local item_name = trim(msg.item_name or "")
+    local item_id = tonumber(msg.item_id) or 0
+    if item_name == "" and item_id <= 0 then return end
+    local owned = false
+    pcall(function()
+        local bis = require('bis')
+        owned = bis.live_own_item(nil, item_name, item_id) == true
+    end)
+    pcall(function()
+        local Engine = require('engine').Engine
+        if Engine and Engine.send_need_confirm_reply then
+            Engine.send_need_confirm_reply(from, {
+                item_name = item_name,
+                item_id = item_id,
+                bucket_key = msg.bucket_key,
+                owned = owned,
+            })
+        end
+    end)
+    diag.count("announce.confirms_answered")
+end
+
+-- Driver side: a peer answered the confirm round. Owned peers are dropped
+-- from the held bucket, and their box is asked for a fresh snapshot so the
+-- needs index rebuilds and future announces are right without a confirm.
+local confirm_refresh_at = {}
+
+function M.on_need_confirm_reply(msg)
+    if type(msg) ~= "table" then return end
+    local from = trim(msg.from or "")
+    if from == "" or from:lower() == me_name():lower() then return end
+    local bucket = group_announces[tostring(msg.bucket_key or "")]
+    if bucket then
+        bucket.pending_confirms = math.max(0, (tonumber(bucket.pending_confirms) or 0) - 1)
+        if msg.owned == true and rules.remove_needer(bucket.names, bucket.order, from) then
+            if type(bucket.sources) == "table" then bucket.sources[from:lower()] = nil end
+            runtime.confirm_owned = (runtime.confirm_owned or 0) + 1
+            diag.count("announce.confirm_owned")
+            note_skip(bucket.item_name, #bucket.order == 0
+                and "all needers already own it (live confirm)"
+                or string.format("%s already owns it (live confirm)", from))
+        end
+        if bucket.pending_confirms <= 0 then
+            -- All replies in: flush on the next drain instead of waiting out
+            -- the full confirm window.
+            bucket.due = math.min(tonumber(bucket.due) or 0, os.clock())
+        end
+    end
+    if msg.owned == true then
+        local server = trim(msg.server or "")
+        if server == "" then server = tostring(mq.TLO.MacroQuest.Server() or "?") end
+        local char_key = server .. "_" .. from
+        local now = os.clock()
+        local cooldown = math.max(5, tonumber(CFG.announce_confirm_refresh_cooldown_s) or 30)
+        if (now - (tonumber(confirm_refresh_at[char_key]) or 0)) >= cooldown then
+            confirm_refresh_at[char_key] = now
+            pcall(function()
+                local Engine = require('engine').Engine
+                if Engine and Engine.request_source then
+                    Engine.request_source(char_key, true, { fastInventory = true })
+                end
+            end)
+        end
+    end
 end
 
 local function replay_payload()

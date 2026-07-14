@@ -43,6 +43,8 @@ local MSG = {
     LOOT_NEED = 'loot_need',
     LOOT_REPLAY_REQUEST = 'loot_replay_request',
     LOOT_REPLAY = 'loot_replay',
+    NEED_CONFIRM = 'need_confirm',
+    NEED_CONFIRM_REPLY = 'need_confirm_reply',
 }
 
 local loot_link_dedupe = {}
@@ -279,6 +281,14 @@ local function on_message(message)
         if target ~= "" and clean_text(target) ~= clean_text(this_name()) then return end
         Engine.stats.rx_need = (Engine.stats.rx_need or 0) + 1
         pcall(function() require('announcer').on_loot_need(c) end)
+    elseif c.type == MSG.NEED_CONFIRM then
+        local target = tostring(c.target or "")
+        if target ~= "" and clean_text(target) ~= clean_text(this_name()) then return end
+        pcall(function() require('announcer').on_need_confirm(c) end)
+    elseif c.type == MSG.NEED_CONFIRM_REPLY then
+        local target = tostring(c.target or "")
+        if target ~= "" and clean_text(target) ~= clean_text(this_name()) then return end
+        pcall(function() require('announcer').on_need_confirm_reply(c) end)
     elseif c.type == MSG.LOOT_REPLAY_REQUEST then
         pcall(function() require('announcer').on_replay_request(c) end)
     elseif c.type == MSG.LOOT_REPLAY then
@@ -344,6 +354,44 @@ function Engine.send_loot_need(target_name, need)
         item_id = tonumber(need.item_id) or 0,
         character = tostring(need.character or mq.TLO.Me.CleanName() or "?"),
         key = tostring(need.key or ""),
+    })
+    return true
+end
+
+-- Ask one peer to live-confirm whether it still needs an item that our cached
+-- needs index says it is missing (see announcer confirm round). Fail-open by
+-- design: no reply within the confirm window means the needer stays announced.
+function Engine.send_need_confirm(target_name, payload)
+    if not Engine.ok or type(payload) ~= "table" then return false end
+    target_name = tostring(target_name or "")
+    if target_name == "" then return false end
+    Engine.stats.tx_confirm = (Engine.stats.tx_confirm or 0) + 1
+    send_mail("need_confirm", {
+        type = MSG.NEED_CONFIRM,
+        proto = CFG.proto,
+        from = tostring(mq.TLO.Me.CleanName() or "?"),
+        target = target_name,
+        item_name = tostring(payload.item_name or ""),
+        item_id = tonumber(payload.item_id) or 0,
+        bucket_key = tostring(payload.bucket_key or ""),
+    })
+    return true
+end
+
+function Engine.send_need_confirm_reply(target_name, payload)
+    if not Engine.ok or type(payload) ~= "table" then return false end
+    target_name = tostring(target_name or "")
+    if target_name == "" then return false end
+    send_mail("need_confirm_reply", {
+        type = MSG.NEED_CONFIRM_REPLY,
+        proto = CFG.proto,
+        from = tostring(mq.TLO.Me.CleanName() or "?"),
+        server = tostring(mq.TLO.MacroQuest.Server() or "?"),
+        target = target_name,
+        item_name = tostring(payload.item_name or ""),
+        item_id = tonumber(payload.item_id) or 0,
+        bucket_key = tostring(payload.bucket_key or ""),
+        owned = payload.owned == true,
     })
     return true
 end
