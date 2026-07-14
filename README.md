@@ -13,6 +13,7 @@
 1. **Download the patcher:** [TurboPatcher.exe (direct download)](https://github.com/drel-git/TurboPatcher/releases/latest/download/TurboPatcher.exe). Drop it in your MacroQuest folder (any spot works, but that location lets the in-game Turbo Patcher button find it).
 2. **Run `TurboPatcher.exe`.** It finds your MacroQuest folder automatically (or click Browse and pick the folder that contains `lua` and `Macros`).
 3. **Click Install.** That's it. The patcher shows the patch notes and keeps you updated from then on.
+4. **For Linux:** Download the zip files and extract to your E3Next or MQ folder.
 
 > Windows may show a SmartScreen prompt the first time since the exe is unsigned. Click "More info", then "Run anyway".
 
@@ -74,6 +75,7 @@ Prefer not to use the patcher? Click **Code, then Download ZIP** on this page, t
 - An EverQuest EMU server (built and tested on Project Lazarus)
 - MacroQuest with E3Next (RoF2 client)
 - Windows for the patcher; the scripts themselves run wherever MQ runs
+- An extractor for Linux; extract to your E3Next or MQ folder and you're ready to go.
 
 ## License
 
