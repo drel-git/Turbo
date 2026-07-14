@@ -787,6 +787,14 @@ function M.render(state, actions)
                     g.statusMessage = 'Turbo Quick Start opened.'
                 end,
             },
+            {
+                label = 'Turbo Patcher##tools_patcher',
+                intent = 'info',
+                tooltip = 'Launch TurboPatcher.exe to update the Turbo suite. Looks in your MacroQuest folder (and a TurboPatcher subfolder there). Running Turbo scripts stop themselves when an update starts.',
+                onClick = function()
+                    if actions.openTurboPatcher then actions.openTurboPatcher() end
+                end,
+            },
         }, 1, 160, ACTION_BTN_H)
     end
 

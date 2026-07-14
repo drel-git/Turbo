@@ -1,3 +1,19 @@
+1.2.0
+- Announce: linked items now resolve by name before parsed-link id, so shared
+  id ranges (for example the Jonas Dagmire hand bones) can no longer credit the
+  wrong bone; alias pairs like "Triquetrum" and "Jonas Dagmire's Triquetrum"
+  collapse to a single announce instead of two.
+- Announce: cache-derived peer needers are live-confirmed over the actor bus
+  before a grouped [TG] send, so characters who already looted the item are
+  dropped from the needer list instead of being announced stale.
+- Updates: Turbo scripts stop themselves when TurboPatcher starts an update
+  (patch-lock hook), and the More tab gained a Turbo Patcher button that
+  launches the patcher directly (drop TurboPatcher.exe in your MacroQuest
+  folder so the button can find it).
+- ResearchLearn spell-research automation moved out of the suite to become a
+  separate project. TurboGear's Spells tab still tracks missing research
+  spells and exports per-character want lists.
+
 1.1.0
 - SQLite storage is now the default (storeBackend = "auto"): the SQLite backend
   is used automatically when lsqlite3 is available, and lsqlite3 is auto-installed

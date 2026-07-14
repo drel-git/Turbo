@@ -35,7 +35,7 @@ M.CFG = {
     script_name  = 'TurboGear',    -- display/settings/cache name
     lua_name     = 'turbogear',     -- folder/module name used by /lua run and /lua stop
     bg_lua_name  = 'turbogear_bg',  -- wrapper responder name; leaves /lua run turbogear free for UI
-    version      = '1.1.0',
+    version      = '1.2.0',
     mailbox      = 'turbogear',     -- shared actor mailbox name across all boxes
     proto        = 1,              -- snapshot protocol version (guards mismatched boxes)
     frame_round  = 5.0,
@@ -56,7 +56,6 @@ M.CFG = {
     patch_stop_scripts = {
         "turbogear", "turbogear_bg", "turbogear_autostart",
         "TurboMobs", "turbomobs_logic", "TurboRolls",
-        "ResearchLearn", "ResearchLearnCatalog", "ResearchLearnEngine", "ResearchLearnExport",
         "ToggleTurboLoot", "ToggleMeleeDist",
         "turbo_bank_all", "turbo_collect_cash", "turbo_collect_dc", "turbo_reclaim_lotto",
     },

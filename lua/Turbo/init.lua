@@ -4301,6 +4301,34 @@ local function openTurboRepoWeb()
     end
 end
 
+--- Launch the patcher exe like a double-click in Explorer (ShellExecuteA
+--- 'open'): no console window, and the patcher outlives this script if it
+--- stops us. Checked spots: <MQ>\, <MQ>\TurboPatcher\, <MQ>\Patcher\.
+--- On TG (not a local): the main chunk is near LuaJIT's 200-local limit.
+TG.openTurboPatcherExternal = function()
+    local exe
+    local mqPath = (mq.TLO.MacroQuest.Path() or ''):gsub('[\\/]+$', '')
+    if mqPath ~= '' then
+        for _, dir in ipairs({ mqPath, mqPath .. '\\TurboPatcher', mqPath .. '\\Patcher' }) do
+            for _, name in ipairs({ 'TurboPatcher.exe', 'LazarusPatcher.exe' }) do
+                local path = dir .. '\\' .. name
+                if fileExists(path) then exe = path break end
+            end
+            if exe then break end
+        end
+    end
+    if not exe then
+        TG.statusMessage = 'TurboPatcher.exe not found. Put it in your MacroQuest folder '
+            .. '(or a TurboPatcher subfolder there).'
+        return
+    end
+    if shellOpenFile(exe) then
+        TG.statusMessage = 'Turbo Patcher launched: ' .. exe
+    else
+        TG.statusMessage = 'Could not launch Turbo Patcher: ' .. exe
+    end
+end
+
 local function findE3Ini(manualFile, characterName)
     local mqPath = mq.TLO.MacroQuest.Path() or ''
     local charName = tostring(characterName or mq.TLO.Me.CleanName() or ''):match('^%s*(.-)%s*$') or ''
@@ -10164,6 +10192,7 @@ function TG.renderWindow()
         RULE_BTN_W = RULE_BTN_W, SLIM_RULE_BTN_H = SLIM_RULE_BTN_H, ActionsView = ActionsView,
         openTurbolootIniFileExternal = openTurbolootIniFileExternal, printTurboDoctor = printTurboDoctor,
         openE3IniExternal = openE3IniExternal, openTurboRepoWeb = openTurboRepoWeb,
+        openTurboPatcherExternal = TG.openTurboPatcherExternal,
         openTurbolootConfigFolderExternal = openTurbolootConfigFolderExternal,
         openTurbolootMacrosFolderExternal = openTurbolootMacrosFolderExternal,
         openTurboMobsExportsFolderExternal = TG.openTurboMobsExportsFolderExternal,
@@ -11927,6 +11956,7 @@ function TG.renderWindow()
                 openGithub = function()
                     o.openTurboRepoWeb()
                 end,
+                openTurboPatcher = o.openTurboPatcherExternal,
                 sendXTankMacro = function()
                     if TG.requireSharedControl('XTank macro broadcast') then
                         local cmd = TG.xtankBroadcastCommand()
