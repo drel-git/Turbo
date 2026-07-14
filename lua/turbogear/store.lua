@@ -109,6 +109,11 @@ local function replace_file(tmp_path, final_path)
     return os.rename(tmp_path, final_path) == true
 end
 
+-- Temp-file re-validation is belt-and-suspenders against a corrupt pickle. It is
+-- demoted to periodic (CFG.cache_tmp_validate_s) so most saves skip the extra
+-- full parse of what we just wrote (P1 interim).
+local last_tmp_validate = 0
+
 local function write_cache_atomic(out)
     local final_path = tostring(cfg.CacheFile or "")
     if final_path == "" then return false, "missing cache path" end
@@ -120,10 +125,15 @@ local function write_cache_atomic(out)
         pcall(function() os.remove(tmp_path) end)
         return false, tostring(pickle_err or "pickle failed")
     end
-    local ok_tmp, _, load_err = safe_load_lua_table(tmp_path)
-    if not ok_tmp then
-        pcall(function() os.remove(tmp_path) end)
-        return false, "temp cache invalid: " .. tostring(load_err or "?")
+    local now_validate = os.clock()
+    local validate_every = tonumber(CFG.cache_tmp_validate_s) or 30
+    if last_tmp_validate == 0 or (now_validate - last_tmp_validate) >= validate_every then
+        local ok_tmp, _, load_err = safe_load_lua_table(tmp_path)
+        if not ok_tmp then
+            pcall(function() os.remove(tmp_path) end)
+            return false, "temp cache invalid: " .. tostring(load_err or "?")
+        end
+        last_tmp_validate = now_validate
     end
     if not replace_file(tmp_path, final_path) then
         pcall(function() os.remove(tmp_path) end)
@@ -657,16 +667,27 @@ function Store.save()
                        lockouts=s.lockouts, spells=s.spells, spells_sig=s.spells_sig,
                        liveStats=s.liveStats }
         end
-        local ok_existing, existing = safe_load_lua_table(cfg.CacheFile)
-        if ok_existing and type(existing) == "table" then
-            for k, disk in pairs(existing) do
-                if type(disk) == "table" then
-                    local mem = out[k]
-                    if type(mem) ~= "table" or snapshot_inventory_recency(disk) > snapshot_inventory_recency(mem) then
-                        out[k] = disk
+        -- P1 interim: the read-merge exists only to avoid clobbering another
+        -- process's newer entries. If the on-disk signature is exactly what WE
+        -- last wrote, no other writer has touched the file since, so the merge
+        -- can be skipped (our in-memory Store already holds every entry we ever
+        -- merged). When the signature differs, another box wrote - merge as before.
+        local disk_sig = cache_file_signature()
+        if Store.cache_signature == nil or disk_sig ~= Store.cache_signature then
+            diag.count("store.save_merge")
+            local ok_existing, existing = safe_load_lua_table(cfg.CacheFile)
+            if ok_existing and type(existing) == "table" then
+                for k, disk in pairs(existing) do
+                    if type(disk) == "table" then
+                        local mem = out[k]
+                        if type(mem) ~= "table" or snapshot_inventory_recency(disk) > snapshot_inventory_recency(mem) then
+                            out[k] = disk
+                        end
                     end
                 end
             end
+        else
+            diag.count("store.save_merge_skipped")
         end
         local ok_save, save_reason = write_cache_atomic(out)
         Store.cache_last_reload_reason = ok_save and "saved atomically" or ("save failed: " .. tostring(save_reason or "?"))

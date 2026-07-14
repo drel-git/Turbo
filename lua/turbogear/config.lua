@@ -45,6 +45,7 @@ M.CFG = {
     self_cache_full_s = 5.0,       -- full gather cache (Stats / Focus / Suggest)
     save_every_s = 15.0,           -- debounce cache writes (UI open)
     age_sweep_interval_s = 1.0,    -- P3: throttle source online/stale/offline aging sweep (status is second-granular)
+    cache_tmp_validate_s = 30.0,   -- P1 interim: re-validate the temp cache file at most this often (not every save)
     save_every_bg_s = 30.0,        -- debounce bg cache writes; actors carry live updates without disk stalls
     save_every_heavy_ui_s = 120.0, -- avoid disk-pickle hitches while Inventory/TurboBiS are open
     save_every_minimized_s = 30.0, -- slower disk writes when minimized
