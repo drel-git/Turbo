@@ -1,0 +1,1 @@
+[{"schema": "TurboMobsAllaSeedNpc", "npc_id": 64001, "id": 64001, "name": "Phinigel Autropos", "points": [{"x": 111.0, "y": 37.0, "z": -276.0, "ph_names": [], "chance": 100.0, "respawn_seconds": 43200, "source_url": "https://lazaruseq.com/alla/npcs/64001", "timer_source": "lazarus_alla"}], "source_url": "https://lazaruseq.com/alla/npcs/64001", "timer_source": "lazarus_alla"}]

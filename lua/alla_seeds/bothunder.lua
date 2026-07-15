@@ -1,0 +1,222 @@
+return {
+  _meta = {
+    format = 'TurboMobsAllaSeed',
+    schema_version = 1,
+    generator = 'tools/laz_alla_seed.py',
+    generated_at = '2026-06-02',
+    source = 'Project Lazarus Alla',
+    report = {
+      records = 18,
+      points = 19,
+      records_without_points = 0,
+      duplicate_points = 0,
+      points_missing_timers = 0,
+    },
+  },
+  zones = {
+    bothunder = {
+      zone = 'bothunder',
+      named = {
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 209080,
+          id = 209080,
+          name = 'Amnquetil Brynjulffr',
+          source_url = 'https://lazaruseq.com/alla/npcs/209080',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 256.0, y = -1119.0, z = 1641.0, chance = 20.0, respawn_seconds = 1440, source_url = 'https://lazaruseq.com/alla/npcs/209080', timer_source = 'lazarus_alla', ph_names = { 'A brann kriger' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 209077,
+          id = 209077,
+          name = 'Bordir Bjomolf',
+          source_url = 'https://lazaruseq.com/alla/npcs/209077',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 333.0, y = -1158.0, z = 1607.0, chance = 20.0, respawn_seconds = 1440, source_url = 'https://lazaruseq.com/alla/npcs/209077', timer_source = 'lazarus_alla', ph_names = { 'A brann kriger' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 209016,
+          id = 209016,
+          name = 'Brynju Thunderclap',
+          source_url = 'https://lazaruseq.com/alla/npcs/209016',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 225.0, y = -1205.0, z = 2328.0, chance = 100.0, respawn_seconds = 23870, source_url = 'https://lazaruseq.com/alla/npcs/209016', timer_source = 'lazarus_alla', ph_names = {  } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 209060,
+          id = 209060,
+          name = 'Eindride Icestorm',
+          source_url = 'https://lazaruseq.com/alla/npcs/209060',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -443.0, y = -867.0, z = 2130.0, chance = 100.0, respawn_seconds = 23870, source_url = 'https://lazaruseq.com/alla/npcs/209060', timer_source = 'lazarus_alla', ph_names = {  } },
+            { x = -492.0, y = 294.0, z = -1469.0, chance = 15.0, respawn_seconds = 1440, source_url = 'https://lazaruseq.com/alla/npcs/209119', timer_source = 'lazarus_alla', ph_names = { 'A vann kriger' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 209121,
+          id = 209121,
+          name = 'Galm Snowdrift',
+          source_url = 'https://lazaruseq.com/alla/npcs/209121',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -666.0, y = -1054.0, z = 1385.0, chance = 20.0, respawn_seconds = 1440, source_url = 'https://lazaruseq.com/alla/npcs/209121', timer_source = 'lazarus_alla', ph_names = { 'A vann kriger' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 209071,
+          id = 209071,
+          name = 'Gaukr Sandstorm',
+          source_url = 'https://lazaruseq.com/alla/npcs/209071',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 17.0, y = -1565.0, z = -1391.0, chance = 100.0, respawn_seconds = 23760, source_url = 'https://lazaruseq.com/alla/npcs/209071', timer_source = 'lazarus_alla', ph_names = {  } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 209082,
+          id = 209082,
+          name = 'Hreidar Lynhillig',
+          source_url = 'https://lazaruseq.com/alla/npcs/209082',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 707.0, y = 276.0, z = -1477.0, chance = 100.0, respawn_seconds = 23760, source_url = 'https://lazaruseq.com/alla/npcs/209082', timer_source = 'lazarus_alla', ph_names = {  } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 209079,
+          id = 209079,
+          name = 'Keeper of Past Lore',
+          source_url = 'https://lazaruseq.com/alla/npcs/209079',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -847.0, y = 283.0, z = -1425.0, chance = 100.0, respawn_seconds = 1440, source_url = 'https://lazaruseq.com/alla/npcs/209079', timer_source = 'lazarus_alla', ph_names = {  } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 209070,
+          id = 209070,
+          name = 'Laef Windfall',
+          source_url = 'https://lazaruseq.com/alla/npcs/209070',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -105.0, y = 734.0, z = -1422.0, chance = 100.0, respawn_seconds = 23760, source_url = 'https://lazaruseq.com/alla/npcs/209070', timer_source = 'lazarus_alla', ph_names = {  } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 209072,
+          id = 209072,
+          name = 'Oreen Wavecrasher',
+          source_url = 'https://lazaruseq.com/alla/npcs/209072',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -904.0, y = -37.0, z = -1448.0, chance = 100.0, respawn_seconds = 23760, source_url = 'https://lazaruseq.com/alla/npcs/209072', timer_source = 'lazarus_alla', ph_names = {  } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 209096,
+          id = 209096,
+          name = 'Riodhr Torrentwind',
+          source_url = 'https://lazaruseq.com/alla/npcs/209096',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -875.0, y = 301.0, z = -1419.0, chance = 20.0, respawn_seconds = 1440, source_url = 'https://lazaruseq.com/alla/npcs/209096', timer_source = 'lazarus_alla', ph_names = { 'A vann kriger' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 209081,
+          id = 209081,
+          name = 'Rorek Steelthorn',
+          source_url = 'https://lazaruseq.com/alla/npcs/209081',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 350.0, y = -933.0, z = -1443.0, chance = 24.0, respawn_seconds = 1440, source_url = 'https://lazaruseq.com/alla/npcs/209081', timer_source = 'lazarus_alla', ph_names = { 'A jord kriger' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 209098,
+          id = 209098,
+          name = 'Thangbrand',
+          source_url = 'https://lazaruseq.com/alla/npcs/209098',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 60.0, y = -566.0, z = -1487.0, chance = 30.0, respawn_seconds = 1440, source_url = 'https://lazaruseq.com/alla/npcs/209098', timer_source = 'lazarus_alla', ph_names = { 'A jord kriger' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 209091,
+          id = 209091,
+          name = 'Thorolf Sutherland',
+          source_url = 'https://lazaruseq.com/alla/npcs/209091',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -311.0, y = -774.0, z = -1455.0, chance = 20.0, respawn_seconds = 1440, source_url = 'https://lazaruseq.com/alla/npcs/209091', timer_source = 'lazarus_alla', ph_names = { 'A jord kriger', 'A jord far' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 209087,
+          id = 209087,
+          name = 'Torstien Stoneskin',
+          source_url = 'https://lazaruseq.com/alla/npcs/209087',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 495.0, y = -211.0, z = -1465.0, chance = 35.0, respawn_seconds = 1440, source_url = 'https://lazaruseq.com/alla/npcs/209087', timer_source = 'lazarus_alla', ph_names = { 'A brann kriger' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 209097,
+          id = 209097,
+          name = 'Valbrand',
+          source_url = 'https://lazaruseq.com/alla/npcs/209097',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -318.0, y = -791.0, z = -1459.0, chance = 24.0, respawn_seconds = 1440, source_url = 'https://lazaruseq.com/alla/npcs/209097', timer_source = 'lazarus_alla', ph_names = { 'A jord kriger' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 209090,
+          id = 209090,
+          name = 'Wybjorn',
+          source_url = 'https://lazaruseq.com/alla/npcs/209090',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 730.0, y = 225.0, z = -1477.0, chance = 35.0, respawn_seconds = 1440, source_url = 'https://lazaruseq.com/alla/npcs/209090', timer_source = 'lazarus_alla', ph_names = { 'A brann kriger' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 209083,
+          id = 209083,
+          name = 'Ymir Stormseer',
+          source_url = 'https://lazaruseq.com/alla/npcs/209083',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 35.0, y = -564.0, z = -1487.0, chance = 30.0, respawn_seconds = 1440, source_url = 'https://lazaruseq.com/alla/npcs/209083', timer_source = 'lazarus_alla', ph_names = { 'A jord kriger' } },
+          },
+        },
+      },
+    },
+  },
+}
