@@ -1,0 +1,41 @@
+-- TurboGear/references/anguish.lua
+-- Static Anguish raid reference text (from LazBiS); not tied to catalog generation.
+
+return {
+    focus = {
+        { item = "Choker of Imprisoned Visions", effect = "Improved Parry/Block V" },
+        { item = "Shroud of Eternal Agony", effect = "Improved Dodge V" },
+        { item = "Ring of Disdain", effect = "Heal focus" },
+        { item = "Globe of Voltage", effect = "Pet Heal focus" },
+        { item = "Golem Stone Face Guard", effect = "Cleave V" },
+        { item = "Shoulderpads of Warfare", effect = "Ferocity V" },
+        { item = "Rigid Ring of Prowess", effect = "Sharpshooting V" },
+        { item = "Earring of Dragonkin", effect = "Beneficial spell haste" },
+        { item = "Ring of Persecution", effect = "Detrimental Spell haste" },
+        { item = "Ring of the Beast", effect = "Extended Buff duration" },
+        { item = "Amice of Ill-Will", effect = "Extended Buff duration" },
+        { item = "Cloak of Wailing Woes", effect = "Extended Dot duration" },
+        { item = "Necklace of the Steadfast Spirit", effect = "Extended Dot duration" },
+        { item = "Belt of the Stagnant", effect = "Extended Dot duration" },
+        { item = "Earring of Dark Conflict", effect = "Extended Range" },
+        { item = "Chains of Anguish", effect = "Reduce mana cost of Beneficial Spells" },
+        { item = "Ring of Deterrence", effect = "Reduce mana cost of Beneficial Spells" },
+        { item = "Plagueborn Cape", effect = "Reduce mana cost of Detrimental Spells" },
+        { item = "Warbeads of the Magus", effect = "Reduce mana cost of Detrimental Spells" },
+        { item = "Stud of Chilling Precision", effect = "Fire Damage" },
+        { item = "Beaded Hoop of Demise", effect = "Poison Damage" },
+        { item = "Cloak of Regretful Transgressions", effect = "Cold Damage" },
+        { item = "Belt of Contempt", effect = "Disease Damage" },
+        { item = "Aegis of the Dragorn Elders", effect = "Magic Damage" },
+    },
+    priority = {
+        { slot = "Helm", chain = "Tanks > Healers > Bard > Others" },
+        { slot = "DSK Bracer", chain = "Tanks > Clerics > Casters > Others" },
+        { slot = "Fippy Bracer", chain = "Tanks > Mage > Ench > Zerker > Necro > Others" },
+        { slot = "Arms", chain = "Tanks > Healers > Others" },
+        { slot = "Boots", chain = "Tanks > Bards > Healers > Others" },
+        { slot = "Gloves", chain = "Tanks > Mages > Rogues > Healers > Others" },
+        { slot = "Legs", chain = "Tanks > Monk > Rogues > Healers > Others" },
+        { slot = "BP", chain = "Tanks > Clerics > others" },
+    },
+}
