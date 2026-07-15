@@ -1100,11 +1100,37 @@ end
 -- send. Results come back the same way (/tgear golootnote) so the panel can
 -- show what happened.
 local function set_go_status(item_name, character, text)
+    text = tostring(text or "")
+    character = tostring(character or "?")
     local dk = linked_item_display_key(item_name)
+    -- Interim phase notes must not be clobbered by a late "going"/"sent" ack
+    -- (request progress fires first; on_go_loot then acks going and wiped the panel).
+    local rank = {
+        sent = 1, going = 2, revealing = 3, heading = 4,
+        opening = 5, looting = 6,
+    }
+    local terminal = {
+        looted = true, corpse_gone = true, too_far = true, not_found = true,
+        timeout_move = true, timeout_job = true, no_target = true,
+        no_window = true, window_closed = true, loot_failed = true,
+        busy = true, in_combat = true, no_corpse_id = true, failed = true,
+    }
     for _, row in ipairs(linked_items or {}) do
         if (dk ~= "" and row.display_key == dk) then
             row.go_status = row.go_status or {}
-            row.go_status[tostring(character or "?")] = tostring(text or "")
+            local prev = tostring(row.go_status[character] or "")
+            if prev ~= "" and text ~= "" and prev ~= text then
+                if not terminal[text] then
+                    local pr, nr = rank[prev] or 0, rank[text] or 0
+                    if terminal[prev] and not terminal[text] then
+                        return true
+                    end
+                    if nr > 0 and pr > 0 and nr < pr then
+                        return true
+                    end
+                end
+            end
+            row.go_status[character] = text
             return true
         end
     end
@@ -1216,14 +1242,16 @@ function M.on_go_loot(msg)
         local Engine = require('engine').Engine
         if not (Engine and Engine.send_go_loot_result) then return end
         if ok then
-            -- Ack "going" for fresh accepts AND duplicates ("already") so the
-            -- panel does not stick on "sent" when a second Go hits an in-flight job.
-            Engine.send_go_loot_result(reply_to, {
-                item_name = item_name,
-                corpse_id = corpse_id,
-                ok = true,
-                note = "going",
-            })
+            -- Fresh accept only: duplicates already have richer phase notes on
+            -- the panel; re-acking "going" made it look stuck forever.
+            if err ~= "already" then
+                Engine.send_go_loot_result(reply_to, {
+                    item_name = item_name,
+                    corpse_id = corpse_id,
+                    ok = true,
+                    note = "going",
+                })
+            end
         else
             Engine.send_go_loot_result(reply_to, {
                 item_name = item_name,

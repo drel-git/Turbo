@@ -82,6 +82,8 @@ check(G.decide("move", {
 -- decide: open phase
 check(G.decide("open", { corpse_exists = true, target_is_corpse = true }).action == "open_window",
     'open: targeted corpse opens')
+check(G.decide("open", { corpse_exists = false, target_is_corpse = true }).action == "open_window",
+    'open: target id is enough without spawn TLO')
 check(G.decide("open", { corpse_exists = false }).note == "corpse_gone", 'open: corpse rotted fails')
 check(G.decide("open", { corpse_exists = true, target_is_corpse = false, timed_out = true }).note == "no_target",
     'open: cannot target fails')

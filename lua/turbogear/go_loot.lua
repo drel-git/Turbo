@@ -87,7 +87,12 @@ end
 local function pause_e3_for_job()
     -- Same idea as TurboLoot PauseE3Logic: E3 will otherwise re-assert follow /
     -- chase and cancel our nav mid-run (common right after a Reloot/TurboLoot).
-    pcall(function() mq.cmd('/squelch /e3p on') end)
+    -- Issue twice: after TurboLoot, the first /e3p on is often delayed behind
+    -- the mac's /e3p off echo and we spent ~8s revealing while E3 was still live.
+    pcall(function()
+        mq.cmd('/squelch /e3p on')
+        mq.cmd('/squelch /e3p on')
+    end)
     return true
 end
 
@@ -212,11 +217,10 @@ function M.decide(phase, ctx)
         end
         return { action = "fail", note = "corpse_gone" }
     elseif phase == "open" then
-        if not ctx.corpse_exists then return { action = "fail", note = "corpse_gone" } end
+        -- Target id match is enough even when Spawn TLO type/filter is weird.
         if ctx.target_is_corpse then return { action = "open_window" } end
+        if not ctx.corpse_exists then return { action = "fail", note = "corpse_gone" } end
         if ctx.timed_out then
-            -- Already in loot range but target did not stick: try /loot anyway
-            -- (TurboLoot does the same when pathing "arrives" without a clean target).
             if ctx.close_enough then return { action = "loot_anyway" } end
             return { action = "fail", note = "no_target" }
         end
@@ -285,15 +289,28 @@ local function progress(j, note)
     report(j, true, note)
 end
 
+local function enter_window_phase(j)
+    -- Match TurboLoot: accept no-drop prompts automatically for this pickup.
+    pcall(function() mq.cmd('/squelch /lootnodrop always') end)
+    mq.cmd('/loot')
+    j.phase = "window"
+    j.deadline = now_s() + (tonumber(CFG.go_loot_window_timeout_s) or 8)
+    progress(j, "looting")
+    print(string.format("\at[TurboGear]\ax go-loot: /loot on corpse %d for %s",
+        j.corpse_id, j.item_name))
+end
+
 local function begin_open(j)
     stop_movement(j.used_nav)
     j.moving = false
-    j.phase = "open"
-    j.deadline = now_s() + 5
     target_corpse(j.corpse_id)
     progress(j, "opening")
     print(string.format("\at[TurboGear]\ax go-loot: opening corpse %d for %s",
         j.corpse_id, j.item_name))
+    -- Issue /loot immediately (TurboLoot does target+/loot in one step). Waiting
+    -- in phase "open" for another tick left us looking stuck on "going" while
+    -- the loot window never appeared.
+    enter_window_phase(j)
 end
 
 local function begin_move(j, opts)
@@ -330,6 +347,7 @@ local function finish(ok, note)
     if not job then return end
     if job.moving then stop_movement(job.used_nav) end
     close_loot_window()
+    pcall(function() mq.cmd('/squelch /lootnodrop never') end)
     local was_paused = job.afollow_paused == true
     local e3_paused = job.e3_paused == true
     local did_reveal = job.revealed_corpses == true
@@ -345,13 +363,6 @@ local function finish(ok, note)
     if ok == true then
         pcall(function() require('inventory_watch').note_change(true, false) end)
     end
-end
-
-local function enter_window_phase(j)
-    mq.cmd('/loot')
-    j.phase = "window"
-    j.deadline = now_s() + (tonumber(CFG.go_loot_window_timeout_s) or 6)
-    progress(j, "looting")
 end
 
 -- Start a job. payload: { item_name, item_id, corpse_id, reply_to }.
@@ -583,6 +594,7 @@ local function tick_once()
         local d = M.decide("pickup", ctx)
         if d.action == "confirm" then
             mq.cmd('/squelch /notify ConfirmationDialogBox Yes_Button leftmouseup')
+            mq.cmd('/squelch /notify ConfirmationDialogBox CD_Yes_Button leftmouseup')
         elseif d.action == "accept_quantity" then
             mq.cmd('/squelch /notify QuantityWnd AcceptButton leftmouseup')
         elseif d.action == "stash_cursor" then

@@ -1,3 +1,8 @@
+1.2.13
+- Go loot: panel no longer regresses opening/looting back to "going"; /loot fires
+  immediately on open; lootnodrop always for the pickup; dual yes-button confirm;
+  stronger E3 pause so reveal is not fighting a still-live E3 for several seconds.
+
 1.2.12
 - Go loot: trust TurboLoot corpse spawn ids regardless of Type; longer reveal
   with pulses/target nudges; if Spawn TLO stays empty, blind /nav id then open;
