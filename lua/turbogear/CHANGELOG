@@ -1,3 +1,9 @@
+1.2.15
+- Go loot: hand the excursion to TurboLoot (`/mac TurboLoot go <corpseId> <Item>`).
+  TurboGear only dispatches and reports panel status from `/tgearbg golootdone`
+  (looted / failed reasons / going). Fixes Lua vs mac timing races that left
+  characters stuck on reveal or an open loot window.
+
 1.2.14
 - Go loot: wait for Corpse.Items to populate after LootWnd opens (TurboLoot does);
   find loot slots via Corpse.Item[=name]/partial/id; retry itemnotify with and

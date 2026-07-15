@@ -205,6 +205,33 @@ function M.beacon_fresh(seen_at, now, ttl_s)
     return age >= 0 and age <= ttl_s
 end
 
+-- TurboLoot GO mode outcome echo:
+--   [GOLOOT] starting Wand of Foo (ID: 141)
+--   [GOLOOT] looted Wand of Foo (ID: 141)
+--   [GOLOOT] failed corpse_gone (ID: 141)
+-- Returns status, detail (item name or fail reason), corpse_id — or nils.
+function M.parse_goloot_line(line)
+    line = tostring(line or "")
+    local lower = line:lower()
+    local tag_at = lower:find("%[goloot%]")
+    if not tag_at then return nil end
+    local after = line:sub(tag_at + 8):match("^%s*(.-)%s*$") or ""
+    local status, rest = after:match("^(%S+)%s*(.*)$")
+    if not status then return nil end
+    status = status:lower()
+    rest = tostring(rest or "")
+    local corpse_id
+    for n in rest:gmatch("%(%s*ID%s*:%s*(%d+)%s*%)") do
+        corpse_id = tonumber(n)
+    end
+    rest = rest:gsub("%(%s*ID%s*:%s*%d+%s*%)", ""):match("^%s*(.-)%s*$") or ""
+    local detail = rest
+    if status == "failed" or status == "fail" then
+        detail = rest:match("^(%S+)") or "failed"
+    end
+    return status, detail, corpse_id
+end
+
 -- Extract the item payload from a [TG] announce line (ours or another box's).
 -- Format: "... '[TG] - <payload> - <names>'". The payload may itself contain
 -- " - " (e.g. "Corrosive Fungus of Suffering - Tier II") so the NAMES are

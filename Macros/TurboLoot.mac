@@ -129,6 +129,31 @@ Sub Main
         /return
     }
 
+    | ---------------------------------------------------------------------
+    | GO / GOLOOT — targeted single-item pickup for TurboGear Go buttons.
+    | Usage: /mac TurboLoot go <corpseSpawnId> <Item Name With Spaces>
+    | Example: /mac TurboLoot go 141 Wand of Ruptured Reality
+    | ---------------------------------------------------------------------
+    /if (${mode.Equal[GO]} || ${mode.Equal[GOLOOT]}) {
+        /call InitState
+        /call LoadSettings
+        /declare goCorpseID int outer ${Int[${Param1}]}
+        /declare goItemName string outer
+        /call BuildGoItemName
+        /if (${goCorpseID} <= 0 || !${goItemName.Length}) {
+            /echo ${tlTag} [GOLOOT] failed bad_args (ID: ${goCorpseID})
+            /echo ${tlTag} Usage: /mac TurboLoot go <corpseId> <Item Name>
+            /squelch /tgearbg golootdone failed bad_args ${goCorpseID} ${goItemName}
+            /call Cleanup
+            /return
+        }
+        /call PauseE3Logic
+        /call StopChaseForUtility
+        /call GoLootOneItem ${goCorpseID} "${goItemName}"
+        /call Cleanup
+        /return
+    }
+
     /if (${mode.Equal[UNLOAD]}) {
         /call InitStateMinimal
         /call LoadSettingsMinimal TRIBUTE
@@ -5433,6 +5458,146 @@ Sub AutoReclaimDiamondCoinsAfterLoot
 
 
 | ---------------------------------------------------------------------
+| GO LOOT (TurboGear) — join Param2..Param12 into the item name
+| ---------------------------------------------------------------------
+Sub BuildGoItemName
+    /varset goItemName ${Param2}
+    /if (${Param3.Length}) /varset goItemName ${goItemName} ${Param3}
+    /if (${Param4.Length}) /varset goItemName ${goItemName} ${Param4}
+    /if (${Param5.Length}) /varset goItemName ${goItemName} ${Param5}
+    /if (${Param6.Length}) /varset goItemName ${goItemName} ${Param6}
+    /if (${Param7.Length}) /varset goItemName ${goItemName} ${Param7}
+    /if (${Param8.Length}) /varset goItemName ${goItemName} ${Param8}
+    /if (${Param9.Length}) /varset goItemName ${goItemName} ${Param9}
+    /if (${Param10.Length}) /varset goItemName ${goItemName} ${Param10}
+    /if (${Param11.Length}) /varset goItemName ${goItemName} ${Param11}
+    /if (${Param12.Length}) /varset goItemName ${goItemName} ${Param12}
+/return
+
+| ---------------------------------------------------------------------
+| GO LOOT (TurboGear) — navigate to one corpse and loot one item by name.
+| Uses the same pause/nav/loot/confirm primitives as normal TurboLoot so we
+| do not reimplement MQ timing in Lua.
+| ---------------------------------------------------------------------
+Sub GoLootOneItem(int corpseId, string itemName)
+    /echo ${tlTag} [GOLOOT] starting ${itemName} (ID: ${corpseId})
+    /squelch /tgearbg golootdone starting ${corpseId} ${itemName}
+    /squelch /hidecorpse none
+    /delay 20 ${Spawn[id ${corpseId}].ID} == ${corpseId}
+    /if (${Spawn[id ${corpseId}].ID} != ${corpseId}) {
+        /echo ${tlTag} [GOLOOT] failed corpse_gone (ID: ${corpseId})
+        /squelch /tgearbg golootdone failed corpse_gone ${corpseId} ${itemName}
+        /return
+    }
+
+    /declare dist float local ${Spawn[id ${corpseId}].Distance3D}
+    /if (${dist} > 400) {
+        /echo ${tlTag} [GOLOOT] failed too_far (ID: ${corpseId})
+        /squelch /tgearbg golootdone failed too_far ${corpseId} ${itemName}
+        /return
+    }
+
+    /target id ${corpseId}
+    /delay 5 ${Target.ID} == ${corpseId}
+    /if (${Target.ID} != ${corpseId}) {
+        /echo ${tlTag} [GOLOOT] failed no_target (ID: ${corpseId})
+        /squelch /tgearbg golootdone failed no_target ${corpseId} ${itemName}
+        /return
+    }
+
+    /if (${Target.Distance} > 15) {
+        /if (${useNavForCorpses} && ${Navigation.MeshLoaded} && ${Navigation.PathExists[id ${corpseId}]}) {
+            /nav id ${corpseId} distance=10
+            /delay 450 ${Spawn[id ${corpseId}].Distance} <= 15 || !${Navigation.Active}
+            /squelch /nav stop
+        } else {
+            /moveto id ${corpseId}
+            /delay 450 ${Spawn[id ${corpseId}].Distance} <= 15
+            /squelch /moveto off
+        }
+    }
+
+    /target id ${corpseId}
+    /delay 3 ${Target.ID} == ${corpseId}
+    /if (${Target.ID} != ${corpseId} || ${Target.Distance} > 20) {
+        /echo ${tlTag} [GOLOOT] failed timeout_move (ID: ${corpseId})
+        /squelch /tgearbg golootdone failed timeout_move ${corpseId} ${itemName}
+        /return
+    }
+
+    /docommand /lootnodrop ${lootNoDropPrompt}
+    /loot
+    /delay 30 ${Window[LootWnd].Open}
+    /declare itemWait int local 0
+    /while (${Window[LootWnd].Open} && ${Corpse.Items} <= 0 && ${itemWait} < 20) {
+        /delay 1
+        /doevents
+        /varcalc itemWait ${itemWait}+1
+    }
+    /if (!${Window[LootWnd].Open}) {
+        /echo ${tlTag} [GOLOOT] failed no_window (ID: ${corpseId})
+        /squelch /tgearbg golootdone failed no_window ${corpseId} ${itemName}
+        /return
+    }
+    /if (${Corpse.Items} <= 0) {
+        /echo ${tlTag} [GOLOOT] failed not_found (ID: ${corpseId})
+        /squelch /tgearbg golootdone failed not_found ${corpseId} ${itemName}
+        /call TryCloseLootWindow
+        /return
+    }
+
+    /declare slot int local 0
+    /declare i int local 0
+    /declare scanMax int local ${Corpse.Items}
+    /declare slotName string local
+    /declare wantId int local 0
+    /if (${scanMax} < 8) /varset scanMax 8
+    /if (${Corpse.Item[=${itemName}].ID}) /varset wantId ${Corpse.Item[=${itemName}].ID}
+    /if (!${wantId} && ${Corpse.Item[${itemName}].ID}) /varset wantId ${Corpse.Item[${itemName}].ID}
+
+    /for i 1 to ${scanMax}
+        /if (!${Corpse.Item[${i}].ID}) /goto :GoLootNextSlot
+        /varset slotName ${Corpse.Item[${i}].Name}
+        /if (${wantId} && ${Corpse.Item[${i}].ID} == ${wantId}) {
+            /varset slot ${i}
+            /goto :GoLootHaveSlot
+        }
+        /if (${slotName.Equal[${itemName}]}) {
+            /varset slot ${i}
+            /goto :GoLootHaveSlot
+        }
+        :GoLootNextSlot
+    /next i
+
+    :GoLootHaveSlot
+    /if (${slot} <= 0) {
+        /echo ${tlTag} [GOLOOT] failed not_found (ID: ${corpseId})
+        /squelch /tgearbg golootdone failed not_found ${corpseId} ${itemName}
+        /call TryCloseLootWindow
+        /return
+    }
+
+    /varset _skipCorpseID ${corpseId}
+    /varset LoreBlocked FALSE
+    /call LootTheItem ${slot} "${itemName}" 999999 KEEP
+    /doevents
+
+    /if (!${Corpse.Item[${slot}].ID}) {
+        /echo ${tlTag} [GOLOOT] looted ${itemName} (ID: ${corpseId})
+        /squelch /tgearbg golootdone looted ${corpseId} ${itemName}
+    } else /if (${LoreBlocked}) {
+        /echo ${tlTag} [GOLOOT] failed lore (ID: ${corpseId})
+        /squelch /tgearbg golootdone failed lore ${corpseId} ${itemName}
+    } else {
+        /echo ${tlTag} [GOLOOT] failed loot_failed (ID: ${corpseId})
+        /squelch /tgearbg golootdone failed loot_failed ${corpseId} ${itemName}
+    }
+
+    /call TryCloseLootWindow
+    /if (${corpseHideMode.Equal[ALL]} || ${corpseHideMode.Equal[SELF]} || ${corpseHideMode.Equal[LOOTED]}) /squelch /hidecorpse looted
+/return
+
+| ---------------------------------------------------------------------
 | CLEANUP (end-of-run cleanup)
 | ---------------------------------------------------------------------
 Sub Cleanup
@@ -6453,6 +6618,7 @@ Sub PrintCommandsAndToggles
     /call HelpAnnounce "${helpMethod}" "\aw \ax"
     /call HelpAnnounce "${helpMethod}" "\at==== \ayLOOT \at====\ax"
     /call HelpAnnounce "${helpMethod}" "\aw    \ag/mac turboloot\ax — loot nearby corpses (default mode)\ax"
+    /call HelpAnnounce "${helpMethod}" "\aw    \ag/mac turboloot go <corpseId> <Item Name>\ax — TurboGear Go-loot one item\ax"
     /call HelpAnnounce "${helpMethod}" "\aw \ax"
     /call HelpAnnounce "${helpMethod}" "\at==== \aySELL / BANK / TRIBUTE \at====\ax"
     /call HelpAnnounce "${helpMethod}" "\aw    \ag/mac turboloot sell\ax — sell items marked \agSELL\aw in inventory\ax"

@@ -1166,12 +1166,6 @@ function M.go_loot_request(id, character)
                     corpse_id = corpse_id,
                     reply_to = "",
                 })
-                if ok then
-                    pcall(function()
-                        local G = require('go_loot')
-                        for _ = 1, 8 do G.tick() end
-                    end)
-                end
                 set_go_status(row.item_name, character, ok and "going" or tostring(err or "busy"))
                 return ok, err
             end
@@ -1230,20 +1224,10 @@ function M.on_go_loot(msg)
         corpse_id = corpse_id,
         reply_to = reply_to,
     })
-    -- Pump a few ticks immediately so reveal/open can advance in the same
-    -- actor callback instead of waiting on the next bg loop delay.
-    if ok then
-        pcall(function()
-            local G = require('go_loot')
-            for _ = 1, 8 do G.tick() end
-        end)
-    end
     pcall(function()
         local Engine = require('engine').Engine
         if not (Engine and Engine.send_go_loot_result) then return end
         if ok then
-            -- Fresh accept only: duplicates already have richer phase notes on
-            -- the panel; re-acking "going" made it look stuck forever.
             if err ~= "already" then
                 Engine.send_go_loot_result(reply_to, {
                     item_name = item_name,

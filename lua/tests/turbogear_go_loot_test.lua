@@ -1,14 +1,41 @@
 -- Run from repo root:  luajit lua\tests\turbogear_go_loot_test.lua
--- Covers the pure pieces of the "go loot" feature: corpse-id extraction from
--- TurboLoot control lines (announce_rules) and the runner's phase decisions
--- (go_loot.decide). The mq/config preloads keep go_loot.lua loadable offline.
+-- Covers corpse-id extraction, [GOLOOT] line parsing, and the TurboLoot-backed
+-- go_loot dispatcher (request / on_mac_line / timeout tick).
 package.path = 'lua/turbogear/?.lua;lua/turbogear/?/init.lua;' .. package.path
 
+local last_cmd = nil
+local last_note = nil
+local macro_name = ""
+
 package.preload['mq'] = function()
-    return { TLO = {}, cmd = function() end }
+    return {
+        TLO = {
+            Me = {
+                CleanName = function() return "Tester" end,
+                Combat = function() return false end,
+            },
+            Macro = {
+                Name = function() return macro_name end,
+            },
+        },
+        cmd = function(s) last_cmd = s end,
+    }
 end
 package.preload['config'] = function()
     return { CFG = {} }
+end
+package.preload['announcer'] = function()
+    return {
+        note_go_status = function(item, who, note)
+            last_note = { item = item, who = who, note = note }
+        end,
+    }
+end
+package.preload['engine'] = function()
+    return { Engine = {} }
+end
+package.preload['inventory_watch'] = function()
+    return { note_change = function() end }
 end
 
 local R = require('announce_rules')
@@ -45,84 +72,48 @@ check(R.corpse_id_from_line("") == nil, 'corpse id: empty line')
 check(R.corpse_id_from_line("You tell the group, 'Sword of Truth'") == nil,
     'corpse id: plain link chat')
 
--- decide: reveal phase (hidecorpse none before spawn check)
-check(G.decide("reveal", { corpse_exists = false }).action == "wait",
-    'reveal: waits for client refresh')
-check(G.decide("reveal", {
-    corpse_exists = true, distance = 50, max_distance = 400,
-}).action == "ready", 'reveal: visible corpse is ready')
-check(G.decide("reveal", {
-    corpse_exists = true, distance = 500, max_distance = 400,
-}).note == "too_far", 'reveal: too far after unhide')
-check(G.decide("reveal", {
-    corpse_exists = false, timed_out = true, reveal_retries_left = 1,
-}).action == "retry_reveal", 'reveal: one retry when still missing')
-check(G.decide("reveal", {
-    corpse_exists = false, timed_out = true, reveal_retries_left = 0,
-}).note == "corpse_gone", 'reveal: still gone after retries')
+-- parse_goloot_line
+local st, det, cid = R.parse_goloot_line("[tl] [GOLOOT] starting Wand of Foo (ID: 141)")
+check(st == "starting" and det == "Wand of Foo" and cid == 141, 'goloot: starting')
+st, det, cid = R.parse_goloot_line("[tl] [GOLOOT] looted Wand of Foo (ID: 141)")
+check(st == "looted" and det == "Wand of Foo" and cid == 141, 'goloot: looted')
+st, det, cid = R.parse_goloot_line("[tl] [GOLOOT] failed corpse_gone (ID: 141)")
+check(st == "failed" and det == "corpse_gone" and cid == 141, 'goloot: failed reason')
+check(R.parse_goloot_line("[tl] [ANNOUNCE] Foo (ID: 1)") == nil, 'goloot: ignores announce')
 
--- decide: move phase
-check(G.decide("move", { corpse_exists = false }).note == "corpse_gone", 'move: corpse gone fails')
-check(G.decide("move", { corpse_exists = true, distance = 10, arrive_dist = 15 }).action == "arrived",
-    'move: within range arrives')
-check(G.decide("move", { corpse_exists = true, distance = 100, arrive_dist = 15, timed_out = true }).note == "timeout_move",
-    'move: timeout fails')
-check(G.decide("move", { corpse_exists = true, distance = 100, arrive_dist = 15 }).action == "wait",
-    'move: still walking waits')
-check(G.decide("move", {
-    corpse_exists = false, allow_blind = true, nav_active = true,
-}).action == "wait", 'move: blind nav active waits')
-check(G.decide("move", {
-    corpse_exists = false, allow_blind = true, nav_active = false,
-}).action == "blind_retry", 'move: blind nav idle reissues')
-check(G.decide("move", {
-    corpse_exists = false, allow_blind = true, timed_out = true,
-}).note == "timeout_move", 'move: blind nav timeout')
+-- dispatcher: rejects bad payloads
+local ok, err = G.request({ item_name = "Wand", corpse_id = 0 })
+check(ok == false and err == "no_corpse_id", 'request: no corpse id')
+ok, err = G.request({ item_name = "", corpse_id = 141 })
+check(ok == false and err == "no_item", 'request: no item')
 
--- decide: open phase
-check(G.decide("open", { corpse_exists = true, target_is_corpse = true }).action == "open_window",
-    'open: targeted corpse opens')
-check(G.decide("open", { corpse_exists = false, target_is_corpse = true }).action == "open_window",
-    'open: target id is enough without spawn TLO')
-check(G.decide("open", { corpse_exists = false }).note == "corpse_gone", 'open: corpse rotted fails')
-check(G.decide("open", { corpse_exists = true, target_is_corpse = false, timed_out = true }).note == "no_target",
-    'open: cannot target fails')
-check(G.decide("open", {
-    corpse_exists = true, target_is_corpse = false, timed_out = true, close_enough = true,
-}).action == "loot_anyway", 'open: close enough tries loot without target')
+-- dispatcher: launches TurboLoot go and finishes on golootdone
+last_cmd = nil
+last_note = nil
+ok, err = G.request({ item_name = "Wand of Foo", corpse_id = 141, item_id = 9 })
+check(ok == true and err == nil, 'request: accepts')
+check(last_cmd == "/mac TurboLoot go 141 Wand of Foo", 'request: launches mac')
+check(G.busy() == true, 'request: busy while pending')
 
--- decide: scan timeout
-check(G.decide("scan", {
-    window_open = true, item_slot = 0, scan_complete = false, timed_out = true,
-}).note == "not_found", 'scan: timeout fails')
-check(G.decide("scan", {
-    window_open = true, item_slot = 0, items_pending = true,
-}).action == "wait", 'scan: waits while Corpse.Items populates')
-check(G.decide("scan", {
-    window_open = true, item_slot = 0, items_pending = true, timed_out = true,
-}).note == "not_found", 'scan: pending populate eventually times out')
+ok, err = G.request({ item_name = "Other", corpse_id = 99 })
+check(ok == false and err == "busy", 'request: busy for different job')
+ok, err = G.request({ item_name = "Wand of Foo", corpse_id = 141 })
+check(ok == true and err == "already", 'request: duplicate is already')
 
--- decide: window phase
-check(G.decide("window", { window_open = true }).action == "found", 'window: open proceeds')
-check(G.decide("window", { window_open = false, timed_out = true }).note == "no_window", 'window: timeout fails')
-check(G.decide("window", { window_open = false }).action == "wait", 'window: waits for open')
+G.on_mac_line("starting", "Wand of Foo", 141, "Wand of Foo")
+check(last_note and last_note.note == "going" and G.busy() == true, 'on_mac_line: starting keeps job')
 
--- decide: scan phase
-check(G.decide("scan", { window_open = true, item_slot = 3 }).action == "found", 'scan: slot found')
-check(G.decide("scan", { window_open = true, item_slot = 0, scan_complete = true }).note == "not_found",
-    'scan: item already gone')
-check(G.decide("scan", { window_open = false }).note == "window_closed", 'scan: window vanished fails')
+G.on_mac_line("looted", "Wand of Foo", 141, "Wand of Foo")
+check(last_note and last_note.note == "looted" and G.busy() == false, 'on_mac_line: looted finishes')
 
--- decide: pickup phase (dialog handling before completion)
-check(G.decide("pickup", { confirm_open = true }).action == "confirm", 'pickup: no-drop confirm first')
-check(G.decide("pickup", { quantity_open = true }).action == "accept_quantity", 'pickup: quantity accept')
-check(G.decide("pickup", { cursor_item = true }).action == "stash_cursor", 'pickup: cursor to bags')
-check(G.decide("pickup", { slot_empty = true }).note == "looted", 'pickup: slot empty = looted')
-check(G.decide("pickup", { timed_out = true }).note == "loot_failed", 'pickup: timeout fails')
-check(G.decide("pickup", {}).action == "wait", 'pickup: otherwise waits')
+-- failed path
+last_note = nil
+G.request({ item_name = "Bone Chips", corpse_id = 136 })
+G.on_mac_line("failed", "corpse_gone", 136, "Bone Chips")
+check(last_note and last_note.note == "corpse_gone" and G.busy() == false, 'on_mac_line: failed reason')
 
--- unknown phase is a hard failure, never a hang
-check(G.decide("nonsense", {}).note == "bad_phase", 'decide: unknown phase fails fast')
+-- legacy decide stub still loadable
+check(G.decide("reveal", {}).note == "legacy_decide_unused", 'decide: legacy stub')
 
 print(string.format("go_loot: %d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

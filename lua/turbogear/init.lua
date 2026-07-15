@@ -633,6 +633,22 @@ local function tgear_command(...)
         if not ok then
             print("[TurboGear] go-loot failed: " .. tostring(err or "?"))
         end
+    elseif arg == "golootdone" then
+        -- TurboLoot GO mode → bg: golootdone looted <corpseId> <item...>
+        --                     or: golootdone failed <reason> <corpseId> <item...>
+        --                     or: golootdone starting <corpseId> <item...>
+        local status = tostring(args[2] or ""):lower()
+        local detail, corpse_id, item_name
+        if status == "failed" or status == "fail" then
+            detail = tostring(args[3] or "failed")
+            corpse_id = tonumber(args[4]) or 0
+            item_name = table.concat(args, " ", 5)
+            require('go_loot').on_mac_line("failed", detail, corpse_id, item_name)
+        else
+            corpse_id = tonumber(args[3]) or 0
+            item_name = table.concat(args, " ", 4)
+            require('go_loot').on_mac_line(status, item_name, corpse_id, item_name)
+        end
     elseif arg == "golootnote" then
         -- golootnote <character> <note_token> <item name...>  (bg -> UI relay)
         announcer.note_go_status(table.concat(args, " ", 4), args[2] or "?", args[3] or "?")

@@ -35,7 +35,7 @@ M.CFG = {
     script_name  = 'TurboGear',    -- display/settings/cache name
     lua_name     = 'turbogear',     -- folder/module name used by /lua run and /lua stop
     bg_lua_name  = 'turbogear_bg',  -- wrapper responder name; leaves /lua run turbogear free for UI
-    version      = '1.2.14',
+    version      = '1.2.15',
     mailbox      = 'turbogear',     -- shared actor mailbox name across all boxes
     proto        = 1,              -- snapshot protocol version (guards mismatched boxes)
     frame_round  = 5.0,
@@ -49,13 +49,13 @@ M.CFG = {
     bg_sync_ack_deadline_s = 5.0,  -- R5: viewer waits this long for the bg readiness ack before syncing anyway
     bg_ready_ttl_s = 90.0,         -- R5: bg-ready marker is "fresh" if written within this window
     bg_ready_write_every_s = 20.0, -- R5: bg refreshes its readiness marker at most this often
-    -- "Go loot" runner (linked-items Go buttons): send a boxed character to a
-    -- corpse TurboLoot left an item on. Corpse ids come from TurboLoot's own
-    -- [ANNOUNCE]/[SKIP] control lines; commands travel the actor bus only.
+    -- "Go loot" (linked-items Go buttons): TurboGear launches
+    -- /mac TurboLoot go <corpseId> <Item Name>; TurboLoot owns pause/nav/loot.
+    -- Corpse ids come from TurboLoot [ANNOUNCE]/[SKIP] lines; dispatch is actor bus.
     go_loot_corpse_ttl_s = 420,    -- Go buttons hide when the corpse hint is older than this
-    go_loot_max_distance = 400,    -- refuse runs beyond this 3D distance (ft)
-    go_loot_arrive_timeout_s = 45, -- movement time budget before giving up
-    go_loot_window_timeout_s = 6,  -- corpse loot-window open budget
+    go_loot_max_distance = 400,    -- mirrored in TurboLoot GO mode (refuse beyond this)
+    go_loot_arrive_timeout_s = 45, -- legacy (movement budget now lives in TurboLoot.mac)
+    go_loot_window_timeout_s = 6,  -- legacy (loot-window budget now lives in TurboLoot.mac)
     patch_lock_poll_s = 1.0,       -- how often to check for the patcher's turbo_patch.lock
     -- Scripts stopped (on this box) when the patch lock appears, so the updater
     -- can replace files cleanly. The shared config dir means every box sees the
