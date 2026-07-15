@@ -1,0 +1,238 @@
+| turbo_reclaim_lotto.mac - Alt-currency reclaim, lottery items, then reclaim again
+| @version turbo_reclaim_lotto.mac 1.4.1
+| Install in Macros. GUI: Reclaim + Lotto button runs /mac turbo_reclaim_lotto
+#warning
+#turbo 20
+
+Sub Main
+
+/declare reclaimPass1 int local
+/declare reclaimPass2 int local
+/declare luckyCoins int local 0
+/declare luckyTickets int local 0
+/declare supplySacks int local 0
+/declare gemBags int local 0
+/declare lottoOpened int local 0
+
+/call TurboReclaimAltCurr
+/varset reclaimPass1 ${Macro.Return}
+
+| ----- lotto items -----
+/while (${FindItemCount[Lucky Coin]}>0) {
+	/call UseLuckyCoinFast
+	/if (!${Macro.Return.Equal[TRUE]}) /break
+	/varcalc luckyCoins ${luckyCoins}+1
+}
+
+/while (${FindItemCount[A Lucky Ticket]}>0) {
+	/call UseClicky "A Lucky Ticket"
+	/if (!${Macro.Return.Equal[TRUE]}) /break
+	/varcalc luckyTickets ${luckyTickets}+1
+	/call ClearCursor
+}
+
+/while (${FindItemCount[Spelunker's Supply Sack]}>0) {
+	/itemnotify "Spelunker's Supply Sack" rightmouseup
+	/delay 2
+	/while (${Cursor.ID}) {
+		/autoinv
+		/delay 7
+	}
+	/delay 7
+	/varcalc supplySacks ${supplySacks}+1
+}
+
+/while (${FindItemCount[Bag of Gems]}>0) {
+	/itemnotify "Bag of Gems" rightmouseup
+	/delay 2
+	/while (${Cursor.ID}) {
+		/autoinv
+		/delay 7
+	}
+	/delay 7
+	/varcalc gemBags ${gemBags}+1
+}
+
+| ----- second reclaim: lotto can add alt-currency; sweep currency tab again -----
+/varset lottoOpened ${Math.Calc[${luckyCoins}+${luckyTickets}+${supplySacks}+${gemBags}].Int}
+/if (${lottoOpened}>0) {
+	/call TurboReclaimAltCurr
+	/varset reclaimPass2 ${Macro.Return}
+} else {
+	/varset reclaimPass2 0
+}
+
+/echo \at[TurboRL]\ag Done.\aw Reclaim clicks: \ag${Math.Calc[${reclaimPass1}+${reclaimPass2}].Int}\aw (\ay${reclaimPass1}\aw+\ay${reclaimPass2}\aw).\ax
+/echo \at[TurboRL]\aw Lotto opened: \ag${lottoOpened}\aw (coins \ay${luckyCoins}\aw, tickets \ay${luckyTickets}\aw, sacks \ay${supplySacks}\aw, gems \ay${gemBags}\aw).\ax
+
+/call ClearCursor
+/call CloseInventory
+
+/clean
+
+/end
+
+| =====================================================================
+| USE LUCKY COIN FAST
+| Lucky Coin is a simple one-second reuse item that immediately creates a
+| cursor prize. Tickets keep the slower UseClicky path below
+| =====================================================================
+Sub UseLuckyCoinFast
+	/declare lcStartCount int local 0
+	/declare lcWait int local 0
+	/declare lcTimer int local 0
+
+	/if (!${FindItem[=Lucky Coin].ID}) /return FALSE
+	/if (${Cursor.ID}) /return FALSE
+
+	/varset lcTimer ${FindItem[=Lucky Coin].Timer}
+	/if (${lcTimer} > 0) /delay ${Math.Calc[${lcTimer}*10+2].Int}
+
+	/varset lcStartCount ${FindItemCount[=Lucky Coin]}
+	/useitem "Lucky Coin"
+
+	/delay 3 ${Cursor.ID}
+	/if (${Cursor.ID}) {
+		/autoinventory
+		/delay 3 !${Cursor.ID}
+		/if (${Cursor.ID}) {
+			/autoinv
+			/delay 3 !${Cursor.ID}
+		}
+	}
+
+	/varset lcWait 0
+	/while (${FindItemCount[=Lucky Coin]} >= ${lcStartCount} && ${lcWait}<12) {
+		/if (${Cursor.ID}) {
+			/autoinventory
+			/delay 2 !${Cursor.ID}
+		}
+		/delay 1
+		/varcalc lcWait ${lcWait}+1
+	}
+
+	/if (${Cursor.ID}) /call ClearCursor
+	/if (${FindItemCount[=Lucky Coin]} >= ${lcStartCount}) /return FALSE
+
+/return TRUE
+
+| =====================================================================
+| USE CLICKY - right-click an item and wait for it to be usable again.
+| For guarded stackable consumables (A Lucky Ticket) only.
+| Do NOT use for charged expendables (Supply Sack, Bag of Gems) -
+| those are handled inline in Main with a cursor-drain loop.
+| Flow:
+|   1. Skip if item's reuse timer > 0 (already on cooldown from prior mac)
+|   2. Fire /itemnotify rightmouseup
+|   3. Wait briefly for Me.Casting.ID to populate (cast started)
+|   4. If cast started, wait for it to finish (Me.Casting.ID clears)
+|   5. Final guard delay so the client's recast-time gate releases
+|   6. Consumption check: count must decrease (cursor-padded for same-item prizes)
+| Returns TRUE on a successful click; FALSE if item vanished or timer blocked
+| =====================================================================
+Sub UseClicky(string itemName)
+	/declare ucTimer int local 0
+	/declare ucStartCount int local 0
+	/declare ucCastWait int local 0
+	/declare ucCursorPad int local 0
+
+	/if (!${FindItem[${itemName}].ID}) /return FALSE
+
+	| Pre-wait: if .Timer reports leftover cooldown, wait that first.
+	/varset ucTimer ${FindItem[${itemName}].Timer}
+	/if (${ucTimer} > 0) {
+		/delay ${Math.Calc[${ucTimer}*10+3].Int}
+	}
+
+	| Count stack before click - used to confirm consumption.
+	/varset ucStartCount ${FindItemCount[${itemName}]}
+
+	/itemnotify "${itemName}" rightmouseup
+
+	| Brief probe for a non-instant cast. 0.5s window.
+	/while (${ucCastWait} < 5 && !${Me.Casting.ID}) {
+		/delay 1
+		/varcalc ucCastWait ${ucCastWait}+1
+	}
+	/if (${Me.Casting.ID}) {
+		/delay 50 !${Me.Casting.ID}
+	}
+
+	/delay 11
+
+	/if (${Cursor.ID} && ${Cursor.Name.Equal[${itemName}]}) /varset ucCursorPad ${Cursor.Stack}
+	/if (${Math.Calc[${FindItemCount[${itemName}]}-${ucCursorPad}].Int} >= ${ucStartCount}) /return FALSE
+
+/return TRUE
+
+Sub ClearCursor
+
+/declare clearTries int local 0
+
+/while (${Cursor.ID} && ${clearTries}<10) {
+	/autoinventory
+	/delay 5 !${Cursor.ID}
+	/if (${Cursor.ID}) {
+		/autoinv
+		/delay 5 !${Cursor.ID}
+	}
+	/varcalc clearTries ${clearTries}+1
+}
+
+/if (${Cursor.ID}) /echo \at[TurboRL]\ar WARNING: Cursor still has \aw${Cursor.Name}\ar. Inventory may be full.\ax
+
+/return
+
+Sub CloseInventory
+
+/if (${Window[InventoryWindow].Open}) {
+	/nomodkey /notify InventoryWindow DoneButton leftmouseup
+	/delay 5 !${Window[InventoryWindow].Open}
+}
+
+/if (${Window[InventoryWindow].Open}) /windowstate InventoryWindow close
+
+/return
+
+Sub TurboReclaimAltCurr
+
+/declare i int local
+/declare ListID int local
+/declare money[5] string local
+/declare reclaimCount int local 0
+/declare hasCurrency int local 0
+/varset money[1] Celestial Crest
+/varset money[2] Diamond Coin
+/varset money[3] Gold Coin
+/varset money[4] Planar Symbol
+/varset money[5] Taelosian Symbol
+
+/for i 1 to 5
+	/if (${FindItemCount[${money[${i}]}]}>0) /varcalc hasCurrency ${hasCurrency}+1
+/next i
+
+/if (${hasCurrency}==0) /return 0
+
+/e3p on
+/delay 1
+/if (!${Window[InventoryWindow]}) /invoke ${Window[InventoryWindow].DoOpen}
+/delay 3
+/notify InventoryWindow IW_Subwindows tabselect 5
+/delay 3
+
+/for i 1 to 5
+	/if (${FindItemCount[${money[${i}]}]}==0) /continue
+	/delay 1
+	/varset ListID ${Window[InventoryWindow].Child[IW_AltCurr_PointList].List[=${money[${i}]}s,2]}
+	/if (${ListID}<=0) /continue
+	/delay 1
+	/notify InventoryWindow IW_AltCurr_PointList listselect ${ListID} leftmouseup
+	/delay 1
+	/notify InventoryWindow IW_AltCurr_Reclaimbutton leftmouseup
+	/varcalc reclaimCount ${reclaimCount}+1
+	/delay 2
+/next i
+
+/e3p off
+
+/return ${reclaimCount}
