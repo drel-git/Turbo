@@ -254,10 +254,22 @@ end
 -- Returns true, or false + a token describing why it refused.
 function M.request(payload)
     payload = type(payload) == "table" and payload or {}
-    if job then return false, "busy" end
     local corpse_id = tonumber(payload.corpse_id) or 0
+    local item_name = tostring(payload.item_name or "")
+    if job then
+        -- Duplicate clicks / double actor delivery while reveal/nav is already
+        -- running: treat the same corpse+item as still in progress, not busy.
+        local same = (tonumber(job.corpse_id) or 0) == corpse_id
+            and tostring(job.item_name or ""):lower() == item_name:lower()
+        if same then
+            local reply = tostring(payload.reply_to or "")
+            if reply ~= "" then job.reply_to = reply end
+            return true, "already"
+        end
+        return false, "busy"
+    end
     if corpse_id <= 0 then return false, "no_corpse_id" end
-    if tostring(payload.item_name or "") == "" then return false, "no_item" end
+    if item_name == "" then return false, "no_item" end
     local okC, combat = pcall(function() return mq.TLO.Me.Combat() == true end)
     if okC and combat then return false, "in_combat" end
 
@@ -271,7 +283,7 @@ function M.request(payload)
     local max_dist = tonumber(CFG.go_loot_max_distance) or 400
     local dist = corpse_distance(corpse_id)
     job = {
-        item_name = tostring(payload.item_name or ""),
+        item_name = item_name,
         item_id = tonumber(payload.item_id) or 0,
         corpse_id = corpse_id,
         reply_to = tostring(payload.reply_to or ""),

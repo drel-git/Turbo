@@ -1,3 +1,8 @@
+1.2.9
+- Go loot: duplicate Go clicks / double actor delivery no longer report "busy"
+  while the same corpse job is already revealing or navigating; ack "going" on
+  accept so the panel does not stick on a false busy from the duplicate.
+
 1.2.8
 - Go loot: if the corpse spawn is not visible (common after TurboLoot hidecorpse),
   unhide with /hidecorpse none like Reloot, wait briefly, retry once, then nav/loot;

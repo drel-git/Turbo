@@ -1189,25 +1189,35 @@ end
 -- runs in the mailbox owner = bg responder).
 function M.on_go_loot(msg)
     if type(msg) ~= "table" then return end
+    local item_name = tostring(msg.item_name or "")
+    local corpse_id = tonumber(msg.corpse_id) or 0
+    local reply_to = trim(msg.from or "")
     local ok, err = require('go_loot').request({
-        item_name = tostring(msg.item_name or ""),
+        item_name = item_name,
         item_id = tonumber(msg.item_id) or 0,
-        corpse_id = tonumber(msg.corpse_id) or 0,
-        reply_to = trim(msg.from or ""),
+        corpse_id = corpse_id,
+        reply_to = reply_to,
     })
-    if not ok then
-        pcall(function()
-            local Engine = require('engine').Engine
-            if Engine and Engine.send_go_loot_result then
-                Engine.send_go_loot_result(trim(msg.from or ""), {
-                    item_name = tostring(msg.item_name or ""),
-                    corpse_id = tonumber(msg.corpse_id) or 0,
-                    ok = false,
-                    note = tostring(err or "busy"),
-                })
-            end
-        end)
-    end
+    pcall(function()
+        local Engine = require('engine').Engine
+        if not (Engine and Engine.send_go_loot_result) then return end
+        if ok and err ~= "already" then
+            -- Ack so the panel shows "going" instead of staying on "sent".
+            Engine.send_go_loot_result(reply_to, {
+                item_name = item_name,
+                corpse_id = corpse_id,
+                ok = true,
+                note = "going",
+            })
+        elseif not ok then
+            Engine.send_go_loot_result(reply_to, {
+                item_name = item_name,
+                corpse_id = corpse_id,
+                ok = false,
+                note = tostring(err or "busy"),
+            })
+        end
+    end)
 end
 
 -- Origin side: the runner's outcome arrived. Print it, record it, and forward
@@ -1237,7 +1247,8 @@ function M.on_go_loot_result(msg)
     -- Same ownership refresh as need-confirm: ask the looter for a fast lite
     -- inventory snap so BiS / needs_index drop them as needers without a hitch
     -- (async actor request; disk flush happens when the reply lands).
-    local looted = msg.ok == true or note == "looted"
+    -- Only "looted" — not the interim "going" ack.
+    local looted = note == "looted"
     if looted and who ~= "" and who:lower() ~= me_name():lower() then
         local server = tostring(mq.TLO.MacroQuest.Server() or "?")
         local char_key = server .. "_" .. who
