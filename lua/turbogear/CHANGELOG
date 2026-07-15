@@ -1,3 +1,8 @@
+1.2.16
+- Go loot: MQ was dropping multi-word item names when passed as a Sub string
+  arg (`[GOLOOT] starting (ID: n)` with no name → false not_found / "item gone").
+  GO mode now keeps the name in outer `goItemName` only.
+
 1.2.15
 - Go loot: hand the excursion to TurboLoot (`/mac TurboLoot go <corpseId> <Item>`).
   TurboGear only dispatches and reports panel status from `/tgearbg golootdone`

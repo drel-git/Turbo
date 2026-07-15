@@ -1111,6 +1111,7 @@ local function set_go_status(item_name, character, text)
     }
     local terminal = {
         looted = true, corpse_gone = true, too_far = true, not_found = true,
+        empty_corpse = true, lore = true,
         timeout_move = true, timeout_job = true, no_target = true,
         no_window = true, window_closed = true, loot_failed = true,
         busy = true, in_combat = true, no_corpse_id = true, failed = true,

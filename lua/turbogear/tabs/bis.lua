@@ -882,6 +882,7 @@ local GO_LOOT_NOTES = {
     looting = "looting",
     busy = "runner busy", in_combat = "in combat",
     corpse_gone = "corpse gone", too_far = "too far", not_found = "item gone",
+    empty_corpse = "empty corpse", lore = "lore blocked",
     timeout_move = "couldn't reach", timeout_job = "timed out",
     no_target = "no target",
     no_window = "window didn't open", window_closed = "window closed",

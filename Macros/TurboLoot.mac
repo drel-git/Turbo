@@ -149,7 +149,9 @@ Sub Main
         }
         /call PauseE3Logic
         /call StopChaseForUtility
-        /call GoLootOneItem ${goCorpseID} "${goItemName}"
+        | Do not pass goItemName as a Sub string arg — MQ drops/splits multi-word
+        | names. GoLootOneItem reads the outer goItemName directly.
+        /call GoLootOneItem ${goCorpseID}
         /call Cleanup
         /return
     }
@@ -5478,22 +5480,24 @@ Sub BuildGoItemName
 | GO LOOT (TurboGear) — navigate to one corpse and loot one item by name.
 | Uses the same pause/nav/loot/confirm primitives as normal TurboLoot so we
 | do not reimplement MQ timing in Lua.
+| Item name lives in outer goItemName (BuildGoItemName); do not pass it as a
+| Sub string parameter — MQ empties/splits multi-word names on /call.
 | ---------------------------------------------------------------------
-Sub GoLootOneItem(int corpseId, string itemName)
-    /echo ${tlTag} [GOLOOT] starting ${itemName} (ID: ${corpseId})
-    /squelch /tgearbg golootdone starting ${corpseId} ${itemName}
+Sub GoLootOneItem(int corpseId)
+    /echo ${tlTag} [GOLOOT] starting ${goItemName} (ID: ${corpseId})
+    /squelch /tgearbg golootdone starting ${corpseId} ${goItemName}
     /squelch /hidecorpse none
     /delay 20 ${Spawn[id ${corpseId}].ID} == ${corpseId}
     /if (${Spawn[id ${corpseId}].ID} != ${corpseId}) {
         /echo ${tlTag} [GOLOOT] failed corpse_gone (ID: ${corpseId})
-        /squelch /tgearbg golootdone failed corpse_gone ${corpseId} ${itemName}
+        /squelch /tgearbg golootdone failed corpse_gone ${corpseId} ${goItemName}
         /return
     }
 
     /declare dist float local ${Spawn[id ${corpseId}].Distance3D}
     /if (${dist} > 400) {
         /echo ${tlTag} [GOLOOT] failed too_far (ID: ${corpseId})
-        /squelch /tgearbg golootdone failed too_far ${corpseId} ${itemName}
+        /squelch /tgearbg golootdone failed too_far ${corpseId} ${goItemName}
         /return
     }
 
@@ -5501,7 +5505,7 @@ Sub GoLootOneItem(int corpseId, string itemName)
     /delay 5 ${Target.ID} == ${corpseId}
     /if (${Target.ID} != ${corpseId}) {
         /echo ${tlTag} [GOLOOT] failed no_target (ID: ${corpseId})
-        /squelch /tgearbg golootdone failed no_target ${corpseId} ${itemName}
+        /squelch /tgearbg golootdone failed no_target ${corpseId} ${goItemName}
         /return
     }
 
@@ -5521,7 +5525,7 @@ Sub GoLootOneItem(int corpseId, string itemName)
     /delay 3 ${Target.ID} == ${corpseId}
     /if (${Target.ID} != ${corpseId} || ${Target.Distance} > 20) {
         /echo ${tlTag} [GOLOOT] failed timeout_move (ID: ${corpseId})
-        /squelch /tgearbg golootdone failed timeout_move ${corpseId} ${itemName}
+        /squelch /tgearbg golootdone failed timeout_move ${corpseId} ${goItemName}
         /return
     }
 
@@ -5536,12 +5540,12 @@ Sub GoLootOneItem(int corpseId, string itemName)
     }
     /if (!${Window[LootWnd].Open}) {
         /echo ${tlTag} [GOLOOT] failed no_window (ID: ${corpseId})
-        /squelch /tgearbg golootdone failed no_window ${corpseId} ${itemName}
+        /squelch /tgearbg golootdone failed no_window ${corpseId} ${goItemName}
         /return
     }
     /if (${Corpse.Items} <= 0) {
-        /echo ${tlTag} [GOLOOT] failed not_found (ID: ${corpseId})
-        /squelch /tgearbg golootdone failed not_found ${corpseId} ${itemName}
+        /echo ${tlTag} [GOLOOT] failed empty_corpse (ID: ${corpseId})
+        /squelch /tgearbg golootdone failed empty_corpse ${corpseId} ${goItemName}
         /call TryCloseLootWindow
         /return
     }
@@ -5552,8 +5556,8 @@ Sub GoLootOneItem(int corpseId, string itemName)
     /declare slotName string local
     /declare wantId int local 0
     /if (${scanMax} < 8) /varset scanMax 8
-    /if (${Corpse.Item[=${itemName}].ID}) /varset wantId ${Corpse.Item[=${itemName}].ID}
-    /if (!${wantId} && ${Corpse.Item[${itemName}].ID}) /varset wantId ${Corpse.Item[${itemName}].ID}
+    /if (${Corpse.Item[=${goItemName}].ID}) /varset wantId ${Corpse.Item[=${goItemName}].ID}
+    /if (!${wantId} && ${Corpse.Item[${goItemName}].ID}) /varset wantId ${Corpse.Item[${goItemName}].ID}
 
     /for i 1 to ${scanMax}
         /if (!${Corpse.Item[${i}].ID}) /goto :GoLootNextSlot
@@ -5562,7 +5566,7 @@ Sub GoLootOneItem(int corpseId, string itemName)
             /varset slot ${i}
             /goto :GoLootHaveSlot
         }
-        /if (${slotName.Equal[${itemName}]}) {
+        /if (${slotName.Equal[${goItemName}]}) {
             /varset slot ${i}
             /goto :GoLootHaveSlot
         }
@@ -5571,26 +5575,26 @@ Sub GoLootOneItem(int corpseId, string itemName)
 
     :GoLootHaveSlot
     /if (${slot} <= 0) {
-        /echo ${tlTag} [GOLOOT] failed not_found (ID: ${corpseId})
-        /squelch /tgearbg golootdone failed not_found ${corpseId} ${itemName}
+        /echo ${tlTag} [GOLOOT] failed not_found ${goItemName} (ID: ${corpseId})
+        /squelch /tgearbg golootdone failed not_found ${corpseId} ${goItemName}
         /call TryCloseLootWindow
         /return
     }
 
     /varset _skipCorpseID ${corpseId}
     /varset LoreBlocked FALSE
-    /call LootTheItem ${slot} "${itemName}" 999999 KEEP
+    /call LootTheItem ${slot} "${goItemName}" 999999 KEEP
     /doevents
 
     /if (!${Corpse.Item[${slot}].ID}) {
-        /echo ${tlTag} [GOLOOT] looted ${itemName} (ID: ${corpseId})
-        /squelch /tgearbg golootdone looted ${corpseId} ${itemName}
+        /echo ${tlTag} [GOLOOT] looted ${goItemName} (ID: ${corpseId})
+        /squelch /tgearbg golootdone looted ${corpseId} ${goItemName}
     } else /if (${LoreBlocked}) {
         /echo ${tlTag} [GOLOOT] failed lore (ID: ${corpseId})
-        /squelch /tgearbg golootdone failed lore ${corpseId} ${itemName}
+        /squelch /tgearbg golootdone failed lore ${corpseId} ${goItemName}
     } else {
         /echo ${tlTag} [GOLOOT] failed loot_failed (ID: ${corpseId})
-        /squelch /tgearbg golootdone failed loot_failed ${corpseId} ${itemName}
+        /squelch /tgearbg golootdone failed loot_failed ${corpseId} ${goItemName}
     }
 
     /call TryCloseLootWindow
