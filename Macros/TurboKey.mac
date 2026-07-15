@@ -1,0 +1,120 @@
+|   *  *  *  *  *  *  *  *  *  *  [  T u r b o K e y  ]  *  *  *  *  *  *  *  *  *  *
+|  _____ _   _____________  _____ _   __ _______   __
+| |_   _| | | | ___ \ ___ \|  _  | | / /|  ___\ \ / /
+|   | | | | | | |_/ / |_/ /| | | | |/ / | |__  \ V /
+|   | | | | | |    /| ___ \| | | |    \ |  __|  \ /
+|   | | | |_| | |\ \| |_/ /\ \_/ / |\  \| |___  | |
+|   \_/  \___/\_| \_\____/  \___/\_| \_/\____/  \_/
+|---------------------------------------------------------------------------------->
+|     https://www.github.com/drel-git/TurboLoot   (INI tag helper)
+|          TurboKey v3.9.74  -  cursor -> [ItemLimits]
+| @version TurboKey.mac 3.9.74
+|---------------------------------------------------------------------------------->
+|
+| Usage: /mac TurboKey KEEP|SELL|IGNORE|SKIP|BANK|TRIBUTE|DESTROY|ANNOUNCE|#
+| Writes to: turboloot.ini -> [ItemLimits] (same path as TurboLoot)
+| For DESTROY/IGNORE/SKIP: marks in INI then destroys item on cursor
+| For a number (e.g. 5): marks item=5 in INI then /autoinv (loot up to N)
+| For others: marks in INI then /autoinv
+| Overwrites existing rule for the exact same item name
+
+Sub Main(string RuleIn)
+  /declare section string local ItemLimits
+  /declare rule string local ${String[${RuleIn}].Upper}
+  /declare itemName string local ${Cursor.Name}
+
+  | Resolve INI path (match TurboLoot/Lua profile: selected profile first, then default)
+  /declare tlIniFile string local "../Config/turboloot.ini"
+  /declare tlIniProfile string local ${MQ2Mono.Query[e3,TurboLootIni]}
+  /if (${tlIniProfile.Length} && !${tlIniProfile.Equal[NULL]} && !${tlIniProfile.Equal[null]}) {
+    /if (${Ini.File[../Config/${tlIniProfile}].Exists}) {
+      /varset tlIniFile "../Config/${tlIniProfile}"
+    } else /if (${Ini.File[../Macros/${tlIniProfile}].Exists}) {
+      /varset tlIniFile "../Macros/${tlIniProfile}"
+    }
+  }
+  /if (!${Ini.File[${tlIniFile}].Exists}) {
+    /varset tlIniFile "../Config/turboloot.ini"
+  }
+  /if (!${Ini.File[${tlIniFile}].Exists}) {
+    /varset tlIniFile "../Macros/turboloot.ini"
+  }
+
+  /if (!${rule.Length} || ${rule.Equal[HELP]}) {
+    /echo \au<<< \ar--------------- \atTurboKey Commands \ar--------------- \au>>>\ax
+    /echo \awVersion: \ag3.9.74\aw  Purpose: tag cursor items into turboloot.ini\ax
+    /echo \aw \ax
+    /echo \at==== \aySUITE MAP \at====\ax
+    /echo \aw  \agTurboKey.mac\ax — tag cursor item into turboloot.ini\ax
+    /echo \aw  \agTurboLoot.mac\ax — loot/sell/bank/tribute/destroy by INI rules\ax
+    /echo \aw  \ag/lua run Turbo\ax — auto-loot controller and looter picker\ax
+    /echo \aw  \agTurboGive.mac\ax — share/collect/hand items and coin between characters\ax
+    /echo \aw \ax
+    /echo \at==== \ayUSAGE \at====\ax
+    /echo \aw  Hold item on cursor, then run:\ax
+    /echo \aw    \ag/mac turbokey KEEP\ax — always loot this item\ax
+    /echo \aw    \ag/mac turbokey SELL\ax — loot and mark for selling\ax
+    /echo \aw    \ap/mac turbokey BANK\ax — loot and mark for banking\ax
+    /echo \aw    \ay/mac turbokey TRIBUTE\ax — loot and mark for tribute\ax
+    /echo \aw    \ar/mac turbokey DESTROY\ax — always destroy this item\ax
+    /echo \aw    \ao/mac turbokey IGNORE\ax \aw(or \aoSKIP\ax) — skip this item entirely\ax
+    /echo \aw    \at/mac turbokey ANNOUNCE\ax — skip and announce so another character can loot it\ax
+    /echo \aw    \ag/mac turbokey \at5\ax — set loot limit (keep up to N)\ax
+    /echo \aw \ax
+    /echo \at==== \ayNOTES \at====\ax
+    /echo \aw  Writes to turboloot.ini [ItemLimits]\ax
+    /echo \aw  DESTROY/IGNORE/SKIP destroys item on cursor\ax
+    /echo \aw  All others return item to inventory\ax
+    /echo \aw  Overwrites existing rule for same item\ax
+    /echo \aw \ax
+    /echo \aw  \aohttps://github.com/drel-git/TurboLoot\ax
+    /return
+  }
+
+  | Check for numeric rule (e.g. /mac TurboKey 5 -> Item=5)
+  /declare isNumeric bool local FALSE
+  /if (${Int[${RuleIn}]} > 0) /varset isNumeric TRUE
+
+  /if (!${isNumeric} && !${rule.Equal[KEEP]} && !${rule.Equal[SELL]} && !${rule.Equal[IGNORE]} && !${rule.Equal[SKIP]} && !${rule.Equal[BANK]} && !${rule.Equal[TRIBUTE]} && !${rule.Equal[ANNOUNCE]} && !${rule.Equal[ALL]} && !${rule.Equal[DESTROY]}) {
+    /echo \arInvalid rule: \ay${RuleIn}\ar. Valid: KEEP SELL IGNORE SKIP BANK TRIBUTE DESTROY ANNOUNCE or a number (e.g. 5)
+    /return
+  }
+
+  | For numeric rules, write the original number (not uppercased)
+  /if (${isNumeric}) /varset rule ${RuleIn}
+
+  | Cursor TLO can lag for a frame when the macro starts from a hotkey/UI click.
+  /if (!${itemName.Length} || ${itemName.Equal[NULL]}) {
+    /delay 2 ${Cursor.ID}
+    /varset itemName ${Cursor.Name}
+  }
+
+  /if (!${itemName.Length} || ${itemName.Equal[NULL]}) {
+    /echo \arYou have nothing valid on your cursor.
+    /return
+  }
+
+  | Read any existing value (if present) so we can message clearly
+  /declare oldRule string local ${Ini["${tlIniFile}","${section}","${itemName}"]}
+
+  | This SETS the value; if the key already exists it is overwritten in-place
+  /ini "${tlIniFile}" "${section}" "${itemName}" "${rule}"
+
+  /if (${oldRule.Length}) {
+    /echo \atUpdated \ag${itemName}\at in \ag[${section}]\at: \ay${oldRule}\at -> \ag${rule}\at.
+  } else {
+    /echo \atAdded \ag${itemName}\at to \ag[${section}]\at as \ag${rule}\at.
+  }
+
+  | DESTROY and IGNORE: destroy item on cursor (fast path)
+  /if (${rule.Equal[DESTROY]} || ${rule.Equal[IGNORE]} || ${rule.Equal[SKIP]}) {
+    /destroy
+    /delay 1
+    /if (${Window[ConfirmationDialogBox].Open}) /notify ConfirmationDialogBox Yes_Button leftmouseup
+    /delay 5 !${Cursor.ID}
+    /return
+  }
+
+  | All other rules: return item to inventory
+  /autoinv
+/return
