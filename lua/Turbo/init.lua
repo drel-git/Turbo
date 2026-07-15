@@ -276,7 +276,20 @@ if cliMode then
 end
 
 local scriptName = 'Turbo'
-local TURBO_VERSION = '3.9.87'  -- single source of truth; @version tag above matches this
+-- Suite version, parsed from lua/turbogear/CHANGELOG (the same file TurboGear and
+-- TurboPatcher read), so every surface shows one number. The literal is only a
+-- fallback for broken installs; per-file @version tags remain maintenance metadata.
+local TURBO_VERSION = '1.2.1'
+do
+    local f = io.open((mq.luaDir or 'lua') .. '/turbogear/CHANGELOG', 'r')
+    if f then
+        for line in f:lines() do
+            local v = line:match('^%s*(%d+%.%d+%.%d+)%s*$')
+            if v then TURBO_VERSION = v break end
+        end
+        f:close()
+    end
+end
 local TURBO_HUB_NAME = 'Turbo'
 local TURBO_DOCTOR_BIND = '/turbodoctor'
 local TURBO_URL = 'github.com/drel-git/TurboLoot'
@@ -12379,6 +12392,21 @@ end
 
 while TG.windowOpen do
     require('Turbo.wares').processPendingActions(TG)
+    -- Patcher shutdown hook: TurboPatcher drops turbo_patch.lock in the shared
+    -- config dir before replacing files. TurboGear stops the rest of the suite;
+    -- the hub only needs to end any running macro and close itself.
+    if os.clock() >= (TG.patchLockNextCheck or 0) then
+        TG.patchLockNextCheck = os.clock() + 1.0
+        -- Field, not a local: this chunk is at LuaJIT's 200-local limit here.
+        TG.patchLockHandle = io.open((mq.configDir or 'config') .. '/turbo_patch.lock', 'rb')
+        if TG.patchLockHandle then
+            TG.patchLockHandle:close()
+            TG.patchLockHandle = nil
+            print('[Turbo] patch lock detected - closing so the updater can replace files.')
+            pcall(function() mq.cmd('/squelch /endmacro') end)
+            TG.windowOpen = false
+        end
+    end
     mq.delay(100)
 end
 

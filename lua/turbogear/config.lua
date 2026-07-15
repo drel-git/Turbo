@@ -35,7 +35,7 @@ M.CFG = {
     script_name  = 'TurboGear',    -- display/settings/cache name
     lua_name     = 'turbogear',     -- folder/module name used by /lua run and /lua stop
     bg_lua_name  = 'turbogear_bg',  -- wrapper responder name; leaves /lua run turbogear free for UI
-    version      = '1.2.0',
+    version      = '1.2.1',
     mailbox      = 'turbogear',     -- shared actor mailbox name across all boxes
     proto        = 1,              -- snapshot protocol version (guards mismatched boxes)
     frame_round  = 5.0,
@@ -54,6 +54,7 @@ M.CFG = {
     -- can replace files cleanly. The shared config dir means every box sees the
     -- lock and stops its own Turbo. Stopping a non-running script is a harmless no-op.
     patch_stop_scripts = {
+        "Turbo",
         "turbogear", "turbogear_bg", "turbogear_autostart",
         "TurboMobs", "turbomobs_logic", "TurboRolls",
         "ToggleTurboLoot", "ToggleMeleeDist",

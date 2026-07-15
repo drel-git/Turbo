@@ -1,3 +1,14 @@
+1.2.1
+- Updates: the patch-lock stop now covers the whole suite. The Turbo hub watches
+  for the patcher's lock file itself (and ends any running macro), and TurboGear
+  stops the hub along with the other Turbo scripts, so clicking Update while
+  everything is running cleanly shuts it all down on every box.
+- One version number everywhere: the Turbo hub window now shows the suite
+  version from this CHANGELOG (the same number TurboPatcher displays) instead
+  of its old internal 3.9.x script version.
+- Releases: the Linux zip is now built and attached automatically when a
+  release is published on GitHub, so it always matches the released source.
+
 1.2.0
 - Announce: linked items now resolve by name before parsed-link id, so shared
   id ranges (for example the Jonas Dagmire hand bones) can no longer credit the
