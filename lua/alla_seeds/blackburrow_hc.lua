@@ -1,0 +1,171 @@
+return {
+  _meta = {
+    format = 'TurboMobsAllaSeed',
+    schema_version = 1,
+    generator = 'tools/laz_alla_seed.py',
+    generated_at = '2026-06-03',
+    source = 'Project Lazarus Alla',
+    report = {
+      records = 13,
+      points = 18,
+      records_without_points = 0,
+      duplicate_points = 6,
+      points_missing_timers = 0,
+    },
+  },
+  zones = {
+    blackburrow_hc = {
+      zone = 'blackburrow_hc',
+      named = {
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 2017109,
+          id = 2017109,
+          name = 'A Giant Plague Rat',
+          source_url = 'https://lazaruseq.com/alla/npcs/2017109',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 200.0, y = -153.0, z = 4.0, chance = 50.0, respawn_seconds = 600, source_url = 'https://lazaruseq.com/alla/npcs/2017109', timer_source = 'lazarus_alla', ph_names = { 'a grizzly bear', 'a gnoll shaman', 'a gnoll scout', 'a gnoll', 'a brown bear', 'a gnoll guardsman', 'a burly gnoll', 'Tranixx Darkpaw' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 2017036,
+          id = 2017036,
+          name = 'A Gnoll Brewer',
+          source_url = 'https://lazaruseq.com/alla/npcs/2017036',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 42.0, y = 33.0, z = -147.0, chance = 25.0, respawn_seconds = 600, source_url = 'https://lazaruseq.com/alla/npcs/2017036', timer_source = 'lazarus_alla', ph_names = { 'a gnoll guardsman', 'Master Brewer' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 2017037,
+          id = 2017037,
+          name = 'A Gnoll Commander',
+          source_url = 'https://lazaruseq.com/alla/npcs/2017037',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -37.0, y = -96.0, z = -34.0, chance = 50.0, respawn_seconds = 600, source_url = 'https://lazaruseq.com/alla/npcs/2017037', timer_source = 'lazarus_alla', ph_names = { 'a gnoll guardsman' } },
+            { x = -114.0, y = 292.0, z = -34.0, chance = 0.0, respawn_seconds = 600, source_url = 'https://lazaruseq.com/alla/npcs/2017037', timer_source = 'lazarus_alla', ph_names = { 'a gnoll shaman', 'an elite gnoll guard', 'Refugee Splitpaw', 'Splitpaw Commander' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 2017030,
+          id = 2017030,
+          name = 'A Gnoll Courier',
+          source_url = 'https://lazaruseq.com/alla/npcs/2017030',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 40.0, y = -162.0, z = 3.0, chance = 100.0, respawn_seconds = 1500, source_url = 'https://lazaruseq.com/alla/npcs/2017030', timer_source = 'lazarus_alla', ph_names = {  } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 2017038,
+          id = 2017038,
+          name = 'A Gnoll Tactician',
+          source_url = 'https://lazaruseq.com/alla/npcs/2017038',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 117.0, y = -85.0, z = -37.0, chance = 50.0, respawn_seconds = 600, source_url = 'https://lazaruseq.com/alla/npcs/2017038', timer_source = 'lazarus_alla', ph_names = { 'an elite gnoll guard' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 2017029,
+          id = 2017029,
+          name = 'Lord Elgnub',
+          source_url = 'https://lazaruseq.com/alla/npcs/2017029',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 146.0, y = 196.0, z = -56.0, chance = 50.0, respawn_seconds = 600, source_url = 'https://lazaruseq.com/alla/npcs/2017029', timer_source = 'lazarus_alla', ph_names = { 'a burly gnoll' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 2017050,
+          id = 2017050,
+          name = 'Mannan of the Sabertooth',
+          source_url = 'https://lazaruseq.com/alla/npcs/2017050',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 219.0, y = 166.0, z = -155.0, chance = 50.0, respawn_seconds = 600, source_url = 'https://lazaruseq.com/alla/npcs/2017050', timer_source = 'lazarus_alla', ph_names = { 'an elite gnoll guard' } },
+            { x = 363.0, y = 64.0, z = -85.0, chance = 0.0, respawn_seconds = 600, source_url = 'https://lazaruseq.com/alla/npcs/2017050', timer_source = 'lazarus_alla', ph_names = { 'a gnoll shaman', 'an elite gnoll guard', 'The Gnoll High Shaman', 'Socho Darkpaw' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 2017049,
+          id = 2017049,
+          name = 'Master Brewer',
+          source_url = 'https://lazaruseq.com/alla/npcs/2017049',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 42.0, y = 33.0, z = -147.0, chance = 25.0, respawn_seconds = 600, source_url = 'https://lazaruseq.com/alla/npcs/2017049', timer_source = 'lazarus_alla', ph_names = { 'a gnoll guardsman', 'A Gnoll Brewer' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 2017023,
+          id = 2017023,
+          name = 'Refugee Splitpaw',
+          source_url = 'https://lazaruseq.com/alla/npcs/2017023',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -114.0, y = 292.0, z = -34.0, chance = 50.0, respawn_seconds = 600, source_url = 'https://lazaruseq.com/alla/npcs/2017023', timer_source = 'lazarus_alla', ph_names = { 'a gnoll shaman', 'an elite gnoll guard', 'Splitpaw Commander', 'A Gnoll Commander' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 2017048,
+          id = 2017048,
+          name = 'Socho Darkpaw',
+          source_url = 'https://lazaruseq.com/alla/npcs/2017048',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 366.0, y = 254.0, z = -125.0, chance = 50.0, respawn_seconds = 600, source_url = 'https://lazaruseq.com/alla/npcs/2017048', timer_source = 'lazarus_alla', ph_names = { 'an elite gnoll guard' } },
+            { x = 363.0, y = 64.0, z = -85.0, chance = 0.0, respawn_seconds = 600, source_url = 'https://lazaruseq.com/alla/npcs/2017048', timer_source = 'lazarus_alla', ph_names = { 'a gnoll shaman', 'an elite gnoll guard', 'The Gnoll High Shaman', 'Mannan of the Sabertooth' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 2017035,
+          id = 2017035,
+          name = 'Splitpaw Commander',
+          source_url = 'https://lazaruseq.com/alla/npcs/2017035',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -340.0, y = 25.0, z = -20.0, chance = 50.0, respawn_seconds = 600, source_url = 'https://lazaruseq.com/alla/npcs/2017035', timer_source = 'lazarus_alla', ph_names = { 'an elite gnoll guard' } },
+            { x = -114.0, y = 292.0, z = -34.0, chance = 0.0, respawn_seconds = 600, source_url = 'https://lazaruseq.com/alla/npcs/2017035', timer_source = 'lazarus_alla', ph_names = { 'a gnoll shaman', 'an elite gnoll guard', 'Refugee Splitpaw', 'A Gnoll Commander' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 2017042,
+          id = 2017042,
+          name = 'The Gnoll High Shaman',
+          source_url = 'https://lazaruseq.com/alla/npcs/2017042',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 363.0, y = 64.0, z = -85.0, chance = 50.0, respawn_seconds = 600, source_url = 'https://lazaruseq.com/alla/npcs/2017042', timer_source = 'lazarus_alla', ph_names = { 'a gnoll shaman', 'an elite gnoll guard', 'Socho Darkpaw', 'Mannan of the Sabertooth' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 2017051,
+          id = 2017051,
+          name = 'Tranixx Darkpaw',
+          source_url = 'https://lazaruseq.com/alla/npcs/2017051',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -27.0, y = 65.0, z = 44.0, chance = 50.0, respawn_seconds = 600, source_url = 'https://lazaruseq.com/alla/npcs/2017051', timer_source = 'lazarus_alla', ph_names = { 'a gnoll' } },
+            { x = 200.0, y = -153.0, z = 4.0, chance = 0.0, respawn_seconds = 600, source_url = 'https://lazaruseq.com/alla/npcs/2017051', timer_source = 'lazarus_alla', ph_names = { 'a grizzly bear', 'a gnoll shaman', 'a gnoll scout', 'a gnoll', 'a brown bear', 'a gnoll guardsman', 'a burly gnoll', 'A Giant Plague Rat' } },
+          },
+        },
+      },
+    },
+  },
+}

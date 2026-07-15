@@ -1,0 +1,222 @@
+return {
+  _meta = {
+    format = 'TurboMobsAllaSeed',
+    schema_version = 1,
+    generator = 'tools/laz_alla_seed.py',
+    generated_at = '2026-06-16',
+    source = 'Project Lazarus Alla',
+    report = {
+      records = 18,
+      points = 19,
+      records_without_points = 0,
+      duplicate_points = 1,
+      points_missing_timers = 0,
+    },
+  },
+  zones = {
+    soldunga = {
+      zone = 'soldunga',
+      named = {
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 31118,
+          id = 31118,
+          name = 'CWG Model EXG',
+          source_url = 'https://lazaruseq.com/alla/npcs/31118',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -1055.0, y = -280.0, z = 49.0, chance = 50.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/31118', timer_source = 'lazarus_alla', ph_names = { 'CWS Model SX' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 31147,
+          id = 31147,
+          name = 'Captain Bipnubble',
+          source_url = 'https://lazaruseq.com/alla/npcs/31147',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -1098.0, y = -296.0, z = 48.0, chance = 20.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/31147', timer_source = 'lazarus_alla', ph_names = { 'gnomish miner' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 31132,
+          id = 31132,
+          name = 'Gabbie Mardoddle',
+          source_url = 'https://lazaruseq.com/alla/npcs/31132',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -1128.0, y = -307.0, z = 35.0, chance = 25.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/31132', timer_source = 'lazarus_alla', ph_names = { 'CWG Model MC', 'CWG Model CA', 'CWG Model MB' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 31136,
+          id = 31136,
+          name = 'Kindle',
+          source_url = 'https://lazaruseq.com/alla/npcs/31136',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -781.0, y = -10.0, z = 47.0, chance = 25.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/31136', timer_source = 'lazarus_alla', ph_names = { 'fire goblin' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 31126,
+          id = 31126,
+          name = 'Lord Gimblox',
+          source_url = 'https://lazaruseq.com/alla/npcs/31126',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -363.0, y = -796.0, z = 57.0, chance = 10.0, respawn_seconds = 930, source_url = 'https://lazaruseq.com/alla/npcs/31126', timer_source = 'lazarus_alla', ph_names = { 'large fire goblin' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 31001,
+          id = 31001,
+          name = 'Lynada the exiled',
+          source_url = 'https://lazaruseq.com/alla/npcs/31001',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -658.0, y = -1002.0, z = 41.0, chance = 100.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/31001', timer_source = 'lazarus_alla', ph_names = {  } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 31127,
+          id = 31127,
+          name = 'Singe',
+          source_url = 'https://lazaruseq.com/alla/npcs/31127',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -660.0, y = -288.0, z = 30.0, chance = 34.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/31127', timer_source = 'lazarus_alla', ph_names = { 'fire goblin', 'flame goblin' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 31128,
+          id = 31128,
+          name = 'Solusek goblin king',
+          source_url = 'https://lazaruseq.com/alla/npcs/31128',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -313.0, y = -789.0, z = 60.0, chance = 34.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/31128', timer_source = 'lazarus_alla', ph_names = { 'Solusek goblin', 'Solusek champion' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 31006,
+          id = 31006,
+          name = 'blazing elemental',
+          source_url = 'https://lazaruseq.com/alla/npcs/31006',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -762.0, y = -51.0, z = 25.0, chance = 50.0, respawn_seconds = 4200, source_url = 'https://lazaruseq.com/alla/npcs/31006', timer_source = 'lazarus_alla', ph_names = { 'reckless efreeti' } },
+            { x = -756.0, y = -31.0, z = 24.0, chance = 100.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/31006', timer_source = 'lazarus_alla', ph_names = {  } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 31145,
+          id = 31145,
+          name = 'fire goblin bartender',
+          source_url = 'https://lazaruseq.com/alla/npcs/31145',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -725.0, y = -722.0, z = 51.0, chance = 15.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/31145', timer_source = 'lazarus_alla', ph_names = { 'inferno goblin', 'fire goblin' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 31124,
+          id = 31124,
+          name = 'flame goblin foreman',
+          source_url = 'https://lazaruseq.com/alla/npcs/31124',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -589.0, y = -345.0, z = 38.0, chance = 25.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/31124', timer_source = 'lazarus_alla', ph_names = { 'young goblin shaman', 'flame goblin' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 31135,
+          id = 31135,
+          name = 'goblin drunkard',
+          source_url = 'https://lazaruseq.com/alla/npcs/31135',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -713.0, y = -797.0, z = 57.0, chance = 34.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/31135', timer_source = 'lazarus_alla', ph_names = { 'fire goblin', 'inferno goblin shaman' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 31022,
+          id = 31022,
+          name = 'goblin high shaman',
+          source_url = 'https://lazaruseq.com/alla/npcs/31022',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -667.0, y = -1013.0, z = 41.0, chance = 33.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/31022', timer_source = 'lazarus_alla', ph_names = { 'Solusek priest', 'Solusek mage' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 31134,
+          id = 31134,
+          name = 'inferno goblin captain',
+          source_url = 'https://lazaruseq.com/alla/npcs/31134',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -684.0, y = 81.0, z = 44.0, chance = 25.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/31134', timer_source = 'lazarus_alla', ph_names = { 'inferno goblin', 'fire goblin', 'flame goblin' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 31144,
+          id = 31144,
+          name = 'inferno goblin torturer',
+          source_url = 'https://lazaruseq.com/alla/npcs/31144',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -317.0, y = -839.0, z = 32.0, chance = 25.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/31144', timer_source = 'lazarus_alla', ph_names = { 'inferno goblin', 'fire goblin' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 31146,
+          id = 31146,
+          name = 'kobold predator',
+          source_url = 'https://lazaruseq.com/alla/npcs/31146',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -609.0, y = -330.0, z = 55.0, chance = 20.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/31146', timer_source = 'lazarus_alla', ph_names = { 'young goblin' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 31143,
+          id = 31143,
+          name = 'lava elemental',
+          source_url = 'https://lazaruseq.com/alla/npcs/31143',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -968.0, y = -136.0, z = 48.0, chance = 25.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/31143', timer_source = 'lazarus_alla', ph_names = { 'CWG Model MB' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 31085,
+          id = 31085,
+          name = 'reckless efreeti',
+          source_url = 'https://lazaruseq.com/alla/npcs/31085',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -762.0, y = -51.0, z = 25.0, chance = 50.0, respawn_seconds = 4200, source_url = 'https://lazaruseq.com/alla/npcs/31085', timer_source = 'lazarus_alla', ph_names = { 'blazing elemental' } },
+          },
+        },
+      },
+    },
+  },
+}

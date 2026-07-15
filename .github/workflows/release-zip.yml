@@ -1,0 +1,30 @@
+# Builds the suite zip (for Linux / manual installs) whenever a release is
+# published on this repo, and attaches it to that release. This keeps the zip
+# in lockstep with the released source - no manual uploads needed.
+name: Attach release zip
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  zip:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Build suite zip
+        run: |
+          zip -r "Turbo.Suite.${{ github.event.release.tag_name }}.zip" lua Macros config README.md LICENSE
+
+      - name: Attach to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" \
+            "Turbo.Suite.${{ github.event.release.tag_name }}.zip" --clobber

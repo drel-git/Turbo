@@ -1,0 +1,172 @@
+#turbo 100
+
+| turbo_xtar_heal.mac (TurboLoot tie-in)
+| @version turbo_xtar_heal.mac 1.6
+| CLR / DRU / SHM: put out-of-group raid tanks (WAR / PAL / SHD) on xtargets for extra healing.
+|
+| /mac turbo_xtar_heal — manages slots 4-13, filling out-of-group raid tanks top-down.
+| /mac turbo_xtar_heal 6 13 — optional managed slot range.
+| /mac turbo_xtar_heal Tankname — still only adds out-of-group raid tanks; same-group tanks are skipped.
+| /mac turbo_xtar_heal Tankname 6 13 — same, with optional managed slot range.
+| Exact PC spawn checks guard against pets/mounts sharing similar names.
+
+Sub Main(string arg1, string arg2, string arg3)
+
+    /declare x            int    local
+    /declare y            int    local
+    /declare startSlot    int    local 4
+    /declare endSlot      int    local 13
+    /declare tankSlot     int    local 4
+    /declare myRaidGroup  int    local
+    /declare addedCount   int    local 0
+    /declare tankList     string local
+    /declare tankName     string local
+    /declare tankSpawnID  int    local
+    /declare healerCount  int    local 0
+    /declare healerList   string local
+    /declare previewCount int    local 0
+    /declare previewList  string local
+    /declare skippedCount int    local 0
+    /declare skippedList  string local
+    /declare requestedTank string local
+    /declare requestedMode bool local FALSE
+
+    /if (!${Raid.Members}) {
+        /echo \at[TurboXT]\ar Not in a raid, exiting.\ax
+        /return
+    }
+
+    /if (${arg1.Length}) {
+        /if (${Int[${arg1}]} > 0) {
+            /varset startSlot ${Int[${arg1}]}
+            /if (${arg2.Length}) /varset endSlot ${Int[${arg2}]}
+        } else {
+            /varset requestedTank ${arg1}
+            /varset requestedMode TRUE
+            /if (${arg2.Length}) /varset startSlot ${Int[${arg2}]}
+            /if (${arg3.Length}) /varset endSlot ${Int[${arg3}]}
+        }
+    }
+
+    /if (${startSlot} < 1 || ${endSlot} > 13 || ${startSlot} > ${endSlot}) {
+        /echo \at[TurboXT]\ar Invalid xtarget range \aw${startSlot}-${endSlot}\ar. Use slots 1-13, start <= end.\ax
+        /return
+    }
+
+    /varset tankSlot ${startSlot}
+
+    /varset myRaidGroup ${Raid.Member[${Me.Name}].Group}
+    /if (${myRaidGroup} == 0) {
+        /echo \at[TurboXT]\ar Could not find my raid group, exiting.\ax
+        /return
+    }
+
+    /if (!${Select[${Me.Class.ShortName},CLR,DRU,SHM]}) {
+        /for y 0 to ${Group.Members}
+            /if (${Select[${Group.Member[${y}].Class.ShortName},CLR,DRU,SHM]}) {
+                /varcalc healerCount ${healerCount}+1
+                /if (${healerCount} > 1) {
+                    /varset healerList ${healerList}, ${Group.Member[${y}].Name}
+                } else {
+                    /varset healerList ${Group.Member[${y}].Name}
+                }
+            }
+        /next y
+
+        /for x 1 to ${Raid.Members}
+            /varset tankName ${Raid.Member[${x}].Name}
+            /if (${Select[${Raid.Member[${x}].Class.ShortName},SHD,WAR,PAL]} && ${Raid.Member[${x}].Group} != ${myRaidGroup}) {
+                /varcalc previewCount ${previewCount}+1
+                /if (${previewCount} > 1) {
+                    /varset previewList ${previewList}, ${Raid.Member[${x}].Name}
+                } else {
+                    /varset previewList ${Raid.Member[${x}].Name}
+                }
+            }
+        /next x
+
+        /if (${healerCount} > 0 && ${previewCount} > 0) {
+            /echo \at[TurboXT]\ay Preview only; not a healer. Group healer(s): \ag${healerList}\ay. Expected XTanks \aw${startSlot}-${endSlot}\ay: \aw${previewList}\ax
+            /echo \at[TurboXT]\ay To apply, run on a healer or use \ag/e3bcga /mac turbo_xtar_heal ${If[${requestedMode},${requestedTank},]}\ay.\ax
+        } else /if (${healerCount} > 0) {
+            /echo \at[TurboXT]\ay Preview only; not a healer. Group healer(s): \ag${healerList}\ay. Expected XTanks \aw${startSlot}-${endSlot}\ay: \awnone\ax
+            /echo \at[TurboXT]\ay To apply, run on a healer or use \ag/e3bcga /mac turbo_xtar_heal\ay.\ax
+        } else {
+            /echo \at[TurboXT]\ar Not a healer and no CLR/DRU/SHM found in group.\ax
+        }
+        /return
+    }
+
+    /if (${requestedMode}) {
+        /echo \at[TurboXT]\ay Filling xtarget slots \aw${startSlot}-${endSlot}\ay top-down with out-of-group raid tanks. Same-group tanks are skipped.\ax
+    } else {
+        /echo \at[TurboXT]\ay Filling xtarget slots \aw${startSlot}-${endSlot}\ay top-down with out-of-group raid tanks.\ax
+    }
+
+    /for x ${startSlot} to ${endSlot}
+        /xtar set ${x} AH
+    /next x
+
+    /for x 1 to ${Raid.Members}
+        /varset tankName ${Raid.Member[${x}].Name}
+        /if (!${Select[${Raid.Member[${x}].Class.ShortName},SHD,WAR,PAL]}) /continue
+        /if (${Raid.Member[${x}].Group} == ${myRaidGroup}) /continue
+
+            /if (${tankSlot} > ${endSlot}) {
+                /varcalc skippedCount ${skippedCount}+1
+                /if (${skippedCount} > 1) {
+                    /varset skippedList ${skippedList}, ${tankName}
+                } else {
+                    /varset skippedList ${tankName}
+                }
+                /continue
+            }
+
+            /varset tankSpawnID ${Spawn[pc =${tankName}].ID}
+            /if (!${tankSpawnID}) {
+                /echo \at[TurboXT]\ay Skipping \aw${tankName}\ay: exact PC not found in zone.\ax
+                /continue
+            }
+
+            /echo \at[TurboXT]\aw Tank -> slot \ag${tankSlot}\aw: \ag${tankName}\ax
+            /xtar set ${tankSlot} "${tankName}"
+            /delay 1s ${Me.XTarget[${tankSlot}].ID}==${tankSpawnID}
+
+            /if (${Me.XTarget[${tankSlot}].ID} != ${tankSpawnID} || !${Me.XTarget[${tankSlot}].TargetType.Equal[Specific PC]}) {
+                /echo \at[TurboXT]\ar Skipping \aw${tankName}\ar: xtarget did not resolve to exact Specific PC.\ax
+                /xtar set ${tankSlot} AH
+                /continue
+            }
+
+            /varcalc addedCount ${addedCount}+1
+            /if (${addedCount} > 1) {
+                /varset tankList ${tankList}, ${tankName}
+            } else {
+                /varset tankList ${tankName}
+            }
+
+            /varcalc tankSlot ${tankSlot}+1
+    /next x
+
+:DoneTanks
+    /if (${addedCount} > 0) {
+        /if (${requestedMode}) {
+            /echo \at[TurboXT]\ag Added out-of-group raid tank(s): \aw${tankList}\ax
+        } else {
+            /echo \at[TurboXT]\ag Added \aw${addedCount}\ag out-of-group raid tank(s): \aw${tankList}\ax
+        }
+        /if (${skippedCount} > 0) {
+            /echo \at[TurboXT]\ay Skipped \aw${skippedCount}\ay tank(s), no managed slots left: \aw${skippedList}\ax
+            /rsay [TurboXT] ${Me.Name} XTanks +${addedCount}: ${tankList} | skipped ${skippedCount}: ${skippedList}
+        } else {
+            /rsay [TurboXT] ${Me.Name} XTanks +${addedCount}: ${tankList}
+        }
+    } else {
+        /if (${requestedMode}) {
+            /echo \at[TurboXT]\ay No out-of-group raid tanks found. Requested same-group/non-tank targets are intentionally skipped.\ax
+        } else {
+            /echo \at[TurboXT]\ay No out-of-group raid tanks found.\ax
+        }
+    }
+
+/return
