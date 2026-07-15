@@ -1,0 +1,62 @@
+return {
+  _meta = {
+    format = 'TurboMobsAllaSeed',
+    schema_version = 1,
+    generator = 'tools/laz_alla_seed.py',
+    generated_at = '2026-06-16',
+    source = 'Project Lazarus Alla',
+    report = {
+      records = 2,
+      points = 19,
+      records_without_points = 0,
+      duplicate_points = 1,
+      points_missing_timers = 0,
+    },
+  },
+  zones = {
+    dulak = {
+      zone = 'dulak',
+      named = {
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 225032,
+          id = 225032,
+          name = 'a Broken Skull scout',
+          source_url = 'https://lazaruseq.com/alla/npcs/225032',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 92.0, y = 4.0, z = 3.0, chance = 50.0, respawn_seconds = 400, source_url = 'https://lazaruseq.com/alla/npcs/225032', timer_source = 'lazarus_alla', ph_names = {  } },
+            { x = -47.0, y = 376.0, z = 3.0, chance = 50.0, respawn_seconds = 400, source_url = 'https://lazaruseq.com/alla/npcs/225032', timer_source = 'lazarus_alla', ph_names = {  } },
+            { x = -69.0, y = 97.0, z = 3.0, chance = 50.0, respawn_seconds = 400, source_url = 'https://lazaruseq.com/alla/npcs/225032', timer_source = 'lazarus_alla', ph_names = {  } },
+            { x = -188.0, y = 95.0, z = 3.0, chance = 50.0, respawn_seconds = 400, source_url = 'https://lazaruseq.com/alla/npcs/225032', timer_source = 'lazarus_alla', ph_names = {  } },
+            { x = -246.0, y = 417.0, z = 3.0, chance = 50.0, respawn_seconds = 400, source_url = 'https://lazaruseq.com/alla/npcs/225032', timer_source = 'lazarus_alla', ph_names = {  } },
+            { x = 168.0, y = 157.0, z = 3.0, chance = 50.0, respawn_seconds = 400, source_url = 'https://lazaruseq.com/alla/npcs/225032', timer_source = 'lazarus_alla', ph_names = {  } },
+            { x = -14.0, y = 461.0, z = 3.0, chance = 50.0, respawn_seconds = 400, source_url = 'https://lazaruseq.com/alla/npcs/225074', timer_source = 'lazarus_alla', ph_names = {  } },
+            { x = 286.0, y = 165.0, z = 3.0, chance = 100.0, respawn_seconds = 400, source_url = 'https://lazaruseq.com/alla/npcs/225074', timer_source = 'lazarus_alla', ph_names = {  } },
+            { x = 329.0, y = 490.0, z = 3.0, chance = 50.0, respawn_seconds = 400, source_url = 'https://lazaruseq.com/alla/npcs/225074', timer_source = 'lazarus_alla', ph_names = {  } },
+            { x = 323.0, y = 200.0, z = 3.0, chance = 50.0, respawn_seconds = 400, source_url = 'https://lazaruseq.com/alla/npcs/225074', timer_source = 'lazarus_alla', ph_names = {  } },
+            { x = -196.0, y = 598.0, z = 3.0, chance = 50.0, respawn_seconds = 400, source_url = 'https://lazaruseq.com/alla/npcs/225074', timer_source = 'lazarus_alla', ph_names = {  } },
+            { x = -289.0, y = 508.0, z = 3.0, chance = 50.0, respawn_seconds = 400, source_url = 'https://lazaruseq.com/alla/npcs/225074', timer_source = 'lazarus_alla', ph_names = {  } },
+            { x = -286.0, y = 293.0, z = 3.0, chance = 50.0, respawn_seconds = 400, source_url = 'https://lazaruseq.com/alla/npcs/225074', timer_source = 'lazarus_alla', ph_names = {  } },
+            { x = -89.0, y = 447.0, z = 3.0, chance = 20.0, respawn_seconds = 1200, source_url = 'https://lazaruseq.com/alla/npcs/225074', timer_source = 'lazarus_alla', ph_names = { 'a shrouded fareyes' } },
+            { x = 255.0, y = 307.0, z = 3.0, chance = 100.0, respawn_seconds = 400, source_url = 'https://lazaruseq.com/alla/npcs/225073', timer_source = 'lazarus_alla', ph_names = {  } },
+            { x = -145.0, y = 267.0, z = 3.0, chance = 50.0, respawn_seconds = 400, source_url = 'https://lazaruseq.com/alla/npcs/225073', timer_source = 'lazarus_alla', ph_names = {  } },
+            { x = 177.0, y = 215.0, z = 3.0, chance = 100.0, respawn_seconds = 400, source_url = 'https://lazaruseq.com/alla/npcs/225069', timer_source = 'lazarus_alla', ph_names = {  } },
+            { x = 403.0, y = 342.0, z = 3.0, chance = 100.0, respawn_seconds = 400, source_url = 'https://lazaruseq.com/alla/npcs/225069', timer_source = 'lazarus_alla', ph_names = {  } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 225345,
+          id = 225345,
+          name = 'a shrouded fareyes',
+          source_url = 'https://lazaruseq.com/alla/npcs/225345',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -89.0, y = 447.0, z = 3.0, chance = 80.0, respawn_seconds = 1200, source_url = 'https://lazaruseq.com/alla/npcs/225345', timer_source = 'lazarus_alla', ph_names = { 'a Broken Skull scout' } },
+          },
+        },
+      },
+    },
+  },
+}
