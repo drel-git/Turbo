@@ -1,0 +1,162 @@
+return {
+  _meta = {
+    format = 'TurboMobsAllaSeed',
+    schema_version = 1,
+    generator = 'tools/laz_alla_seed.py',
+    generated_at = '2026-06-03',
+    source = 'Project Lazarus Alla',
+    report = {
+      records = 12,
+      points = 19,
+      records_without_points = 0,
+      duplicate_points = 4,
+      points_missing_timers = 0,
+    },
+  },
+  zones = {
+    befallen_hc = {
+      zone = 'befallen_hc',
+      named = {
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 2036000,
+          id = 2036000,
+          name = 'Boondin Babbinsbort',
+          source_url = 'https://lazaruseq.com/alla/npcs/2036000',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -206.0, y = -814.0, z = -68.0, chance = 40.0, respawn_seconds = 480, source_url = 'https://lazaruseq.com/alla/npcs/2036000', timer_source = 'lazarus_alla', ph_names = { 'a necro acolyte', 'a necro theurgist' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 2036079,
+          id = 2036079,
+          name = 'Devouring Shadowknight',
+          source_url = 'https://lazaruseq.com/alla/npcs/2036079',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -105.0, y = -372.0, z = -78.0, chance = 45.0, respawn_seconds = 480, source_url = 'https://lazaruseq.com/alla/npcs/2036079', timer_source = 'lazarus_alla', ph_names = { 'a greater skeleton', 'a ghoul', 'a shadowknight' } },
+            { x = 152.0, y = -511.0, z = -39.0, chance = 0.0, respawn_seconds = 480, source_url = 'https://lazaruseq.com/alla/npcs/2036079', timer_source = 'lazarus_alla', ph_names = { 'ice boned skeleton', 'Malignant Shadowknight', 'Dreaded Shadowknight', 'a shadowknight' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 2036075,
+          id = 2036075,
+          name = 'Dreaded Shadowknight',
+          source_url = 'https://lazaruseq.com/alla/npcs/2036075',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 154.0, y = -843.0, z = -66.0, chance = 50.0, respawn_seconds = 480, source_url = 'https://lazaruseq.com/alla/npcs/2036075', timer_source = 'lazarus_alla', ph_names = { 'Hateful Shadowknight', 'a greater skeleton', 'a lesser mummy', 'a shadowknight' } },
+            { x = 152.0, y = -511.0, z = -39.0, chance = 0.0, respawn_seconds = 480, source_url = 'https://lazaruseq.com/alla/npcs/2036075', timer_source = 'lazarus_alla', ph_names = { 'ice boned skeleton', 'Malignant Shadowknight', 'Devouring Shadowknight', 'a shadowknight' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 2036013,
+          id = 2036013,
+          name = 'Enchanted Elf Skeleton',
+          source_url = 'https://lazaruseq.com/alla/npcs/2036013',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 118.0, y = -652.0, z = -66.0, chance = 45.0, respawn_seconds = 480, source_url = 'https://lazaruseq.com/alla/npcs/2036013', timer_source = 'lazarus_alla', ph_names = { 'a greater skeleton', 'an elf skeleton', 'a necro acolyte' } },
+            { x = -184.0, y = -665.0, z = -68.0, chance = 0.0, respawn_seconds = 480, source_url = 'https://lazaruseq.com/alla/npcs/2036013', timer_source = 'lazarus_alla', ph_names = { 'a dread bone', 'an elf skeleton' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 2036103,
+          id = 2036103,
+          name = 'Gynok Moltor',
+          source_url = 'https://lazaruseq.com/alla/npcs/2036103',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -211.0, y = -439.0, z = -38.0, chance = 35.0, respawn_seconds = 480, source_url = 'https://lazaruseq.com/alla/npcs/2036103', timer_source = 'lazarus_alla', ph_names = { 'a ghoul', 'a greater skeleton', 'a lesser mummy', 'a burnt zombie' } },
+            { x = 25.0, y = -77.0, z = 3.0, chance = 0.0, respawn_seconds = 480, source_url = 'https://lazaruseq.com/alla/npcs/2036103', timer_source = 'lazarus_alla', ph_names = { 'a putrid skeleton', 'a giant rat', 'a plague rat', 'a greater skeleton' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 2036010,
+          id = 2036010,
+          name = 'Hateful Shadowknight',
+          source_url = 'https://lazaruseq.com/alla/npcs/2036010',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 154.0, y = -843.0, z = -66.0, chance = 0.0, respawn_seconds = 480, source_url = 'https://lazaruseq.com/alla/npcs/2036010', timer_source = 'lazarus_alla', ph_names = { 'a greater skeleton', 'a lesser mummy', 'Dreaded Shadowknight', 'a shadowknight' } },
+            { x = 183.0, y = -332.0, z = -11.0, chance = 35.0, respawn_seconds = 480, source_url = 'https://lazaruseq.com/alla/npcs/2036010', timer_source = 'lazarus_alla', ph_names = { 'Malignant Shadowknight', 'a putrid skeleton', 'a shadowknight' } },
+            { x = -195.0, y = -988.0, z = -69.0, chance = 0.0, respawn_seconds = 480, source_url = 'https://lazaruseq.com/alla/npcs/2036010', timer_source = 'lazarus_alla', ph_names = { 'a ghoul', 'a zombie' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 2036028,
+          id = 2036028,
+          name = 'Malignant Shadowknight',
+          source_url = 'https://lazaruseq.com/alla/npcs/2036028',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 183.0, y = -332.0, z = -11.0, chance = 0.0, respawn_seconds = 480, source_url = 'https://lazaruseq.com/alla/npcs/2036028', timer_source = 'lazarus_alla', ph_names = { 'Hateful Shadowknight', 'a putrid skeleton', 'a shadowknight' } },
+            { x = 152.0, y = -511.0, z = -39.0, chance = 40.0, respawn_seconds = 480, source_url = 'https://lazaruseq.com/alla/npcs/2036028', timer_source = 'lazarus_alla', ph_names = { 'ice boned skeleton', 'Dreaded Shadowknight', 'Devouring Shadowknight', 'a shadowknight' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 2036095,
+          id = 2036095,
+          name = 'Priest Amiaz',
+          source_url = 'https://lazaruseq.com/alla/npcs/2036095',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 102.0, y = -488.0, z = -76.0, chance = 40.0, respawn_seconds = 480, source_url = 'https://lazaruseq.com/alla/npcs/2036095', timer_source = 'lazarus_alla', ph_names = { 'ice boned skeleton', 'a necro theurgist', 'a necro acolyte' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 2036051,
+          id = 2036051,
+          name = 'Soulless Shadowknight',
+          source_url = 'https://lazaruseq.com/alla/npcs/2036051',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -54.0, y = -552.0, z = -39.0, chance = 40.0, respawn_seconds = 480, source_url = 'https://lazaruseq.com/alla/npcs/2036051', timer_source = 'lazarus_alla', ph_names = { 'a dread bone', 'a shadowknight' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 2036097,
+          id = 2036097,
+          name = 'The Thaumaturgist',
+          source_url = 'https://lazaruseq.com/alla/npcs/2036097',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 51.0, y = -424.0, z = -75.0, chance = 35.0, respawn_seconds = 480, source_url = 'https://lazaruseq.com/alla/npcs/2036097', timer_source = 'lazarus_alla', ph_names = { 'a ghoul', 'a necro theurgist' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 2036055,
+          id = 2036055,
+          name = 'Zeek`s Shadow',
+          source_url = 'https://lazaruseq.com/alla/npcs/2036055',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 22.0, y = -201.0, z = -12.0, chance = 30.0, respawn_seconds = 480, source_url = 'https://lazaruseq.com/alla/npcs/2036055', timer_source = 'lazarus_alla', ph_names = { 'a dread bone', 'a necro acolyte' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 2036040,
+          id = 2036040,
+          name = 'skeleton Lrodd',
+          source_url = 'https://lazaruseq.com/alla/npcs/2036040',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 104.0, y = -365.0, z = -10.0, chance = 35.0, respawn_seconds = 480, source_url = 'https://lazaruseq.com/alla/npcs/2036040', timer_source = 'lazarus_alla', ph_names = { 'a putrid skeleton', 'an odd skeleton' } },
+          },
+        },
+      },
+    },
+  },
+}

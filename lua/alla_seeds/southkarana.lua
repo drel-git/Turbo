@@ -1,0 +1,213 @@
+return {
+  _meta = {
+    format = 'TurboMobsAllaSeed',
+    schema_version = 1,
+    generator = 'tools/laz_alla_seed.py',
+    generated_at = '2026-06-16',
+    source = 'Project Lazarus Alla',
+    report = {
+      records = 17,
+      points = 20,
+      records_without_points = 1,
+      duplicate_points = 5,
+      points_missing_timers = 0,
+    },
+  },
+  zones = {
+    southkarana = {
+      zone = 'southkarana',
+      named = {
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 14129,
+          id = 14129,
+          name = 'Gnashmaw',
+          source_url = 'https://lazaruseq.com/alla/npcs/14129',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -180.0, y = -6083.0, z = -2.0, chance = 1.0, respawn_seconds = 1200, source_url = 'https://lazaruseq.com/alla/npcs/14129', timer_source = 'lazarus_alla', ph_names = { 'a mist wolf', 'centaur archer', 'High Shaman Grisok', 'an escaped Splitpaw gnoll', 'a lion', 'an elephant calf', 'a shadow wolf', 'an elephant', 'centaur foal', 'a treant', 'Kroldir Thunderhoof' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 14126,
+          id = 14126,
+          name = 'Gnawfang',
+          source_url = 'https://lazaruseq.com/alla/npcs/14126',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 1334.0, y = -7650.0, z = 80.0, chance = 3.0, respawn_seconds = 30, source_url = 'https://lazaruseq.com/alla/npcs/14126', timer_source = 'lazarus_alla', ph_names = { 'a lioness', 'aviak rook', 'centaur archer', 'a lion', 'an elephant calf', 'aviak egret', 'a shadow wolf', 'centaur sheltie', 'Cracktusk', 'Sir Nandruar', 'Kroldir Thunderhoof' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 14142,
+          id = 14142,
+          name = 'Grizzleknot',
+          source_url = 'https://lazaruseq.com/alla/npcs/14142',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -1287.0, y = -187.0, z = -1.0, chance = 5.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/14142', timer_source = 'lazarus_alla', ph_names = { 'centaur archer', 'centaur charger', 'centaur foal', 'centaur sheltie', 'Coloth Meadowgreen', 'Kroldir Thunderhoof' } },
+            { x = -763.0, y = 715.0, z = 3.0, chance = 2.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/14142', timer_source = 'lazarus_alla', ph_names = { 'a lioness', 'centaur archer', 'a lion', 'a shadow wolf', 'centaur charger', 'centaur foal', 'centaur courser', 'centaur sheltie', 'Shaman Lenrel', 'Zrithsadioun', 'Kroldir Thunderhoof' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 14135,
+          id = 14135,
+          name = 'Groi Gutblade',
+          source_url = 'https://lazaruseq.com/alla/npcs/14135',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 2973.0, y = 276.0, z = 142.0, chance = 10.0, respawn_seconds = 1200, source_url = 'https://lazaruseq.com/alla/npcs/14135', timer_source = 'lazarus_alla', ph_names = { 'a lion', 'aviak egret', 'an elephant' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 14137,
+          id = 14137,
+          name = 'Knari Morawk',
+          source_url = 'https://lazaruseq.com/alla/npcs/14137',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -1811.0, y = 1244.0, z = 39.0, chance = 17.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/14137', timer_source = 'lazarus_alla', ph_names = { 'aviak rook', 'aviak darter', 'aviak avocet', 'aviak egret', 'aviak harrier' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 14197,
+          id = 14197,
+          name = 'Kroldir Thunderhoof',
+          source_url = 'https://lazaruseq.com/alla/npcs/14197',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -1287.0, y = -187.0, z = -1.0, chance = 5.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/14197', timer_source = 'lazarus_alla', ph_names = { 'centaur archer', 'centaur charger', 'centaur foal', 'centaur sheltie', 'Coloth Meadowgreen', 'Grizzleknot' } },
+            { x = -180.0, y = -6083.0, z = -2.0, chance = 5.0, respawn_seconds = 1200, source_url = 'https://lazaruseq.com/alla/npcs/14197', timer_source = 'lazarus_alla', ph_names = { 'a mist wolf', 'centaur archer', 'High Shaman Grisok', 'an escaped Splitpaw gnoll', 'a lion', 'an elephant calf', 'a shadow wolf', 'an elephant', 'centaur foal', 'a treant', 'Gnashmaw' } },
+            { x = -763.0, y = 715.0, z = 3.0, chance = 5.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/14197', timer_source = 'lazarus_alla', ph_names = { 'a lioness', 'centaur archer', 'a lion', 'a shadow wolf', 'centaur charger', 'centaur foal', 'centaur courser', 'centaur sheltie', 'Shaman Lenrel', 'Grizzleknot', 'Zrithsadioun' } },
+            { x = 1334.0, y = -7650.0, z = 80.0, chance = 5.0, respawn_seconds = 30, source_url = 'https://lazaruseq.com/alla/npcs/14197', timer_source = 'lazarus_alla', ph_names = { 'a lioness', 'aviak rook', 'centaur archer', 'a lion', 'an elephant calf', 'aviak egret', 'a shadow wolf', 'centaur sheltie', 'Cracktusk', 'Sir Nandruar', 'Gnawfang' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 14131,
+          id = 14131,
+          name = 'Marik Clubthorn',
+          source_url = 'https://lazaruseq.com/alla/npcs/14131',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 705.0, y = -7311.0, z = 0.0, chance = 50.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/14131', timer_source = 'lazarus_alla', ph_names = { 'Sentry Alechin' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 14136,
+          id = 14136,
+          name = 'Mroon',
+          source_url = 'https://lazaruseq.com/alla/npcs/14136',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 1721.0, y = -6538.0, z = 57.0, chance = 50.0, respawn_seconds = 400, source_url = 'https://lazaruseq.com/alla/npcs/14136', timer_source = 'lazarus_alla', ph_names = { 'a cyclops' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 14144,
+          id = 14144,
+          name = 'Narra Tanith',
+          source_url = 'https://lazaruseq.com/alla/npcs/14144',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 3177.0, y = -4832.0, z = 82.0, chance = 100.0, respawn_seconds = 1200, source_url = 'https://lazaruseq.com/alla/npcs/14144', timer_source = 'lazarus_alla', ph_names = {  } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 14193,
+          id = 14193,
+          name = 'Nisch Val Torash Mashk',
+          source_url = 'https://lazaruseq.com/alla/npcs/14193',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 874.0, y = -2985.0, z = 5.0, chance = 5.0, respawn_seconds = 1200, source_url = 'https://lazaruseq.com/alla/npcs/14193', timer_source = 'lazarus_alla', ph_names = { 'a Nisch Val Gnoll' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 14139,
+          id = 14139,
+          name = 'Quillmane',
+          source_url = 'https://lazaruseq.com/alla/npcs/14139',
+          timer_source = 'lazarus_alla',
+          points = {
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 14194,
+          id = 14194,
+          name = 'Rosch Val L`Vlor',
+          source_url = 'https://lazaruseq.com/alla/npcs/14194',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 1286.0, y = -2500.0, z = 3.0, chance = 5.0, respawn_seconds = 1200, source_url = 'https://lazaruseq.com/alla/npcs/14194', timer_source = 'lazarus_alla', ph_names = { 'a Rosch Val Gnoll' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 14133,
+          id = 14133,
+          name = 'Shaman Lenrel',
+          source_url = 'https://lazaruseq.com/alla/npcs/14133',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -763.0, y = 715.0, z = 3.0, chance = 3.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/14133', timer_source = 'lazarus_alla', ph_names = { 'a lioness', 'centaur archer', 'a lion', 'a shadow wolf', 'centaur charger', 'centaur foal', 'centaur courser', 'centaur sheltie', 'Grizzleknot', 'Zrithsadioun', 'Kroldir Thunderhoof' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 14119,
+          id = 14119,
+          name = 'Shaman Ren`Rex',
+          source_url = 'https://lazaruseq.com/alla/npcs/14119',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -2782.0, y = -4468.0, z = 1.0, chance = 3.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/14119', timer_source = 'lazarus_alla', ph_names = { 'a mist wolf', 'an escaped Splitpaw gnoll', 'aviak harrier', 'an elephant', 'a cyclops', 'an undead cyclops' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 14125,
+          id = 14125,
+          name = 'Synger Foxfyre',
+          source_url = 'https://lazaruseq.com/alla/npcs/14125',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -1481.0, y = -3409.0, z = 4.0, chance = 100.0, respawn_seconds = 1200, source_url = 'https://lazaruseq.com/alla/npcs/14125', timer_source = 'lazarus_alla', ph_names = {  } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 14192,
+          id = 14192,
+          name = 'Tesch Val Deval`Nmak',
+          source_url = 'https://lazaruseq.com/alla/npcs/14192',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 230.0, y = -3274.0, z = 1.0, chance = 5.0, respawn_seconds = 1200, source_url = 'https://lazaruseq.com/alla/npcs/14192', timer_source = 'lazarus_alla', ph_names = { 'a Tesch Mas Gnoll' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 14195,
+          id = 14195,
+          name = 'Tesch Val Kadvem',
+          source_url = 'https://lazaruseq.com/alla/npcs/14195',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 1746.0, y = -4146.0, z = 26.0, chance = 5.0, respawn_seconds = 1200, source_url = 'https://lazaruseq.com/alla/npcs/14195', timer_source = 'lazarus_alla', ph_names = { 'a Tesch Val Gnoll' } },
+          },
+        },
+      },
+    },
+  },
+}

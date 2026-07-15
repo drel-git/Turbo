@@ -1,0 +1,160 @@
+1.2.14
+- Go loot: wait for Corpse.Items to populate after LootWnd opens (TurboLoot does);
+  find loot slots via Corpse.Item[=name]/partial/id; retry itemnotify with and
+  without /ctrl; mash no-drop confirm while picking up so we do not sit on an
+  open corpse inventory.
+
+1.2.13
+- Go loot: panel no longer regresses opening/looting back to "going"; /loot fires
+  immediately on open; lootnodrop always for the pickup; dual yes-button confirm;
+  stronger E3 pause so reveal is not fighting a still-live E3 for several seconds.
+
+1.2.12
+- Go loot: trust TurboLoot corpse spawn ids regardless of Type; longer reveal
+  with pulses/target nudges; if Spawn TLO stays empty, blind /nav id then open;
+  faster runner loop + immediate tick pump so reveal does not stall after ack.
+
+1.2.11
+- Go loot: if already in range, skip /nav and open immediately (fixes 8ft "nav
+  reached later, never looted"); retarget/face + /loot retries; loot-anyway when
+  target will not stick; job watchdog resumes E3; duplicate Go acks "going"
+  instead of leaving the panel on "sent"; phase notes (revealing/heading/...).
+
+1.2.10
+- Go loot: pause E3 (/e3p on) for the run like TurboLoot so chase/follow cannot
+  cancel nav after Reloot; longer corpse reveal wait + retries; re-issue nav
+  while walking if interrupted.
+
+1.2.9
+- Go loot: duplicate Go clicks / double actor delivery no longer report "busy"
+  while the same corpse job is already revealing or navigating; ack "going" on
+  accept so the panel does not stick on a false busy from the duplicate.
+
+1.2.8
+- Go loot: if the corpse spawn is not visible (common after TurboLoot hidecorpse),
+  unhide with /hidecorpse none like Reloot, wait briefly, retry once, then nav/loot;
+  restore /hidecorpse looted when the job ends so the world is not left cluttered.
+
+1.2.7
+- Hotfix: Clear-all helper is stored on TG instead of a chunk local so Turbo
+  init.lua stays under LuaJIT's 200-local main-function limit (load failure on
+  /lua run turbo after 1.2.6).
+
+1.2.6
+- Linked items: show corpse spawn ID in its own column next to Age so you can
+  call out which NPC corpse still has the item (same id TurboLoot prints on
+  [ANNOUNCE]/[SKIP] lines).
+- Go loot: on success, urgently republish the looter's inventory and request a
+  fast snap on the driver (same path as need-confirm), flushing the shared cache
+  so BiS / needs_index reflect ownership without waiting for the ~30s bg save.
+- Review: Clear all skips loads each turboloot.ini [ItemLimits] once (section
+  lookup) instead of N per-item INI reads — same expected-skip filter and
+  mark_ts revive semantics, without the UI hitch on large pending lists.
+
+1.2.5
+- Go loot: announce-passive bg on the driver box now relays peer LOOT_LINK /
+  lootseen drops to the local UI via /tgear lootseenquiet. Actors only land on
+  the bg mailbox, so 1.2.4's corpse-aware broadcast never reached the panel that
+  draws Go buttons (plain red needers). Also treat a missing corpse_at as fresh
+  when corpse_id is present, and tooltip Age/needers when Go is unavailable.
+
+1.2.4
+- Go loot / announce: TurboLoot's structured handoff now calls /tgearbg (looters
+  usually bind that, not /tgear) and passes the corpse spawn id, then broadcasts
+  it to peer drivers over actors so the Linked items panel can show Go buttons
+  even when other-player chat links do not parse. ANNOUNCE/SKIP chat parsing is
+  tougher about link frames, and a pending linked row appears as soon as a
+  corpse id and needers are known (before the [TG] flush).
+
+1.2.3
+- Go loot: pause /afollow and stop /chaseme before walking to the corpse, then
+  /afollow unpause on finish - same prelude as TurboLoot sell/bank/tribute so
+  followers resume chase correctly instead of fighting nav or standing at the
+  corpse.
+- TurboLoot: [ANNOUNCE]/[SKIP] dedupe buffer raised (~40 keys -> ~200) so a
+  mid-pull wipe no longer double-announces items still on corpses; corpse (ID:)
+  stamps prefer the loot-loop corpse id over Target.ID so Go buttons cannot
+  point at the wrong corpse when target drifts.
+- Announce: also capture guild and OOC item links (group/raid/say already
+  worked). [TG] need-lines are still skipped so we never re-announce needs.
+- Needs index warm-up: the bg responder now builds peer needs even while
+  announce-passive (its direct catalogs persist to disk for the UI driver);
+  the queue is pruned to the announce roster; lean/minimized UIs temporarily
+  raise their index budget when the oldest queued rebuild is older than 60s.
+
+1.2.2
+- Go loot: the BiS tab's linked-items panel now shows a Go button per needer
+  when TurboLoot left the item on a corpse (ANNOUNCE/SKIP rules). Clicking it
+  sends that character to the corpse over the actor bus: they nav (or moveto)
+  there, open the corpse, pick up exactly that item, and report the outcome
+  back into the panel (looted / corpse gone / item gone / couldn't reach).
+  Guards: same-zone only, distance cap, combat check, corpse-age timeout, and
+  one run at a time per character. Buttons hide once the corpse hint is stale.
+
+1.2.1
+- Updates: the patch-lock stop now covers the whole suite. The Turbo hub watches
+  for the patcher's lock file itself (and ends any running macro), and TurboGear
+  stops the hub along with the other Turbo scripts, so clicking Update while
+  everything is running cleanly shuts it all down on every box.
+- One version number everywhere: the Turbo hub window now shows the suite
+  version from this CHANGELOG (the same number TurboPatcher displays) instead
+  of its old internal 3.9.x script version.
+- New /turbopatcher command launches TurboPatcher.exe while Turbo is already
+  running (the /lua run Turbo patcher form only works when Turbo is stopped,
+  since MQ refuses to start a script that is already loaded).
+- Releases: the Linux zip is now built and attached automatically when a
+  release is published on GitHub, so it always matches the released source.
+
+1.2.0
+- Announce: linked items now resolve by name before parsed-link id, so shared
+  id ranges (for example the Jonas Dagmire hand bones) can no longer credit the
+  wrong bone; alias pairs like "Triquetrum" and "Jonas Dagmire's Triquetrum"
+  collapse to a single announce instead of two.
+- Announce: cache-derived peer needers are live-confirmed over the actor bus
+  before a grouped [TG] send, so characters who already looted the item are
+  dropped from the needer list instead of being announced stale.
+- Updates: Turbo scripts stop themselves when TurboPatcher starts an update
+  (patch-lock hook), and the More tab gained a Turbo Patcher button that
+  launches the patcher directly (drop TurboPatcher.exe in your MacroQuest
+  folder so the button can find it).
+- ResearchLearn spell-research automation moved out of the suite to become a
+  separate project. TurboGear's Spells tab still tracks missing research
+  spells and exports per-character want lists.
+
+1.1.0
+- SQLite storage is now the default (storeBackend = "auto"): the SQLite backend
+  is used automatically when lsqlite3 is available, and lsqlite3 is auto-installed
+  from the MacroQuest LuaRocks server on first use via mq/PackageMan (like LazBis).
+  Falls back to the file cache if lsqlite3 cannot be installed or loaded.
+- Added `/tgear backend auto|file|sqlite` and a Setup-tab "Storage" toggle to
+  switch backends without editing files (applies on restart).
+
+1.0.0
+- Storage: new SQLite backend (WAL) behind a pluggable store backend interface;
+  concurrent multi-box writes with no clobber race, change-detected upserts, and
+  a one-time import of the legacy pickle cache. Ships dormant (storeBackend =
+  "file"); set storeBackend = "auto" after an in-game smoke test to enable it.
+  Falls back to the file cache automatically when lsqlite3 is unavailable.
+- Sync: cross-box update ordering now uses a per-publisher monotonic sequence
+  instead of wall-clock timestamps, so clock skew between boxes can no longer
+  drop a fresh update or accept a stale one. Wire-compatible (no proto bump).
+- Startup: the viewer waits for the background responder's readiness ack before
+  delegating its first sync (with a deadline fallback), instead of a fixed
+  /timed delay that could fire before the responder's mailbox was live.
+- Performance: background BiS catalog (~34k lines) is now lazy-loaded on first
+  use; the per-source online/stale/offline aging sweep is throttled to ~1Hz;
+  announce catalog-warm + needs-index work draws down from a single per-frame
+  budget; the file cache no longer re-reads/merges the whole file when this box
+  is the sole writer, and re-validates the temp file only periodically.
+- Reliability/observability: swallowed actor-send/file errors are now recorded
+  and surfaced in /tgear perfdiag; memo-cache sizes are bounded and reported;
+  perfdiag gained per-frame work-time, Lua heap, and catalog-residency gauges.
+- Testing: full offline suite (15 files) runs under LuaJIT 2.1 (MacroQuest's
+  runtime) via a CI-style runner (lua/tests/run_all.lua), including a real
+  SQLite engine exercised through an lsqlite3 FFI shim. Graceful-degradation
+  fallbacks (no actors, no lsqlite3, missing cache) are covered by tests.
+- Docs: added lua/turbogear/README.md (architecture, storage backends, perfdiag).
+
+0.2.1
+- Prior baseline (pre-hardening): live multi-character inventory/BiS/announce
+  engine on the MQ actor bus with a single atomic Lua-pickle cache.
