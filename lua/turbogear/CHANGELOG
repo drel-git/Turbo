@@ -1,3 +1,8 @@
+1.2.10
+- Go loot: pause E3 (/e3p on) for the run like TurboLoot so chase/follow cannot
+  cancel nav after Reloot; longer corpse reveal wait + retries; re-issue nav
+  while walking if interrupted.
+
 1.2.9
 - Go loot: duplicate Go clicks / double actor delivery no longer report "busy"
   while the same corpse job is already revealing or navigating; ack "going" on

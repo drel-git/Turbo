@@ -22,17 +22,24 @@ local M = {}
 local job = nil
 
 local ARRIVE_DIST = 15.0
-local REVEAL_WAIT_S = 0.45
+local REVEAL_WAIT_S = 1.2
+local NAV_REISSUE_S = 4.0
 
 local function now_s() return os.clock() end
 
 local function corpse_spawn(corpse_id)
     local ok, s = pcall(function()
-        local sp = mq.TLO.Spawn(tonumber(corpse_id) or 0)
+        local id = tonumber(corpse_id) or 0
+        if id <= 0 then return nil end
+        local sp = mq.TLO.Spawn(id)
         if not sp or not sp.ID then return nil end
-        if (tonumber(sp.ID()) or 0) <= 0 then return nil end
-        if tostring(sp.Type() or "") ~= "Corpse" then return nil end
-        return sp
+        if (tonumber(sp.ID()) or 0) ~= id then return nil end
+        local typ = tostring(sp.Type() or ""):lower()
+        -- Prefer Corpse; after hidecorpse refresh some builds briefly report oddly.
+        if typ == "corpse" or typ:find("corpse", 1, true) then return sp end
+        local okD, dead = pcall(function() return sp.Dead() == true end)
+        if okD and dead then return sp end
+        return nil
     end)
     if ok then return s end
     return nil
@@ -55,6 +62,18 @@ end
 -- not read here; looted matches the default that caused Go-loot "corpse gone".
 local function restore_corpse_hide()
     pcall(function() mq.cmd('/squelch /hidecorpse looted') end)
+end
+
+local function pause_e3_for_job()
+    -- Same idea as TurboLoot PauseE3Logic: E3 will otherwise re-assert follow /
+    -- chase and cancel our nav mid-run (common right after a Reloot/TurboLoot).
+    pcall(function() mq.cmd('/squelch /e3p on') end)
+    return true
+end
+
+local function resume_e3_for_job(was_paused)
+    if not was_paused then return end
+    pcall(function() mq.cmd('/squelch /e3p off') end)
 end
 
 local function nav_available()
@@ -222,13 +241,15 @@ local function begin_move(j)
     j.moving = true
     j.phase = "move"
     j.deadline = now_s() + (tonumber(CFG.go_loot_arrive_timeout_s) or 45)
+    j.last_nav_at = now_s()
+    local dist = corpse_distance(j.corpse_id)
     if used_nav then
         mq.cmd(string.format('/squelch /nav id %d distance=%d', j.corpse_id, math.floor(ARRIVE_DIST) - 5))
     else
         mq.cmd(string.format('/squelch /moveto id %d', j.corpse_id))
     end
-    print(string.format("\at[TurboGear]\ax go-loot: heading to corpse %d for %s (%s)",
-        j.corpse_id, j.item_name, used_nav and "nav" or "moveto"))
+    print(string.format("\at[TurboGear]\ax go-loot: heading to corpse %d for %s (%s, %.0fft)",
+        j.corpse_id, j.item_name, used_nav and "nav" or "moveto", tonumber(dist) or -1))
 end
 
 local function finish(ok, note)
@@ -236,11 +257,13 @@ local function finish(ok, note)
     if job.moving then stop_movement(job.used_nav) end
     close_loot_window()
     local was_paused = job.afollow_paused == true
+    local e3_paused = job.e3_paused == true
     local did_reveal = job.revealed_corpses == true
     local j = job
     job = nil
     if did_reveal then restore_corpse_hide() end
     resume_follow_for_job(was_paused)
+    resume_e3_for_job(e3_paused)
     report(j, ok, note)
     -- Inventory may already be updated before the "You have looted" chat line
     -- fires; nudge the watch so peers (and our own Store) see ownership soon
@@ -273,8 +296,9 @@ function M.request(payload)
     local okC, combat = pcall(function() return mq.TLO.Me.Combat() == true end)
     if okC and combat then return false, "in_combat" end
 
-    -- Same prelude as turboloot sell/bank/tribute/loot: stop chase, pause
-    -- afollow, clear stick/nav before we issue our own movement.
+    -- Same prelude as turboloot sell/bank/tribute/loot: pause E3, stop chase,
+    -- pause afollow, clear stick/nav before we issue our own movement.
+    local e3_paused = pause_e3_for_job()
     stop_chase_and_stick()
     local afollow_paused = pause_follow_for_job()
     stop_movement(true)
@@ -291,15 +315,17 @@ function M.request(payload)
         moving = false,
         slot = 0,
         afollow_paused = afollow_paused,
+        e3_paused = e3_paused,
         max_distance = max_dist,
         revealed_corpses = false,
-        reveal_retries_left = 1,
+        reveal_retries_left = 2,
     }
 
     if dist ~= nil then
         if dist > max_dist then
             job = nil
             resume_follow_for_job(afollow_paused)
+            resume_e3_for_job(e3_paused)
             return false, "too_far"
         end
         begin_move(job)
@@ -372,6 +398,19 @@ function M.tick()
             mq.cmd(string.format('/squelch /target id %d', j.corpse_id))
             j.phase = "open"
             j.deadline = now_s() + 3
+        elseif d.action == "wait" then
+            -- E3 / follow can cancel nav; re-issue periodically while walking.
+            local now = now_s()
+            if (now - (tonumber(j.last_nav_at) or 0)) >= NAV_REISSUE_S then
+                j.last_nav_at = now
+                stop_chase_and_stick()
+                pause_follow_for_job()
+                if j.used_nav then
+                    mq.cmd(string.format('/squelch /nav id %d distance=%d', j.corpse_id, math.floor(ARRIVE_DIST) - 5))
+                else
+                    mq.cmd(string.format('/squelch /moveto id %d', j.corpse_id))
+                end
+            end
         elseif d.action == "fail" then
             finish(false, d.note)
         end
