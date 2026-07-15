@@ -813,11 +813,14 @@ local function draw_linked_items_panel()
     local flags = (ImGuiTableFlags.BordersInnerV or 0)
         + (ImGuiTableFlags.RowBg or 0)
         + (ImGuiTableFlags.NoSavedSettings or 0)
-    if ImGui.BeginTable("##bis_linked_items", 5, flags) then
+    if ImGui.BeginTable("##bis_linked_items", 6, flags) then
         ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 30.0)
         ImGui.TableSetupColumn("Send", ImGuiTableColumnFlags.WidthFixed, 150.0)
         ImGui.TableSetupColumn("Item", ImGuiTableColumnFlags.WidthStretch, 1.8)
         ImGui.TableSetupColumn("Needers", ImGuiTableColumnFlags.WidthStretch, 2.2)
+        -- Corpse spawn id from TurboLoot [ANNOUNCE]/[SKIP] so callers can say
+        -- "loot corpse 132" without digging through chat.
+        ImGui.TableSetupColumn("ID", ImGuiTableColumnFlags.WidthFixed, 48.0)
         ImGui.TableSetupColumn("Age", ImGuiTableColumnFlags.WidthFixed, 42.0)
         ImGui.TableHeadersRow()
         for i = 1, math.min(#rows, 6) do
@@ -840,19 +843,22 @@ local function draw_linked_items_panel()
             ImGui.TableSetColumnIndex(3)
             draw_linked_needers(row, id)
             ImGui.TableSetColumnIndex(4)
-            local age = linked_item_age_text(row.age_s)
             local cid = tonumber(row.corpse_id)
             if cid then
-                ImGui.TextDisabled(age)
+                col_text(Theme.dim, tostring(math.floor(cid)))
                 if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
-                    ImGui.SetTooltip(string.format("corpse %d", cid))
+                    ImGui.SetTooltip(string.format(
+                        "Corpse spawn id %d — tell others which corpse still has this item.",
+                        math.floor(cid)))
                 end
             else
-                ImGui.TextDisabled(age)
+                ImGui.TextDisabled("-")
                 if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
-                    ImGui.SetTooltip("no corpse id — Go buttons stay off")
+                    ImGui.SetTooltip("No corpse id — Go buttons stay off until an [ANNOUNCE]/[SKIP] handoff arrives.")
                 end
             end
+            ImGui.TableSetColumnIndex(5)
+            ImGui.TextDisabled(linked_item_age_text(row.age_s))
         end
         ImGui.EndTable()
     end

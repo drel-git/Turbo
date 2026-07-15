@@ -6942,6 +6942,39 @@ rebuildSkipDisplayRows = function()
     TG.skipExpectedSkipTotal = expectedN
 end
 
+-- Dismiss every actionable pending skip in one pass. Same filter as the Review
+-- list (leave "expected" skips alone) and same mark_ts revive semantics as a
+-- per-row dismiss — but load each INI's [ItemLimits] once instead of N key reads.
+local function clearActionablePendingSkips()
+    local cleared = 0
+    if not skipTracker or not skipTracker.get_pending then return 0 end
+    local pendingItems = skipTracker.get_pending() or {}
+    local ruleCache = {}
+    if skipTracker.persist_batch_begin then skipTracker.persist_batch_begin() end
+    for _, rec in ipairs(pendingItems) do
+        if rec.name and rec.name ~= '' then
+            local reasonCode = skipTracker.primary_reason(rec)
+            local recSrc = skipTracker.get_source(rec)
+            local iniFile = resolveIniForChar(recSrc)
+            local iniPath = resolveTurbolootIniPathForProfile and resolveTurbolootIniPathForProfile(iniFile) or nil
+            local itemRule = nil
+            if iniPath and iniPath ~= '' then
+                local cacheKey = iniPath:lower()
+                if not ruleCache[cacheKey] then
+                    ruleCache[cacheKey] = TG.buildReviewItemRuleLookup(iniPath)
+                end
+                local lookup = ruleCache[cacheKey]
+                itemRule = lookup[rec.name] or lookup[rec.name:upper()] or lookup[rec.name:lower()]
+            end
+            if not TG.isExpectedReviewSkip(reasonCode, itemRule) then
+                if skipTracker.dismiss(rec.name) then cleared = cleared + 1 end
+            end
+        end
+    end
+    if skipTracker.persist_batch_end then skipTracker.persist_batch_end() end
+    return cleared
+end
+
 --- EQBC / echo event names (must be defined before registerSkipListener).
 local SKIP_EVENT_NAME = 'TurboSkipBroadcast'
 --- Multiple patterns: MQ Next chat lines vary (color codes, channel); e3bc often does not surface to Lua mq.event without a local /echo.
@@ -8538,22 +8571,7 @@ local function renderSkipReview(g, skipTracker, tip, thinSep, undoSkipRule, Turb
     local hasTarget = (targetMode ~= 'none')
 
     local function clearActionableSkips()
-        local cleared = 0
-        local pendingItems = skipTracker.get_pending() or {}
-        skipTracker.persist_batch_begin()
-        for _, rec in ipairs(pendingItems) do
-            if rec.name and rec.name ~= '' then
-                local reasonCode = skipTracker.primary_reason(rec)
-                local recSrc = skipTracker.get_source(rec)
-                local iniFile = resolveIniForChar(recSrc)
-                local iniPath = resolveTurbolootIniPathForProfile and resolveTurbolootIniPathForProfile(iniFile) or nil
-                local itemRule = TG.readReviewItemRule(iniPath, rec.name)
-                if not TG.isExpectedReviewSkip(reasonCode, itemRule) then
-                    if skipTracker.dismiss(rec.name) then cleared = cleared + 1 end
-                end
-            end
-        end
-        skipTracker.persist_batch_end()
+        local cleared = clearActionablePendingSkips()
         g.skipSelectedKey = nil
         g.skipSelectionSet = nil
         g.skipIniTargetOverride = nil
@@ -9509,22 +9527,7 @@ local function renderSkipReview(g, skipTracker, tip, thinSep, undoSkipRule, Turb
 
     if (not pageMode) and pendingN >= (Theme.layout.skipClearMinCount or 2) then
         local function clearActionableSkips()
-            local cleared = 0
-            local pendingItems = skipTracker.get_pending() or {}
-            skipTracker.persist_batch_begin()
-            for _, rec in ipairs(pendingItems) do
-                if rec.name and rec.name ~= '' then
-                    local reasonCode = skipTracker.primary_reason(rec)
-                    local recSrc = skipTracker.get_source(rec)
-                    local iniFile = resolveIniForChar(recSrc)
-                    local iniPath = resolveTurbolootIniPathForProfile and resolveTurbolootIniPathForProfile(iniFile) or nil
-                    local itemRule = TG.readReviewItemRule(iniPath, rec.name)
-                    if not TG.isExpectedReviewSkip(reasonCode, itemRule) then
-                        if skipTracker.dismiss(rec.name) then cleared = cleared + 1 end
-                    end
-                end
-            end
-            skipTracker.persist_batch_end()
+            local cleared = clearActionablePendingSkips()
             g.skipSelectedKey = nil
             g.skipSelectionSet = nil
             g.skipIniTargetOverride = nil
@@ -11474,22 +11477,7 @@ function TG.renderWindow()
                 end
 
                 local function quickClearActionableSkips()
-                    local cleared = 0
-                    local pendingItems = skipTracker.get_pending and skipTracker.get_pending() or {}
-                    if skipTracker.persist_batch_begin then skipTracker.persist_batch_begin() end
-                    for _, rec in ipairs(pendingItems) do
-                        if rec.name and rec.name ~= '' then
-                            local reasonCode = skipTracker.primary_reason(rec)
-                            local recSrc = skipTracker.get_source(rec)
-                            local iniFile = resolveIniForChar(recSrc)
-                            local iniPath = resolveTurbolootIniPathForProfile and resolveTurbolootIniPathForProfile(iniFile) or nil
-                            local itemRule = TG.readReviewItemRule(iniPath, rec.name)
-                            if not TG.isExpectedReviewSkip(reasonCode, itemRule) then
-                                if skipTracker.dismiss(rec.name) then cleared = cleared + 1 end
-                            end
-                        end
-                    end
-                    if skipTracker.persist_batch_end then skipTracker.persist_batch_end() end
+                    local cleared = clearActionablePendingSkips()
                     g.quickReviewSelectedKey = nil
                     g.skipSelectedKey = nil
                     g.skipSelectionSet = nil

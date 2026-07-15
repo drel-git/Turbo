@@ -196,6 +196,12 @@ local function finish(ok, note)
     job = nil
     resume_follow_for_job(was_paused)
     report(j, ok, note)
+    -- Inventory may already be updated before the "You have looted" chat line
+    -- fires; nudge the watch so peers (and our own Store) see ownership soon
+    -- without waiting for a heartbeat.
+    if ok == true then
+        pcall(function() require('inventory_watch').note_change(true, false) end)
+    end
 end
 
 -- Start a job. payload: { item_name, item_id, corpse_id, reply_to }.

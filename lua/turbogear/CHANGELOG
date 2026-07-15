@@ -1,3 +1,14 @@
+1.2.6
+- Linked items: show corpse spawn ID in its own column next to Age so you can
+  call out which NPC corpse still has the item (same id TurboLoot prints on
+  [ANNOUNCE]/[SKIP] lines).
+- Go loot: on success, urgently republish the looter's inventory and request a
+  fast snap on the driver (same path as need-confirm), flushing the shared cache
+  so BiS / needs_index reflect ownership without waiting for the ~30s bg save.
+- Review: Clear all skips loads each turboloot.ini [ItemLimits] once (section
+  lookup) instead of N per-item INI reads — same expected-skip filter and
+  mark_ts revive semantics, without the UI hitch on large pending lists.
+
 1.2.5
 - Go loot: announce-passive bg on the driver box now relays peer LOOT_LINK /
   lootseen drops to the local UI via /tgear lootseenquiet. Actors only land on

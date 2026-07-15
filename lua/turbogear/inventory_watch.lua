@@ -131,16 +131,18 @@ local function flush_if_due()
     dirty_urgent = false
     local full = dirty_full == true
     dirty_full = false
-    local bank_open = snapshot.bank_window_open and snapshot.bank_window_open() or false
     local depth = full and "full" or "lite"
     local publish_opts = { skipLockouts = true, skipLiveStats = true, reason = "inventory_watch_dirty" }
+    -- Urgent changes (go-loot, equip/bank) bypass the publish cooldown and flush
+    -- the shared cache so the announce UI can reload without waiting ~30s.
+    if urgent then publish_opts.saveNow = true end
     local snap = snapshot.gather({
         force = true,
         depth = depth,
         skipLockouts = publish_opts and publish_opts.skipLockouts == true,
         skipLiveStats = publish_opts and publish_opts.skipLiveStats == true,
     })
-    return publish_snap_if_changed(snap, now, depth, urgent and bank_open, publish_opts)
+    return publish_snap_if_changed(snap, now, depth, urgent, publish_opts)
 end
 
 local function bg_poll_if_due()
@@ -215,6 +217,13 @@ end
 function M.seed_signature()
     local snap = snapshot.cached() or snapshot.gather({ force = false, depth = "lite" })
     if snap then last_known_sig = snapshot.lite_signature(snap) end
+end
+
+-- Explicit dirty mark for scripted loot / trade paths that may not emit the
+-- chat lines our events watch (e.g. go-loot itemnotify). urgent=true skips
+-- debounce so the next tick can publish a lite snap promptly.
+function M.note_change(urgent, full)
+    mark_dirty(urgent == true, full == true)
 end
 
 return M

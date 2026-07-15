@@ -1212,6 +1212,10 @@ end
 
 -- Origin side: the runner's outcome arrived. Print it, record it, and forward
 -- to the viewer UI (separate script, separate Lua state) if one is open.
+-- Cooldown map shared by need-confirm and go-loot ownership refreshes so a
+-- burst of "owned" signals does not spam request_source for the same peer.
+local confirm_refresh_at = {}
+
 function M.on_go_loot_result(msg)
     if type(msg) ~= "table" then return end
     local who = trim(msg.from or "?")
@@ -1229,6 +1233,30 @@ function M.on_go_loot_result(msg)
                 mq.cmd(string.format('/squelch /tgear golootnote %s %s %s', who, note, item_name))
             end)
         end
+    end
+    -- Same ownership refresh as need-confirm: ask the looter for a fast lite
+    -- inventory snap so BiS / needs_index drop them as needers without a hitch
+    -- (async actor request; disk flush happens when the reply lands).
+    local looted = msg.ok == true or note == "looted"
+    if looted and who ~= "" and who:lower() ~= me_name():lower() then
+        local server = tostring(mq.TLO.MacroQuest.Server() or "?")
+        local char_key = server .. "_" .. who
+        local now = os.clock()
+        local cooldown = math.max(5, tonumber(CFG.announce_confirm_refresh_cooldown_s) or 30)
+        if (now - (tonumber(confirm_refresh_at[char_key]) or 0)) >= cooldown then
+            confirm_refresh_at[char_key] = now
+            pcall(function()
+                local Engine = require('engine').Engine
+                if Engine and Engine.request_source then
+                    Engine.request_source(char_key, true, { fastInventory = true })
+                end
+            end)
+        end
+    elseif looted and who:lower() == me_name():lower() then
+        -- Local go-loot: inventory_watch.note_change already ran on the runner;
+        -- nudge once more here if this instance is the announce UI without the
+        -- runner's watch tick owning publish.
+        pcall(function() require('inventory_watch').note_change(true, false) end)
     end
 end
 
@@ -2104,7 +2132,6 @@ end
 -- Driver side: a peer answered the confirm round. Owned peers are dropped
 -- from the held bucket, and their box is asked for a fresh snapshot so the
 -- needs index rebuilds and future announces are right without a confirm.
-local confirm_refresh_at = {}
 
 function M.on_need_confirm_reply(msg)
     if type(msg) ~= "table" then return end

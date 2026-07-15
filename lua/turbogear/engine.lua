@@ -242,6 +242,9 @@ local function on_message(message)
             }
             diag.event("engine.request_reply", string.format("id=%s from=%s depth=%s",
                 tostring(c.replyTo), tostring(c.snap.name or "?"), tostring(c.snap.depth or "?")))
+            -- Explicit inventory requests (need-confirm / go-loot) should reach
+            -- the announce UI promptly; bg normally debounce-saves for ~30s.
+            pcall(function() Store.save() end)
         end
     elseif c.type == MSG.SNAPSHOT_DELTA and c.delta then
         Engine.stats.rx_delta = (Engine.stats.rx_delta or 0) + 1
