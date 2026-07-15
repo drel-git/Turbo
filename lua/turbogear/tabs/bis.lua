@@ -840,7 +840,19 @@ local function draw_linked_items_panel()
             ImGui.TableSetColumnIndex(3)
             draw_linked_needers(row, id)
             ImGui.TableSetColumnIndex(4)
-            ImGui.TextDisabled(linked_item_age_text(row.age_s))
+            local age = linked_item_age_text(row.age_s)
+            local cid = tonumber(row.corpse_id)
+            if cid then
+                ImGui.TextDisabled(age)
+                if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
+                    ImGui.SetTooltip(string.format("corpse %d", cid))
+                end
+            else
+                ImGui.TextDisabled(age)
+                if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
+                    ImGui.SetTooltip("no corpse id — Go buttons stay off")
+                end
+            end
         end
         ImGui.EndTable()
     end
@@ -877,8 +889,11 @@ draw_linked_needers = function(row, id)
         return
     end
     local ttl = tonumber(cfg.CFG.go_loot_corpse_ttl_s) or 420
+    -- Missing corpse_at still counts as fresh when we have a corpse_id (stamp
+    -- can lag a tick behind the id on pending rows).
+    local corpse_age = tonumber(row.corpse_age_s)
     local can_go = tonumber(row.corpse_id) ~= nil
-        and (tonumber(row.corpse_age_s) or math.huge) <= ttl
+        and (corpse_age == nil or corpse_age <= ttl)
     local go_status = row.go_status or {}
     for i, name in ipairs(needers) do
         if i > 1 then ImGui.SameLine() end
@@ -901,6 +916,9 @@ draw_linked_needers = function(row, id)
             end
         else
             col_text(Theme.missing, tostring(name))
+            if i == 1 and ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
+                ImGui.SetTooltip("Go loot unavailable: no corpse id on this linked row.\nNeeds a TurboLoot [ANNOUNCE]/[SKIP] handoff (or actor relay) while the corpse is fresh.")
+            end
         end
         local note = go_status[tostring(name)]
         if note and note ~= "" then

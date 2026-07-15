@@ -913,7 +913,7 @@ local function queue_group_text_target_checks(line, source)
     return queued, batch.snaps
 end
 
-local function add_text_candidate_need(hit, row, source, batch_key)
+local function add_text_candidate_need(hit, row, source, batch_key, corpse_id)
     local snap = row and row.snap
     if type(snap) ~= "table" or not snap.class or snap.class == "?" then return 0 end
     local item_name = tostring(hit and hit.name or "")
@@ -925,7 +925,7 @@ local function add_text_candidate_need(hit, row, source, batch_key)
     if not need then return 0 end
     note_loot_seen(item_name, source)
     local item_link = resolve_group_item_link(item_name, nil, item_id)
-    local bucket = ensure_group_announce(item_name, item_link, item_id, source)
+    local bucket = ensure_group_announce(item_name, item_link, item_id, source, corpse_id)
     if bucket then
         bucket.text_batch_key = tostring(batch_key or "")
         bucket.due = math.max(tonumber(bucket.due) or 0, os.clock() + group_window_s())
@@ -1300,8 +1300,10 @@ local function process_target_check(entry, deadline)
                 tonumber(CFG.announce_text_fallback_candidates) or 8)
         end)
         if ok and type(hits) == "table" then
+            local corpse_id = rules.corpse_id_from_line(entry.line)
             for _, hit in ipairs(hits) do
-                added = added + add_text_candidate_need(hit, row, entry.source or "text-targeted", entry.batch_key)
+                added = added + add_text_candidate_need(
+                    hit, row, entry.source or "text-targeted", entry.batch_key, corpse_id)
             end
         end
         if added > 0 then
@@ -1962,12 +1964,31 @@ end
 M._parse_item_links_for_test = parse_item_links
 M._has_unparseable_item_link_payload_for_test = has_unparseable_item_link_payload
 
+-- Driver boxes run UI (announce-active) + bg (announce-passive). Actors land
+-- on the bg mailbox only; without a local relay, corpse-aware LOOT_LINK never
+-- reaches the Linked items panel that draws Go buttons.
+local function forward_loot_to_local_ui(item_name, item_id, corpse_id)
+    if state.bg ~= true then return end
+    item_name = trim(item_name)
+    if item_name == "" then return end
+    mq.cmd(string.format('/squelch /tgear lootseenquiet "%s" %d %d',
+        item_name:gsub('"', ""),
+        math.floor(tonumber(item_id) or 0),
+        math.floor(tonumber(corpse_id) or 0)))
+end
+
 function M.on_loot_link(msg)
-    if passive then return end
-    if not SharedSettings.bisAnnounceEnabled then return end
     if type(msg) ~= "table" or type(msg.items) ~= "table" or #msg.items == 0 then return end
     local from = tostring(msg.from or "")
     if from ~= "" and from:lower() == me_name():lower() then return end
+
+    if passive then
+        for _, it in ipairs(msg.items) do
+            forward_loot_to_local_ui(it.name, it.id, it.corpse_id)
+        end
+        return
+    end
+    if not SharedSettings.bisAnnounceEnabled then return end
 
     refresh_settings_if_due()
     local links = {}
@@ -1997,14 +2018,17 @@ function M.on_loot_link(msg)
 end
 
 function M.on_loot_seen(item_name, item_id, item_link, source, corpse_id)
-    if passive then return false end
-    if not SharedSettings.bisAnnounceEnabled then return false end
-    refresh_settings_if_due()
     item_name = trim(item_name or "")
     item_id = tonumber(item_id) or 0
     item_link = tostring(item_link or "")
     corpse_id = tonumber(corpse_id) or 0
     if item_name == "" then return false end
+    if passive then
+        forward_loot_to_local_ui(item_name, item_id, corpse_id)
+        return false
+    end
+    if not SharedSettings.bisAnnounceEnabled then return false end
+    refresh_settings_if_due()
 
     local links = {{
         name = item_name,

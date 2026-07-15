@@ -39,6 +39,8 @@ check(R.corpse_id_from_line("[tl] [SELL] Junk (ID: 5)") == nil,
     'corpse id: SELL looted the item - no id')
 check(R.corpse_id_from_line("[tl] [ANNOUNCE] No id here") == nil,
     'corpse id: ANNOUNCE without (ID: n)')
+check(R.corpse_id_from_line("[tl] [ANNOUNCE] Foo (ID: 11) bar (ID: 131)") == 131,
+    'corpse id: last (ID:) wins')
 check(R.corpse_id_from_line("") == nil, 'corpse id: empty line')
 check(R.corpse_id_from_line("You tell the group, 'Sword of Truth'") == nil,
     'corpse id: plain link chat')

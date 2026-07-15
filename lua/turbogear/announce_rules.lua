@@ -170,14 +170,28 @@ end
 -- Looted-class tags (KEEP/SELL/BANK/...) are ignored: the item is gone.
 function M.corpse_id_from_line(line)
     line = tostring(line or "")
-    for tag, payload_start in line:gmatch("%[([^%]]+)%]()") do
+    local left_on_corpse = false
+    for tag in line:gmatch("%[([^%]]+)%]") do
         local t = tostring(tag or ""):lower()
         if t:find("announce", 1, true) or t:find("skip", 1, true) or t:find("ignore", 1, true) then
-            local id = line:sub(payload_start):match("%(%s*ID%s*:%s*(%d+)%s*%)")
-            if id then return tonumber(id) end
+            left_on_corpse = true
+            break
+        end
+        -- Looted-class tags mean the item is gone; never treat their (ID:) as
+        -- an actionable corpse spawn id.
+        if t:find("keep", 1, true) or t:find("sell", 1, true) or t:find("bank", 1, true)
+            or t:find("destroy", 1, true) or t:find("tribute", 1, true) then
+            return nil
         end
     end
-    return nil
+    if not left_on_corpse then return nil end
+    -- Last (ID: n) wins: TurboLoot stamps the corpse id at the end of the line;
+    -- link frames can embed earlier numeric noise.
+    local id
+    for n in line:gmatch("%(%s*ID%s*:%s*(%d+)%s*%)") do
+        id = n
+    end
+    return id and tonumber(id) or nil
 end
 
 -- Coordinator beacon freshness: the driver UI stamps shared settings while it

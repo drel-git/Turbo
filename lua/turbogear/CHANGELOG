@@ -1,3 +1,10 @@
+1.2.5
+- Go loot: announce-passive bg on the driver box now relays peer LOOT_LINK /
+  lootseen drops to the local UI via /tgear lootseenquiet. Actors only land on
+  the bg mailbox, so 1.2.4's corpse-aware broadcast never reached the panel that
+  draws Go buttons (plain red needers). Also treat a missing corpse_at as fresh
+  when corpse_id is present, and tooltip Age/needers when Go is unavailable.
+
 1.2.4
 - Go loot / announce: TurboLoot's structured handoff now calls /tgearbg (looters
   usually bind that, not /tgear) and passes the corpse spawn id, then broadcasts
