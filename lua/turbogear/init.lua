@@ -906,7 +906,12 @@ local function run_loop(inspect_tick, peer_refresh)
         else
             announcer.tick()
         end
-        require('go_loot').tick()
+        -- Never let a go-loot tick error kill the bg/UI run loop (that left E3
+        -- paused and the panel stuck on "sent"/"going" with no finish).
+        local okGo, goErr = pcall(function() require('go_loot').tick() end)
+        if not okGo then
+            print(string.format("\ar[TurboGear]\ax go-loot tick error: %s", tostring(goErr)))
+        end
         if inspect_tick then inspect_tick() end
         tick_perfdiag_capture()
         -- Per-frame non-render work gauge (P5): total time this loop pass spent

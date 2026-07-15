@@ -878,9 +878,12 @@ local LINKED_SEND_BUTTONS = {
 -- they travel through /tgear golootnote argument parsing).
 local GO_LOOT_NOTES = {
     sent = "sent", going = "going", looted = "looted",
+    revealing = "revealing", heading = "heading", opening = "opening",
+    looting = "looting",
     busy = "runner busy", in_combat = "in combat",
     corpse_gone = "corpse gone", too_far = "too far", not_found = "item gone",
-    timeout_move = "couldn't reach", no_target = "no target",
+    timeout_move = "couldn't reach", timeout_job = "timed out",
+    no_target = "no target",
     no_window = "window didn't open", window_closed = "window closed",
     loot_failed = "loot failed", no_corpse_id = "no corpse id",
 }

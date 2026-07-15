@@ -24,6 +24,7 @@ local job = nil
 local ARRIVE_DIST = 15.0
 local REVEAL_WAIT_S = 1.2
 local NAV_REISSUE_S = 4.0
+local JOB_MAX_S = 90.0
 
 local function now_s() return os.clock() end
 
@@ -39,6 +40,8 @@ local function corpse_spawn(corpse_id)
         if typ == "corpse" or typ:find("corpse", 1, true) then return sp end
         local okD, dead = pcall(function() return sp.Dead() == true end)
         if okD and dead then return sp end
+        -- TurboLoot stamped this spawn id; trust it if the id still resolves.
+        if typ == "" then return sp end
         return nil
     end)
     if ok then return s end
@@ -48,7 +51,11 @@ end
 local function corpse_distance(corpse_id)
     local s = corpse_spawn(corpse_id)
     if not s then return nil end
-    local ok, d = pcall(function() return tonumber(s.Distance3D() or 0) end)
+    local ok, d = pcall(function()
+        local d3 = tonumber(s.Distance3D() or 0)
+        if d3 and d3 > 0 then return d3 end
+        return tonumber(s.Distance() or 0)
+    end)
     if ok then return d end
     return nil
 end
@@ -146,11 +153,18 @@ local function stop_chase_and_stick()
     end)
 end
 
+local function target_corpse(corpse_id)
+    pcall(function()
+        mq.cmd(string.format('/squelch /target id %d', corpse_id))
+        mq.cmd(string.format('/squelch /face fast id %d', corpse_id))
+    end)
+end
+
 -- ---------------------------------------------------------------------------
 -- Pure decision core. ctx carries plain values; returns { action = <string>,
 -- note = <token or nil> }. Actions: "wait", "arrived", "fail", "open_window",
--- "found", "not_found", "confirm", "accept_quantity", "stash_cursor",
--- "done_looted", "fail_loot", "ready", "retry_reveal".
+-- "loot_anyway", "found", "not_found", "confirm", "accept_quantity",
+-- "stash_cursor", "done_looted", "fail_loot", "ready", "retry_reveal".
 -- ---------------------------------------------------------------------------
 function M.decide(phase, ctx)
     ctx = ctx or {}
@@ -179,7 +193,12 @@ function M.decide(phase, ctx)
     elseif phase == "open" then
         if not ctx.corpse_exists then return { action = "fail", note = "corpse_gone" } end
         if ctx.target_is_corpse then return { action = "open_window" } end
-        if ctx.timed_out then return { action = "fail", note = "no_target" } end
+        if ctx.timed_out then
+            -- Already in loot range but target did not stick: try /loot anyway
+            -- (TurboLoot does the same when pathing "arrives" without a clean target).
+            if ctx.close_enough then return { action = "loot_anyway" } end
+            return { action = "fail", note = "no_target" }
+        end
         return { action = "wait" }
     elseif phase == "window" then
         if ctx.window_open then return { action = "found" } end -- proceed to scan
@@ -189,12 +208,13 @@ function M.decide(phase, ctx)
         if not ctx.window_open then return { action = "fail", note = "window_closed" } end
         if (tonumber(ctx.item_slot) or 0) > 0 then return { action = "found" } end
         if ctx.scan_complete then return { action = "not_found", note = "not_found" } end
+        if ctx.timed_out then return { action = "fail", note = "not_found" } end
         return { action = "wait" }
     elseif phase == "pickup" then
         if ctx.confirm_open then return { action = "confirm" } end
         if ctx.quantity_open then return { action = "accept_quantity" } end
         if ctx.cursor_item then return { action = "stash_cursor" } end
-        if ctx.slot_empty then return { action = "done_looted", note = "looted" } end
+        if ctx.slot_empty or ctx.got_item then return { action = "done_looted", note = "looted" } end
         if ctx.timed_out then return { action = "fail_loot", note = "loot_failed" } end
         return { action = "wait" }
     end
@@ -235,19 +255,48 @@ local function report(j, ok, note)
     end
 end
 
+-- Interim panel/chat status (does not end the job). Tokens stay space-free.
+local function progress(j, note)
+    note = tostring(note or "")
+    if note == "" or not j then return end
+    if j.last_progress == note then return end
+    j.last_progress = note
+    report(j, true, note)
+end
+
+local function begin_open(j)
+    stop_movement(j.used_nav)
+    j.moving = false
+    j.phase = "open"
+    j.deadline = now_s() + 5
+    target_corpse(j.corpse_id)
+    progress(j, "opening")
+    print(string.format("\at[TurboGear]\ax go-loot: opening corpse %d for %s",
+        j.corpse_id, j.item_name))
+end
+
 local function begin_move(j)
+    local dist = corpse_distance(j.corpse_id)
+    -- Already in loot range: do not fire /nav (Nav "Reached destination" can
+    -- arrive long after we should have /loot'd, and left us stuck in move).
+    if dist ~= nil and dist <= ARRIVE_DIST then
+        print(string.format("\at[TurboGear]\ax go-loot: already at corpse %d for %s (%.0fft)",
+            j.corpse_id, j.item_name, dist))
+        begin_open(j)
+        return
+    end
     local used_nav = nav_available()
     j.used_nav = used_nav
     j.moving = true
     j.phase = "move"
     j.deadline = now_s() + (tonumber(CFG.go_loot_arrive_timeout_s) or 45)
     j.last_nav_at = now_s()
-    local dist = corpse_distance(j.corpse_id)
     if used_nav then
         mq.cmd(string.format('/squelch /nav id %d distance=%d', j.corpse_id, math.floor(ARRIVE_DIST) - 5))
     else
         mq.cmd(string.format('/squelch /moveto id %d', j.corpse_id))
     end
+    progress(j, "heading")
     print(string.format("\at[TurboGear]\ax go-loot: heading to corpse %d for %s (%s, %.0fft)",
         j.corpse_id, j.item_name, used_nav and "nav" or "moveto", tonumber(dist) or -1))
 end
@@ -273,6 +322,13 @@ local function finish(ok, note)
     end
 end
 
+local function enter_window_phase(j)
+    mq.cmd('/loot')
+    j.phase = "window"
+    j.deadline = now_s() + (tonumber(CFG.go_loot_window_timeout_s) or 6)
+    progress(j, "looting")
+end
+
 -- Start a job. payload: { item_name, item_id, corpse_id, reply_to }.
 -- Returns true, or false + a token describing why it refused.
 function M.request(payload)
@@ -280,16 +336,21 @@ function M.request(payload)
     local corpse_id = tonumber(payload.corpse_id) or 0
     local item_name = tostring(payload.item_name or "")
     if job then
-        -- Duplicate clicks / double actor delivery while reveal/nav is already
-        -- running: treat the same corpse+item as still in progress, not busy.
-        local same = (tonumber(job.corpse_id) or 0) == corpse_id
-            and tostring(job.item_name or ""):lower() == item_name:lower()
-        if same then
-            local reply = tostring(payload.reply_to or "")
-            if reply ~= "" then job.reply_to = reply end
-            return true, "already"
+        -- Stale job that never finished (e.g. tick error left E3 paused): clear
+        -- it so a new Go click can recover instead of returning "already" forever.
+        local age = now_s() - (tonumber(job.started_at) or now_s())
+        if age >= JOB_MAX_S then
+            finish(false, "timeout_job")
+        else
+            local same = (tonumber(job.corpse_id) or 0) == corpse_id
+                and tostring(job.item_name or ""):lower() == item_name:lower()
+            if same then
+                local reply = tostring(payload.reply_to or "")
+                if reply ~= "" then job.reply_to = reply end
+                return true, "already"
+            end
+            return false, "busy"
         end
-        return false, "busy"
     end
     if corpse_id <= 0 then return false, "no_corpse_id" end
     if item_name == "" then return false, "no_item" end
@@ -319,6 +380,7 @@ function M.request(payload)
         max_distance = max_dist,
         revealed_corpses = false,
         reveal_retries_left = 2,
+        started_at = now_s(),
     }
 
     if dist ~= nil then
@@ -338,6 +400,7 @@ function M.request(payload)
     job.revealed_corpses = true
     job.phase = "reveal"
     job.deadline = now_s() + REVEAL_WAIT_S
+    progress(job, "revealing")
     print(string.format("\at[TurboGear]\ax go-loot: revealing hidden corpses for id %d (%s)",
         corpse_id, job.item_name))
     return true
@@ -346,8 +409,7 @@ end
 function M.busy() return job ~= nil end
 
 local function find_item_slot(j)
-    -- Scan the open corpse for the item by name (case-insensitive exact first,
-    -- then prefix - loot slots show full names, so exact should normally hit).
+    -- Scan the open corpse for the item by name (case-insensitive exact).
     local want = tostring(j.item_name or ""):lower()
     local okN, count = pcall(function() return tonumber(mq.TLO.Corpse.Items() or 0) end)
     if not okN then return 0, true end
@@ -361,9 +423,10 @@ local function find_item_slot(j)
     return 0, true
 end
 
-function M.tick()
-    if not job then return end
+local function tick_once()
     local j = job
+    if not j then return false end
+    local phase_before = j.phase
     local timed_out = now_s() > (tonumber(j.deadline) or 0)
 
     if j.phase == "reveal" then
@@ -393,11 +456,7 @@ function M.tick()
             timed_out = timed_out,
         })
         if d.action == "arrived" then
-            stop_movement(j.used_nav)
-            j.moving = false
-            mq.cmd(string.format('/squelch /target id %d', j.corpse_id))
-            j.phase = "open"
-            j.deadline = now_s() + 3
+            begin_open(j)
         elseif d.action == "wait" then
             -- E3 / follow can cancel nav; re-issue periodically while walking.
             local now = now_s()
@@ -416,16 +475,18 @@ function M.tick()
         end
     elseif j.phase == "open" then
         local s = corpse_spawn(j.corpse_id)
+        local dist = s and corpse_distance(j.corpse_id) or nil
         local okT, target_id = pcall(function() return tonumber(mq.TLO.Target.ID() or 0) end)
         local d = M.decide("open", {
             corpse_exists = s ~= nil,
             target_is_corpse = okT and (target_id or 0) == j.corpse_id,
+            close_enough = dist ~= nil and dist <= ARRIVE_DIST,
             timed_out = timed_out,
         })
-        if d.action == "open_window" then
-            mq.cmd('/loot')
-            j.phase = "window"
-            j.deadline = now_s() + (tonumber(CFG.go_loot_window_timeout_s) or 6)
+        if d.action == "open_window" or d.action == "loot_anyway" then
+            enter_window_phase(j)
+        elseif d.action == "wait" then
+            target_corpse(j.corpse_id)
         elseif d.action == "fail" then
             finish(false, d.note)
         end
@@ -437,6 +498,10 @@ function M.tick()
             j.deadline = now_s() + 4
         elseif d.action == "fail" then
             finish(false, d.note)
+        elseif d.action == "wait" then
+            -- Keep trying /loot while waiting for the window.
+            target_corpse(j.corpse_id)
+            mq.cmd('/loot')
         end
     elseif j.phase == "scan" then
         local okW, open = pcall(function() return mq.TLO.Window('LootWnd').Open() == true end)
@@ -445,6 +510,7 @@ function M.tick()
             window_open = okW and open,
             item_slot = slot,
             scan_complete = complete,
+            timed_out = timed_out,
         })
         if d.action == "found" then
             j.slot = slot
@@ -455,7 +521,7 @@ function M.tick()
             finish(false, d.note)
         end
     elseif j.phase == "pickup" then
-        local ctx = {}
+        local ctx = { got_item = j.got_item == true }
         pcall(function() ctx.confirm_open = mq.TLO.Window('ConfirmationDialogBox').Open() == true end)
         pcall(function() ctx.quantity_open = mq.TLO.Window('QuantityWnd').Open() == true end)
         pcall(function() ctx.cursor_item = (tonumber(mq.TLO.Cursor.ID() or 0) or 0) > 0 end)
@@ -470,7 +536,6 @@ function M.tick()
             mq.cmd('/squelch /notify QuantityWnd AcceptButton leftmouseup')
         elseif d.action == "stash_cursor" then
             mq.cmd('/squelch /autoinventory')
-            -- Cursor had the item: the pickup worked even if the slot read lags.
             j.got_item = true
         elseif d.action == "done_looted" then
             finish(true, d.note)
@@ -479,6 +544,21 @@ function M.tick()
         end
     else
         finish(false, "bad_phase")
+    end
+
+    return job ~= nil and job.phase ~= phase_before
+end
+
+function M.tick()
+    if not job then return end
+    if (now_s() - (tonumber(job.started_at) or now_s())) >= JOB_MAX_S then
+        finish(false, "timeout_job")
+        return
+    end
+    -- Allow reveal->open->window to advance in one frame when already in range
+    -- so we do not sit in "move" waiting on a pointless /nav completion.
+    for _ = 1, 6 do
+        if not tick_once() then break end
     end
 end
 

@@ -1,3 +1,9 @@
+1.2.11
+- Go loot: if already in range, skip /nav and open immediately (fixes 8ft "nav
+  reached later, never looted"); retarget/face + /loot retries; loot-anyway when
+  target will not stick; job watchdog resumes E3; duplicate Go acks "going"
+  instead of leaving the panel on "sent"; phase notes (revealing/heading/...).
+
 1.2.10
 - Go loot: pause E3 (/e3p on) for the run like TurboLoot so chase/follow cannot
   cancel nav after Reloot; longer corpse reveal wait + retries; re-issue nav

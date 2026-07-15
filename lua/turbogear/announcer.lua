@@ -1201,15 +1201,16 @@ function M.on_go_loot(msg)
     pcall(function()
         local Engine = require('engine').Engine
         if not (Engine and Engine.send_go_loot_result) then return end
-        if ok and err ~= "already" then
-            -- Ack so the panel shows "going" instead of staying on "sent".
+        if ok then
+            -- Ack "going" for fresh accepts AND duplicates ("already") so the
+            -- panel does not stick on "sent" when a second Go hits an in-flight job.
             Engine.send_go_loot_result(reply_to, {
                 item_name = item_name,
                 corpse_id = corpse_id,
                 ok = true,
                 note = "going",
             })
-        elseif not ok then
+        else
             Engine.send_go_loot_result(reply_to, {
                 item_name = item_name,
                 corpse_id = corpse_id,

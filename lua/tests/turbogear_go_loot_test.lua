@@ -76,6 +76,14 @@ check(G.decide("open", { corpse_exists = true, target_is_corpse = true }).action
 check(G.decide("open", { corpse_exists = false }).note == "corpse_gone", 'open: corpse rotted fails')
 check(G.decide("open", { corpse_exists = true, target_is_corpse = false, timed_out = true }).note == "no_target",
     'open: cannot target fails')
+check(G.decide("open", {
+    corpse_exists = true, target_is_corpse = false, timed_out = true, close_enough = true,
+}).action == "loot_anyway", 'open: close enough tries loot without target')
+
+-- decide: scan timeout
+check(G.decide("scan", {
+    window_open = true, item_slot = 0, scan_complete = false, timed_out = true,
+}).note == "not_found", 'scan: timeout fails')
 
 -- decide: window phase
 check(G.decide("window", { window_open = true }).action == "found", 'window: open proceeds')
