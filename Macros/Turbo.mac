@@ -1,0 +1,604 @@
+|   *  *  *  *  *  *  *  *  [  T u r b o   A u t o - L o o t  ]  *  *  *  *  *  *  *  *
+|                       _____ _   _____________  _____ 
+|                       |_   _| | | | ___ \ ___ \|  _  |
+|                         | | | | | | |_/ / |_/ /| | | |
+|                         | | | | | |    /| ___ \| | | |
+|                         | | | |_| | |\ \| |_/ /\ \_/ / 
+|                         \_/  \___/\_| \_\____/  \___/
+|---------------------------------------------------------------------------------->
+|                  https://www.github.com/drel-git/TurboLoot
+|             Turbo Auto-Loot v3.9.74  -  setup / toggle / pick group looter
+| @version Turbo.mac 3.9.74
+|---------------------------------------------------------------------------------->
+|
+| Usage:
+|   /mac Turbo              — cycle to next group member as looter
+|   /mac Turbo CharName     — set specific character as looter
+|   /mac Turbo on           — enable auto-loot (sweeps existing corpses too)
+|   /mac Turbo off          — disable auto-loot (Turbo=false, looter=NOBODY)
+|   /mac Turbo all          — toggle ALL-loot mode (everyone loots on each kill)
+|   /mac Turbo loot         — sweep nearby corpses now
+|   /mac Turbo combatloot   — toggle looting during combat
+|   /mac Turbo list         — show group members, current looter, Turbo state
+|   /mac Turbo setup        — one-time: write auto-loot config to your E3 INI
+|   /mac Turbo setup FILE   — same, but specify INI filename (e.g. Sketti_Lazarus.ini)
+|   /mac Turbo help         — show usage
+|
+| Turbo.mac is kept as the short compatible command name.
+| Sets the E3 variables GrpLootMode, GrpMainLooter, GrpLootAll, GrpLoot1-6,
+| and Turbo used by the tank's auto-loot event.
+
+#turbo 40
+
+Sub Main(string argIn, string arg2In)
+  /declare tpTag string local \at[Turbo]\ax
+  /declare arg string local ${argIn}
+  /declare argUp string local ${arg.Upper}
+  /declare currentLooter string local ${MQ2Mono.Query[e3,GrpMainLooter]}
+  /declare lootMode string local ${MQ2Mono.Query[e3,GrpLootMode]}
+  /declare turboState string local ${MQ2Mono.Query[e3,Turbo]}
+  /declare corpseRad int local ${Int[${MQ2Mono.Query[e3,LootRadius]}]}
+  /if (!${corpseRad} || ${corpseRad} < 1) /varset corpseRad 50
+  /if (!${lootMode.Length} || ${lootMode.Equal[NULL]}) /varset lootMode single
+
+  | ---- SETUP ----
+  | Optional 2nd arg: INI filename override, e.g. /mac Turbo setup Sketti_Lazarus.ini
+  /if (${argUp.Equal[SETUP]}) {
+    /call DoSetup "${tpTag}" "${arg2In}"
+    /return
+  }
+
+  | ---- ON ----
+  /if (${argUp.Equal[ON]}) {
+    /e3varset Turbo true
+    /declare lootAllOn string local ${MQ2Mono.Query[e3,GrpLootAll]}
+    /if (${lootAllOn.Equal[true]} || ${lootMode.Equal[all]}) {
+      /e3varset GrpLootMode all
+      /echo ${tpTag} \agAuto-loot ON.\ax Mode: \acALL LOOT\ax
+      /e3bc /echo ${tpTag} Auto-loot \agON\ax. Mode: \acALL LOOT\ax
+    } else /if (${lootMode.Equal[multi]}) {
+      /echo ${tpTag} \agAuto-loot ON.\ax Mode: \acMULTI LOOT\ax
+      /e3bc /echo ${tpTag} Auto-loot \agON\ax. Mode: \acMULTI LOOT\ax
+    } else {
+      /if (!${currentLooter.Length} || ${currentLooter.Equal[NOBODY]} || ${currentLooter.Equal[NULL]}) {
+        /call CycleToNext "${tpTag}" "${currentLooter}"
+      } else {
+        /echo ${tpTag} \agAuto-loot ON.\ax Looter: \ag${currentLooter}\ax
+        /e3bc /echo ${tpTag} Auto-loot \agON\ax. Looter: \ag${currentLooter}\ax
+      }
+    }
+    | Sweep existing corpses if any
+    /if (${SpawnCount[npccorpse radius ${corpseRad}]}) {
+      /echo ${tpTag} \aoSweeping ${SpawnCount[npccorpse radius ${corpseRad}]} nearby corpse(s)...\ax
+      /if (${lootAllOn.Equal[true]} || ${lootMode.Equal[all]}) {
+        /squelch /e3bcaa /mac TurboLoot
+      } else /if (${lootMode.Equal[multi]}) {
+        /call SendMultiLooters "${tpTag}" ${SpawnCount[npccorpse radius ${corpseRad}]}
+      } else /if (${MQ2Mono.Query[e3,GrpMainLooter].NotEqual[NOBODY]}) {
+        /squelch /e3bct ${MQ2Mono.Query[e3,GrpMainLooter]} /mac TurboLoot
+      }
+    }
+    /return
+  }
+
+  | ---- OFF ----
+    /if (${arg.Length} && (${argUp.Equal[OFF]} || ${argUp.Equal[NONE]} || ${argUp.Equal[NOBODY]})) {
+    /e3varset Turbo false
+    /e3varset GrpLootMode single
+    /e3varset GrpMainLooter NOBODY
+    /echo ${tpTag} \arAuto-loot OFF.\ax Looter set to \ayNOBODY\ax.
+    /e3bc /echo ${tpTag} Auto-loot \arOFF\ax.
+    /return
+  }
+
+  | ---- LOOT (sweep existing corpses) ----
+  /if (${argUp.Equal[LOOT]} || ${argUp.Equal[LOOTNOW]}) {
+    /if (!${SpawnCount[npccorpse radius ${corpseRad}]}) {
+      /echo ${tpTag} \awNo corpses nearby.\ax
+      /return
+    }
+    /declare lootAllLoot string local ${MQ2Mono.Query[e3,GrpLootAll]}
+    /declare lootModeLoot string local ${MQ2Mono.Query[e3,GrpLootMode]}
+    /if (${lootAllLoot.Equal[true]} || ${lootModeLoot.Equal[all]}) {
+      /echo ${tpTag} \aoLoot ALL sent (${SpawnCount[npccorpse radius ${corpseRad}]} corpses).\ax
+      /squelch /e3bcaa /mac TurboLoot
+    } else /if (${lootModeLoot.Equal[multi]}) {
+      /call SendMultiLooters "${tpTag}" ${SpawnCount[npccorpse radius ${corpseRad}]}
+    } else {
+      /if (!${currentLooter.Length} || ${currentLooter.Equal[NOBODY]} || ${currentLooter.Equal[NULL]}) {
+        /echo ${tpTag} \arNo looter set.\ax Pick one first, or use \ac/mac Turbo all\ax.
+        /return
+      }
+      /echo ${tpTag} \aoLoot sent to \ag${currentLooter}\ax (${SpawnCount[npccorpse radius ${corpseRad}]} corpses).\ax
+      /squelch /e3bct ${currentLooter} /mac TurboLoot
+    }
+    /return
+  }
+
+  | ---- ALL (everyone loots) toggle ----
+  /if (${argUp.Equal[ALL]}) {
+    /declare allState string local ${MQ2Mono.Query[e3,GrpLootAll]}
+    /if (${allState.Equal[true]}) {
+      /e3varset GrpLootAll false
+      /e3varset GrpLootMode single
+      /echo ${tpTag} Loot ALL \arOFF\ax. Single-looter mode.
+      /e3bc /echo ${tpTag} Loot ALL \arOFF\ax.
+    } else {
+      /e3varset GrpLootAll true
+      /e3varset GrpLootMode all
+      /echo ${tpTag} Loot ALL \agON\ax. All characters will loot on each kill.
+      /e3bc /echo ${tpTag} Loot ALL \agON\ax.
+    }
+    /return
+  }
+
+  | ---- COMBATLOOT toggle ----
+  /if (${argUp.Equal[COMBATLOOT]} || ${argUp.Equal[COMBAT]}) {
+    /declare clState string local ${MQ2Mono.Query[e3,CombatLoot]}
+    /if (${clState.Equal[true]}) {
+      /e3varset CombatLoot false
+      /echo ${tpTag} Combat loot \arOFF\ax. Will only loot when area is clear.
+    } else {
+      /e3varset CombatLoot true
+      /echo ${tpTag} Combat loot \agON\ax. Will loot even with aggressive mobs nearby.
+    }
+    /return
+  }
+
+  | ---- LIST ----
+  /if (${argUp.Equal[LIST]} || ${argUp.Equal[STATUS]}) {
+    /call DoList "${tpTag}" "${currentLooter}" "${turboState}"
+    /return
+  }
+
+  | ---- HELP ----
+  /if (${arg.Length} && ${argUp.Equal[HELP]}) {
+    /echo \au<<< \ar---------- \atTurbo Auto-Loot Help \ar---------- \au>>>\ax
+    /echo \awVersion: \ag3.9.74\aw  Command: \ag/mac Turbo\aw  Purpose: auto-loot controller\ax
+    /echo \aw  Name note: \agTurbo.mac\aw is kept for compatibility; it controls auto-loot.\ax
+    /echo \aw \ax
+    /echo \at==== \aySUITE MAP \at====\ax
+    /echo \aw  \agTurboLoot.mac\ax = loot/sell/bank/tribute/destroy by INI rules\ax
+    /echo \aw  \ag/lua run Turbo\ax or \ag/mac Turbo\ax = auto-loot controller and looter picker\ax
+    /echo \aw  \agTurboKey.mac\ax = tag cursor item into turboloot.ini\ax
+    /echo \aw  \agTurboGive.mac\ax = share/collect/hand items and coin between characters\ax
+    /echo \aw \ax
+    /echo \at==== \ayLOOTER SELECTION \at====\ax
+    /echo \aw    \ag/mac Turbo\ax
+    /echo \aw      cycle to next group member as looter\ax
+    /echo \aw    \ag/mac Turbo \atCharName\ax
+    /echo \aw      set specific character as looter\ax
+    /echo \aw    \ac/mac Turbo all\ax
+    /echo \aw      toggle ALL-loot mode (everyone loots)\ax
+    /echo \aw \ax
+    /echo \at==== \ayTOGGLES \at====\ax
+    /echo \aw    \ag/mac Turbo on\ax
+    /echo \aw      enable auto-loot (sweeps existing corpses)\ax
+    /echo \aw    \ar/mac Turbo off\ax
+    /echo \aw      disable auto-loot (Turbo=false, looter=NOBODY)\ax
+    /echo \aw    \ay/mac Turbo combatloot\ax
+    /echo \aw      toggle looting during combat\ax
+    /echo \aw \ax
+    /echo \at==== \ayACTIONS \at====\ax
+    /echo \aw    \ao/mac Turbo loot\ax
+    /echo \aw      sweep nearby corpses now\ax
+    /echo \aw    \ao/mac Turbo list\ax
+    /echo \aw      show group members, current looter, state\ax
+    /echo \aw \ax
+    /echo \at==== \aySETUP \at====\ax
+    /echo \aw    \ay/mac Turbo setup\ax
+    /echo \aw      one-time: write auto-loot config to E3 INI\ax
+    /echo \aw    \ay/mac Turbo setup \atFile.ini\ax
+    /echo \aw      same, but specify INI filename\ax
+    /echo \aw \ax
+    /echo \at==== \ayGUI \at====\ax
+    /echo \aw    \ag/lua run Turbo\ax
+    /echo \aw      open the visual looter picker GUI\ax
+    /echo \aw \ax
+    /echo \at==== \aySTATUS \at====\ax
+    /echo \aw  Turbo: ${If[${turboState.Equal[true]},\agON\ax,\arOFF\ax]}  Looter: \ag${currentLooter}\ax
+    /echo \aw \ax
+    /echo \aw  \aohttps://github.com/drel-git/TurboLoot\ax
+    /return
+  }
+
+  | ---- EXPLICIT NAME ----
+  /if (${arg.Length}) {
+    /if (${SpawnCount[pc ${arg}]} || ${Spawn[=${arg}].ID}) {
+      /call ClearMultiLooters
+      /e3varset GrpLootMode single
+      /e3varset GrpLootAll false
+      /e3varset GrpMainLooter ${arg}
+      /echo ${tpTag} Looter set to \ag${arg}\ax.
+      /e3bc /echo ${tpTag} Looter set to \ag${arg}\ax.
+      /return
+    } else {
+      /echo ${tpTag} \arCannot find \ay${arg}\ar in zone. Check the name.\ax
+      /return
+    }
+  }
+
+  | ---- NO ARG: CYCLE ----
+  /call CycleToNext "${tpTag}" "${currentLooter}"
+/return
+
+| =====================================================================
+| CLEAR MULTI-LOOT SLOTS
+| =====================================================================
+Sub ClearMultiLooters
+  /declare mlIdx int local
+  /for mlIdx 1 to 6
+    /e3varset GrpLoot${mlIdx} NOBODY
+  /next mlIdx
+/return
+
+| =====================================================================
+| SEND MULTI-LOOT COMMANDS
+| =====================================================================
+Sub SendMultiLooters(string tpTag, int corpseCount)
+  /declare mlIdx int local
+  /declare mlDelay int local
+  /declare mlName string local
+  /declare mlSent int local 0
+
+  /for mlIdx 1 to 6
+    /varset mlName ${MQ2Mono.Query[e3,GrpLoot${mlIdx}]}
+    /if (!${mlName.Length} || ${mlName.Equal[NOBODY]} || ${mlName.Equal[NULL]}) /continue
+    /if (${mlSent} == 0) {
+      /squelch /e3bct ${mlName} /mac TurboLoot
+    } else {
+      /varcalc mlDelay ${mlSent}*15
+      /timed ${mlDelay} /squelch /e3bct ${mlName} /mac TurboLoot
+    }
+    /varcalc mlSent ${mlSent}+1
+  /next mlIdx
+
+  /if (${mlSent} > 0) {
+    /echo ${tpTag} \aoLoot MULTI sent to \ag${mlSent}\ao character(s) (${corpseCount} corpses).\ax
+  } else {
+    /echo ${tpTag} \arMULTI mode has no looters set.\ax Use the Lua GUI to select looters.
+  }
+/return ${mlSent}
+
+| =====================================================================
+| CYCLE TO NEXT GROUP MEMBER
+| =====================================================================
+Sub CycleToNext(string tpTag, string currentLooter)
+  /if (!${Me.Grouped}) {
+    /call ClearMultiLooters
+    /e3varset GrpLootMode single
+    /e3varset GrpLootAll false
+    /e3varset GrpMainLooter ${Me.Name}
+    /echo ${tpTag} Solo — looter set to \ag${Me.Name}\ax.
+    /return
+  }
+
+  /declare memberCount int local 0
+  /declare idx int local
+  /declare memberName string local
+  /declare foundCurrent bool local FALSE
+  /declare nextLooter string local
+  /declare firstName string local
+
+  /for idx 0 to ${Group.Members}
+    /if (${idx} == 0) {
+      /varset memberName ${Group.Leader.Name}
+    } else {
+      /if (!${Group.Member[${idx}].Name.Length} || ${Group.Member[${idx}].Offline}) /continue
+      /varset memberName ${Group.Member[${idx}].Name}
+    }
+    /if (!${memberName.Length} || ${memberName.Equal[NULL]}) /continue
+
+    /varcalc memberCount ${memberCount}+1
+    /if (${memberCount} == 1) /varset firstName ${memberName}
+
+    /if (${foundCurrent} && !${nextLooter.Length}) {
+      /varset nextLooter ${memberName}
+    }
+    /if (${memberName.Equal[${currentLooter}]}) {
+      /varset foundCurrent TRUE
+    }
+  /next idx
+
+  /if (!${nextLooter.Length} && ${firstName.Length}) {
+    /varset nextLooter ${firstName}
+  }
+
+  /if (!${nextLooter.Length}) {
+    /echo ${tpTag} \arNo group members found to cycle.\ax
+    /return
+  }
+
+  /call ClearMultiLooters
+  /e3varset GrpLootMode single
+  /e3varset GrpLootAll false
+  /e3varset GrpMainLooter ${nextLooter}
+  /echo ${tpTag} Looter set to \ag${nextLooter}\ax (was: ${If[${currentLooter.Equal[NOBODY]},\ayNOBODY\ax,\ao${currentLooter}\ax]}).
+  /e3bc /echo ${tpTag} Looter set to \ag${nextLooter}\ax.
+/return
+
+| =====================================================================
+| LIST — show group members, current looter, and Turbo state
+| =====================================================================
+Sub DoList(string tpTag, string currentLooter, string turboState)
+  /declare combatState string local ${MQ2Mono.Query[e3,CombatLoot]}
+  /declare allState string local ${MQ2Mono.Query[e3,GrpLootAll]}
+  /declare modeState string local ${MQ2Mono.Query[e3,GrpLootMode]}
+  /declare listCorpseRad int local ${Int[${MQ2Mono.Query[e3,LootRadius]}]}
+  /if (!${listCorpseRad} || ${listCorpseRad} < 1) /varset listCorpseRad 50
+  /if (!${modeState.Length} || ${modeState.Equal[NULL]}) /varset modeState single
+  /echo ${tpTag} \ao--- Status ---\ax
+  /echo ${tpTag}   Turbo: ${If[${turboState.Equal[true]},\agON\ax,\arOFF\ax]}
+  /echo ${tpTag}   Combat Loot: ${If[${combatState.Equal[true]},\agON\ax,\arOFF\ax]}
+  /echo ${tpTag}   Mode: \ag${modeState}\ax  Loot ALL: ${If[${allState.Equal[true]},\acON\ax,\arOFF\ax]}
+  /echo ${tpTag}   Looter: ${If[${currentLooter.Equal[NOBODY]},\ayNOBODY\ax,\ag${currentLooter}\ax]}
+  /if (${modeState.Equal[multi]}) {
+    /echo ${tpTag}   Multi looters: \ag${MQ2Mono.Query[e3,GrpLoot1]}\ax, \ag${MQ2Mono.Query[e3,GrpLoot2]}\ax, \ag${MQ2Mono.Query[e3,GrpLoot3]}\ax, \ag${MQ2Mono.Query[e3,GrpLoot4]}\ax, \ag${MQ2Mono.Query[e3,GrpLoot5]}\ax, \ag${MQ2Mono.Query[e3,GrpLoot6]}\ax
+  }
+  /echo ${tpTag}   Corpses nearby: \ay${SpawnCount[npccorpse radius ${listCorpseRad}]}\ax
+
+  /if (!${Me.Grouped}) {
+    /echo ${tpTag}   (not grouped)
+    /return
+  }
+
+  /echo ${tpTag}   \aoGroup:\ax
+  /declare idx int local
+  /declare memberName string local
+  /declare num int local 0
+
+  /for idx 0 to ${Group.Members}
+    /if (${idx} == 0) {
+      /varset memberName ${Group.Leader.Name}
+    } else {
+      /if (!${Group.Member[${idx}].Name.Length} || ${Group.Member[${idx}].Offline}) /continue
+      /varset memberName ${Group.Member[${idx}].Name}
+    }
+    /if (!${memberName.Length} || ${memberName.Equal[NULL]}) /continue
+    /varcalc num ${num}+1
+    /if (${memberName.Equal[${currentLooter}]}) {
+      /echo ${tpTag}     ${num}. \ag${memberName}\ax \am[LOOTER]\ax
+    } else {
+      /echo ${tpTag}     ${num}. ${memberName}
+    }
+  /next idx
+/return
+
+| =====================================================================
+| SETUP — write auto-loot config to E3 INI
+| =====================================================================
+Sub DoSetup(string tpTag, string iniOverride)
+  /declare myName string local ${Me.CleanName}
+  /declare serverName string local
+  /declare e3Ini string local
+  /declare found bool local FALSE
+  /declare testVal string local
+
+  | Two base directories: some installs use Config, others keep INIs in Macros
+  /declare baseCfg string local ../Config/e3 Bot Inis
+  /declare baseMac string local e3 Bot Inis
+
+  | --- Manual override: /mac Turbo setup Filename.ini ---
+  | Skips verification and writes directly -- user is explicitly specifying the file
+  /if (${iniOverride.Length} && !${iniOverride.Equal[NULL]}) {
+    | Try Config path first, then Macros path
+    /varset e3Ini "${baseCfg}/${iniOverride}"
+    /call TryIniRead "${e3Ini}"
+    /if (${Macro.Return.Equal[OK]}) {
+      /varset found TRUE
+    } else {
+      /varset e3Ini "${baseMac}/${iniOverride}"
+      /call TryIniRead "${e3Ini}"
+      /if (${Macro.Return.Equal[OK]}) {
+        /varset found TRUE
+      }
+    }
+    | If read-check failed but user specified a file, try writing directly
+    /if (!${found}) {
+      /varset e3Ini "${baseCfg}/${iniOverride}"
+      /echo ${tpTag} \ayRead-check failed but attempting direct write to: ${e3Ini}\ax
+      /varset found TRUE
+    }
+  }
+
+  | --- Try each server-name variant in both Config and Macros paths ---
+
+  | Variant 1: EverQuest.Server (official TLO)
+  /if (!${found}) {
+    /varset serverName ${EverQuest.Server}
+    /if (${serverName.Length} && !${serverName.Equal[NULL]}) {
+      /varset e3Ini "${baseCfg}/${myName}_${serverName}.ini"
+      /call TryIniRead "${e3Ini}"
+      /if (${Macro.Return.Equal[OK]}) /varset found TRUE
+      /if (!${found}) {
+        /varset e3Ini "${baseMac}/${myName}_${serverName}.ini"
+        /call TryIniRead "${e3Ini}"
+        /if (${Macro.Return.Equal[OK]}) /varset found TRUE
+      }
+    }
+  }
+
+  | Variant 2: MacroQuest.Server (MQNext compat, only if different)
+  /if (!${found}) {
+    /varset serverName ${MacroQuest.Server}
+    /if (${serverName.Length} && !${serverName.Equal[NULL]} && !${serverName.Equal[${EverQuest.Server}]}) {
+      /varset e3Ini "${baseCfg}/${myName}_${serverName}.ini"
+      /call TryIniRead "${e3Ini}"
+      /if (${Macro.Return.Equal[OK]}) /varset found TRUE
+      /if (!${found}) {
+        /varset e3Ini "${baseMac}/${myName}_${serverName}.ini"
+        /call TryIniRead "${e3Ini}"
+        /if (${Macro.Return.Equal[OK]}) /varset found TRUE
+      }
+    }
+  }
+
+  | Variant 3: spaces replaced with underscores
+  /if (!${found}) {
+    /varset serverName ${EverQuest.Server.Replace[ ,_]}
+    /varset e3Ini "${baseCfg}/${myName}_${serverName}.ini"
+    /call TryIniRead "${e3Ini}"
+    /if (${Macro.Return.Equal[OK]}) /varset found TRUE
+    /if (!${found}) {
+      /varset e3Ini "${baseMac}/${myName}_${serverName}.ini"
+      /call TryIniRead "${e3Ini}"
+      /if (${Macro.Return.Equal[OK]}) /varset found TRUE
+    }
+  }
+
+  | Variant 4: "Project " prefix stripped (emu servers like Project Lazarus)
+  /if (!${found}) {
+    /varset serverName ${EverQuest.Server}
+    /if (${serverName.Find[Project ]}) {
+      /declare projPos int local ${serverName.Find[Project ]}
+      /declare startPos int local
+      /varcalc startPos ${projPos}+8
+      /varset serverName ${serverName.Mid[${startPos}]}
+      /varset e3Ini "${baseCfg}/${myName}_${serverName}.ini"
+      /call TryIniRead "${e3Ini}"
+      /if (${Macro.Return.Equal[OK]}) /varset found TRUE
+      /if (!${found}) {
+        /varset e3Ini "${baseMac}/${myName}_${serverName}.ini"
+        /call TryIniRead "${e3Ini}"
+        /if (${Macro.Return.Equal[OK]}) /varset found TRUE
+      }
+    }
+  }
+
+  | Variant 5: CharName only (no server suffix)
+  /if (!${found}) {
+    /varset e3Ini "${baseCfg}/${myName}.ini"
+    /call TryIniRead "${e3Ini}"
+    /if (${Macro.Return.Equal[OK]}) /varset found TRUE
+    /if (!${found}) {
+      /varset e3Ini "${baseMac}/${myName}.ini"
+      /call TryIniRead "${e3Ini}"
+      /if (${Macro.Return.Equal[OK]}) /varset found TRUE
+    }
+  }
+
+  | --- Read-checks failed: write directly to best-guess path ---
+  | The ${Ini[]} TLO cannot read from paths with spaces (like "e3 Bot Inis").
+  | But /ini command writes work fine with quoted paths, so we pick the best
+  | candidate and write directly. For emu servers, strip "Project " prefix.
+  /if (!${found}) {
+    /varset serverName ${EverQuest.Server}
+    /if (${serverName.Find[Project ]}) {
+      /declare dPos int local ${serverName.Find[Project ]}
+      /declare dStart int local
+      /varcalc dStart ${dPos}+8
+      /varset serverName ${serverName.Mid[${dStart}]}
+    }
+    /varset e3Ini "${baseCfg}/${myName}_${serverName}.ini"
+    /echo ${tpTag} \ayAuto-read failed (spaces in path). Writing directly to: \ag${e3Ini}\ax
+    /echo ${tpTag} \awIf this is wrong, run: \ag/mac Turbo setup YourFile.ini\ax
+    /varset found TRUE
+  }
+
+  /echo ${tpTag} \ay--- Running Setup ---\ax
+  /echo ${tpTag} \awTarget INI: \ag${e3Ini}\ax
+  /echo ${tpTag} \awMQ Path: \ag${MacroQuest.Path}\ax
+  /echo ${tpTag} \awEQ Path: \ag${EverQuest.Path}\ax
+
+  | Attempt INI writes
+  /ini "${e3Ini}" "EventRegMatches" "Tloot" "slain"
+  /ini "${e3Ini}" "EventRegMatches" "TlootAll" "slain"
+  /ini "${e3Ini}" "EventRegMatches" "TlootM1" "slain"
+  /ini "${e3Ini}" "EventRegMatches" "TlootM2" "slain"
+  /ini "${e3Ini}" "EventRegMatches" "TlootM3" "slain"
+  /ini "${e3Ini}" "EventRegMatches" "TlootM4" "slain"
+  /ini "${e3Ini}" "EventRegMatches" "TlootM5" "slain"
+  /ini "${e3Ini}" "EventRegMatches" "TlootM6" "slain"
+  /echo ${tpTag}   \ag[WRITE]\ax EventRegMatches -> Tloot, TlootAll, TlootM1-6
+
+  /ini "${e3Ini}" "Events" "Tloot" "/timed 10 /if ($\{MQ2Mono.Query[e3,GrpLootMode].Equal[single]\} && $\{MQ2Mono.Query[e3,GrpMainLooter].NotEqual[NOBODY]\} && ($\{MQ2Mono.Query[e3,CombatLoot].Equal[true]\} || !$\{Spawn[npc radius $\{MQ2Mono.Query[e3,LootRadius]\}].Aggressive\}) && $\{MQ2Mono.Query[e3,Turbo].Equal[true]\} && $\{SpawnCount[npccorpse radius $\{MQ2Mono.Query[e3,LootRadius]\}]\}) /squelch /e3bct $\{MQ2Mono.Query[e3,GrpMainLooter]\} /mac TurboLoot"
+  /ini "${e3Ini}" "Events" "TlootAll" "/timed 11 /if ($\{MQ2Mono.Query[e3,GrpLootMode].Equal[all]\} && ($\{MQ2Mono.Query[e3,CombatLoot].Equal[true]\} || !$\{Spawn[npc radius $\{MQ2Mono.Query[e3,LootRadius]\}].Aggressive\}) && $\{MQ2Mono.Query[e3,Turbo].Equal[true]\} && $\{SpawnCount[npccorpse radius $\{MQ2Mono.Query[e3,LootRadius]\}]\}) /squelch /e3bcaa /mac TurboLoot"
+  /ini "${e3Ini}" "Events" "TlootM1" "/timed 10 /if ($\{MQ2Mono.Query[e3,GrpLootMode].Equal[multi]\} && $\{MQ2Mono.Query[e3,GrpLoot1].NotEqual[NOBODY]\} && ($\{MQ2Mono.Query[e3,CombatLoot].Equal[true]\} || !$\{Spawn[npc radius $\{MQ2Mono.Query[e3,LootRadius]\}].Aggressive\}) && $\{MQ2Mono.Query[e3,Turbo].Equal[true]\} && $\{SpawnCount[npccorpse radius $\{MQ2Mono.Query[e3,LootRadius]\}]\}) /squelch /e3bct $\{MQ2Mono.Query[e3,GrpLoot1]\} /mac TurboLoot"
+  /ini "${e3Ini}" "Events" "TlootM2" "/timed 25 /if ($\{MQ2Mono.Query[e3,GrpLootMode].Equal[multi]\} && $\{MQ2Mono.Query[e3,GrpLoot2].NotEqual[NOBODY]\} && ($\{MQ2Mono.Query[e3,CombatLoot].Equal[true]\} || !$\{Spawn[npc radius $\{MQ2Mono.Query[e3,LootRadius]\}].Aggressive\}) && $\{MQ2Mono.Query[e3,Turbo].Equal[true]\} && $\{SpawnCount[npccorpse radius $\{MQ2Mono.Query[e3,LootRadius]\}]\}) /squelch /e3bct $\{MQ2Mono.Query[e3,GrpLoot2]\} /mac TurboLoot"
+  /ini "${e3Ini}" "Events" "TlootM3" "/timed 40 /if ($\{MQ2Mono.Query[e3,GrpLootMode].Equal[multi]\} && $\{MQ2Mono.Query[e3,GrpLoot3].NotEqual[NOBODY]\} && ($\{MQ2Mono.Query[e3,CombatLoot].Equal[true]\} || !$\{Spawn[npc radius $\{MQ2Mono.Query[e3,LootRadius]\}].Aggressive\}) && $\{MQ2Mono.Query[e3,Turbo].Equal[true]\} && $\{SpawnCount[npccorpse radius $\{MQ2Mono.Query[e3,LootRadius]\}]\}) /squelch /e3bct $\{MQ2Mono.Query[e3,GrpLoot3]\} /mac TurboLoot"
+  /ini "${e3Ini}" "Events" "TlootM4" "/timed 55 /if ($\{MQ2Mono.Query[e3,GrpLootMode].Equal[multi]\} && $\{MQ2Mono.Query[e3,GrpLoot4].NotEqual[NOBODY]\} && ($\{MQ2Mono.Query[e3,CombatLoot].Equal[true]\} || !$\{Spawn[npc radius $\{MQ2Mono.Query[e3,LootRadius]\}].Aggressive\}) && $\{MQ2Mono.Query[e3,Turbo].Equal[true]\} && $\{SpawnCount[npccorpse radius $\{MQ2Mono.Query[e3,LootRadius]\}]\}) /squelch /e3bct $\{MQ2Mono.Query[e3,GrpLoot4]\} /mac TurboLoot"
+  /ini "${e3Ini}" "Events" "TlootM5" "/timed 70 /if ($\{MQ2Mono.Query[e3,GrpLootMode].Equal[multi]\} && $\{MQ2Mono.Query[e3,GrpLoot5].NotEqual[NOBODY]\} && ($\{MQ2Mono.Query[e3,CombatLoot].Equal[true]\} || !$\{Spawn[npc radius $\{MQ2Mono.Query[e3,LootRadius]\}].Aggressive\}) && $\{MQ2Mono.Query[e3,Turbo].Equal[true]\} && $\{SpawnCount[npccorpse radius $\{MQ2Mono.Query[e3,LootRadius]\}]\}) /squelch /e3bct $\{MQ2Mono.Query[e3,GrpLoot5]\} /mac TurboLoot"
+  /ini "${e3Ini}" "Events" "TlootM6" "/timed 85 /if ($\{MQ2Mono.Query[e3,GrpLootMode].Equal[multi]\} && $\{MQ2Mono.Query[e3,GrpLoot6].NotEqual[NOBODY]\} && ($\{MQ2Mono.Query[e3,CombatLoot].Equal[true]\} || !$\{Spawn[npc radius $\{MQ2Mono.Query[e3,LootRadius]\}].Aggressive\}) && $\{MQ2Mono.Query[e3,Turbo].Equal[true]\} && $\{SpawnCount[npccorpse radius $\{MQ2Mono.Query[e3,LootRadius]\}]\}) /squelch /e3bct $\{MQ2Mono.Query[e3,GrpLoot6]\} /mac TurboLoot"
+  /echo ${tpTag}   \ag[WRITE]\ax Events -> single, all, multi slots 1-6
+
+  /ini "${e3Ini}" "E3BotsPublishData (key/value)" "GrpMainLooterName" "${GrpMainLooter}"
+  /echo ${tpTag}   \ag[WRITE]\ax E3BotsPublishData -> GrpMainLooterName
+
+  /ini "${e3Ini}" "Startup Commands" "Turbo_InitLootMode" "/e3varset GrpLootMode single"
+  /ini "${e3Ini}" "Startup Commands" "Turbo_InitLooter" "/e3varset GrpMainLooter NOBODY"
+  /ini "${e3Ini}" "Startup Commands" "Turbo_InitTurbo" "/e3varset Turbo false"
+  /ini "${e3Ini}" "Startup Commands" "Turbo_InitCombat" "/e3varset CombatLoot false"
+  /ini "${e3Ini}" "Startup Commands" "Turbo_InitLootAll" "/e3varset GrpLootAll false"
+  /ini "${e3Ini}" "Startup Commands" "Turbo_InitLootRadius" "/e3varset LootRadius 50"
+  /ini "${e3Ini}" "Startup Commands" "Turbo_InitLoot1" "/e3varset GrpLoot1 NOBODY"
+  /ini "${e3Ini}" "Startup Commands" "Turbo_InitLoot2" "/e3varset GrpLoot2 NOBODY"
+  /ini "${e3Ini}" "Startup Commands" "Turbo_InitLoot3" "/e3varset GrpLoot3 NOBODY"
+  /ini "${e3Ini}" "Startup Commands" "Turbo_InitLoot4" "/e3varset GrpLoot4 NOBODY"
+  /ini "${e3Ini}" "Startup Commands" "Turbo_InitLoot5" "/e3varset GrpLoot5 NOBODY"
+  /ini "${e3Ini}" "Startup Commands" "Turbo_InitLoot6" "/e3varset GrpLoot6 NOBODY"
+  /echo ${tpTag}   \ag[WRITE]\ax Startup Commands -> mode, single, all, multi slots, radius
+
+  | Set runtime vars now
+  /e3varset GrpLootMode single
+  /e3varset GrpMainLooter NOBODY
+  /e3varset Turbo false
+  /e3varset GrpLootAll false
+  /e3varset LootRadius 50
+  /call ClearMultiLooters
+
+  /echo ${tpTag} \ay--- Writes Attempted ---\ax
+  /echo ${tpTag} \awPlease verify the entries are in your E3 INI.\ax
+  /echo ${tpTag} \awIf they are NOT there, add these lines manually:\ax
+  /echo ${tpTag} ------
+  /echo \ao[EventRegMatches]\ax
+  /echo \aoTloot=slain\ax
+  /echo \aoTlootAll=slain\ax
+  /echo \aoTlootM1-6=slain\ax
+  /echo
+  /echo \ao[Events]\ax
+  /echo \aoTloot/TlootAll/TlootM1-6: use \atMQ2Mono.Query[e3,*]\ao vars and LootRadius in Spawn filters.\ax
+  /echo
+  /echo \ao[E3BotsPublishData (key/value)]\ax
+  /echo \aoGrpMainLooterName=$\{GrpMainLooter}\ax
+  /echo
+  /echo \ao[Startup Commands]\ax
+  /echo \aoTurbo_InitLootMode=/e3varset GrpLootMode single\ax
+  /echo \aoTurbo_InitLooter=/e3varset GrpMainLooter NOBODY\ax
+  /echo \aoTurbo_InitTurbo=/e3varset Turbo false\ax
+  /echo \aoTurbo_InitCombat=/e3varset CombatLoot false\ax
+  /echo \aoTurbo_InitLootAll=/e3varset GrpLootAll false\ax
+  /echo \aoTurbo_InitLootRadius=/e3varset LootRadius 50\ax
+  /echo \aoTurbo_InitLoot1-6=/e3varset GrpLoot# NOBODY\ax
+  /echo ${tpTag} ------
+  /echo ${tpTag} \awNext steps:\ax
+  /echo ${tpTag}   1. \ag/e3reload\ax or restart E3 so the event rules load
+  /echo ${tpTag}   2. \ag/lua run Turbo\ax — pick single, multi, or all looters
+  /echo ${tpTag}   3. \ag/mac Turbo on\ax — enable auto-loot
+/return
+
+| =====================================================================
+| TryIniRead — attempt to read from an INI to verify it exists
+| Returns "OK" if any read succeeds, "FAIL" otherwise.
+| Tries multiple common E3 INI sections since not all INIs have [Misc].
+| =====================================================================
+Sub TryIniRead(string iniPath)
+  /declare tv string local
+  | Try [Misc] section (common in many E3 INIs)
+  /varset tv ${Ini[${iniPath},Misc]}
+  /if (${tv.Length} && !${tv.Equal[NULL]}) /return OK
+  | Try reading a specific key with default
+  /varset tv ${Ini[${iniPath},Misc,Class,_NF_]}
+  /if (!${tv.Equal[_NF_]}) /return OK
+  | Try [General] section
+  /varset tv ${Ini[${iniPath},General]}
+  /if (${tv.Length} && !${tv.Equal[NULL]}) /return OK
+  | Try [Assists] section
+  /varset tv ${Ini[${iniPath},Assists]}
+  /if (${tv.Length} && !${tv.Equal[NULL]}) /return OK
+  | Try [Buffs] section
+  /varset tv ${Ini[${iniPath},Buffs]}
+  /if (${tv.Length} && !${tv.Equal[NULL]}) /return OK
+  | Try the old-style Ini.File.Exists as last resort
+  /if (${Ini.File[${iniPath}].Exists}) /return OK
+  /return FAIL
+/return

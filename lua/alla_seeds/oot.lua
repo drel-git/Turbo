@@ -1,0 +1,160 @@
+return {
+  _meta = {
+    format = 'TurboMobsAllaSeed',
+    schema_version = 1,
+    generator = 'tools/laz_alla_seed.py',
+    generated_at = '2026-06-03',
+    source = 'Project Lazarus Alla',
+    report = {
+      records = 12,
+      points = 17,
+      records_without_points = 0,
+      duplicate_points = 1,
+      points_missing_timers = 0,
+    },
+  },
+  zones = {
+    oot = {
+      zone = 'oot',
+      named = {
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 69018,
+          id = 69018,
+          name = 'Allizewsaur',
+          source_url = 'https://lazaruseq.com/alla/npcs/69018',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -782.0, y = -2959.0, z = 60.0, chance = 67.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/69018', timer_source = 'lazarus_alla', ph_names = { } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 69090,
+          id = 69090,
+          name = 'Boog Mudtoe',
+          source_url = 'https://lazaruseq.com/alla/npcs/69090',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -8022.0, y = 1008.0, z = 3.0, chance = 20.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/69090', timer_source = 'lazarus_alla', ph_names = { 'a cyclops', 'an aqua goblin', 'a pirate', 'an ancient cyclops' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 69024,
+          id = 69024,
+          name = 'Dixl Drool',
+          source_url = 'https://lazaruseq.com/alla/npcs/69024',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -5397.0, y = 752.0, z = 12.0, chance = 100.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/69024', timer_source = 'lazarus_alla', ph_names = {  } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 69125,
+          id = 69125,
+          name = 'Goob Mudtoe',
+          source_url = 'https://lazaruseq.com/alla/npcs/69125',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -6573.0, y = 900.0, z = 9.0, chance = 100.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/69125', timer_source = 'lazarus_alla', ph_names = {  } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 69094,
+          id = 69094,
+          name = 'Gornit',
+          source_url = 'https://lazaruseq.com/alla/npcs/69094',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -5602.0, y = 613.0, z = -31.0, chance = 33.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/69094', timer_source = 'lazarus_alla', ph_names = {  } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 69034,
+          id = 69034,
+          name = 'Gull Skytalon',
+          source_url = 'https://lazaruseq.com/alla/npcs/69034',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 4071.0, y = 1785.0, z = 166.0, chance = 100.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/69034', timer_source = 'lazarus_alla', ph_names = {  } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 69153,
+          id = 69153,
+          name = 'Soarin Brightfeather',
+          source_url = 'https://lazaruseq.com/alla/npcs/69153',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 3332.0, y = 1942.0, z = 120.0, chance = 100.0, respawn_seconds = 10800, source_url = 'https://lazaruseq.com/alla/npcs/69153', timer_source = 'lazarus_alla', ph_names = {  } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 69042,
+          id = 69042,
+          name = 'Toko Binlittle',
+          source_url = 'https://lazaruseq.com/alla/npcs/69042',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -5453.0, y = 735.0, z = 5.0, chance = 33.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/69042', timer_source = 'lazarus_alla', ph_names = {  } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 69102,
+          id = 69102,
+          name = 'a goblin headmaster',
+          source_url = 'https://lazaruseq.com/alla/npcs/69102',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -8574.0, y = -1206.0, z = 51.0, chance = 25.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/69102', timer_source = 'lazarus_alla', ph_names = { 'an island goblin headhunter', 'an island goblin headhunte' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 69150,
+          id = 69150,
+          name = 'an ancient cyclops',
+          source_url = 'https://lazaruseq.com/alla/npcs/69150',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -8022.0, y = 1008.0, z = 3.0, chance = 20.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/69150', timer_source = 'lazarus_alla', ph_names = { 'a cyclops', 'an aqua goblin', 'Boog Mudtoe', 'a pirate' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 69148,
+          id = 69148,
+          name = 'isle goblin chieftan',
+          source_url = 'https://lazaruseq.com/alla/npcs/69148',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -8551.0, y = -847.0, z = 167.0, chance = 34.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/69148', timer_source = 'lazarus_alla', ph_names = { 'an isle goblin wizard' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 69096,
+          id = 69096,
+          name = 'tainted seafury cyclops',
+          source_url = 'https://lazaruseq.com/alla/npcs/69096',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -6169.0, y = 1218.0, z = 146.0, chance = 1.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/69096', timer_source = 'lazarus_alla', ph_names = { 'a seafury cyclops', 'Quag Maelstrom' } },
+            { x = -5421.0, y = 1217.0, z = 51.0, chance = 1.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/69096', timer_source = 'lazarus_alla', ph_names = { 'a seafury cyclops', 'Quag Maelstrom' } },
+            { x = -5352.0, y = 1119.0, z = 23.0, chance = 1.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/69096', timer_source = 'lazarus_alla', ph_names = { 'a seafury cyclops', 'Quag Maelstrom' } },
+            { x = -6479.0, y = 1804.0, z = 7.0, chance = 1.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/69096', timer_source = 'lazarus_alla', ph_names = { 'a seafury cyclops', 'Quag Maelstrom' } },
+            { x = -5853.0, y = 1000.0, z = 137.0, chance = 1.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/69096', timer_source = 'lazarus_alla', ph_names = { 'a seafury cyclops', 'Quag Maelstrom' } },
+            { x = -6203.0, y = 1731.0, z = 58.0, chance = 1.0, respawn_seconds = 640, source_url = 'https://lazaruseq.com/alla/npcs/69096', timer_source = 'lazarus_alla', ph_names = { 'a seafury cyclops', 'Quag Maelstrom' } },
+          },
+        },
+      },
+    },
+  },
+}

@@ -1,0 +1,191 @@
+return {
+  _meta = {
+    format = 'TurboMobsAllaSeed',
+    schema_version = 1,
+    generator = 'tools/laz_alla_seed.py',
+    generated_at = '2026-06-02',
+    source = 'Project Lazarus Alla',
+    report = {
+      records = 15,
+      points = 18,
+      records_without_points = 0,
+      duplicate_points = 0,
+      points_missing_timers = 0,
+    },
+  },
+  zones = {
+    provinggrounds = {
+      zone = 'provinggrounds',
+      named = {
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 316067,
+          id = 316067,
+          name = 'Battlemaster Denik',
+          source_url = 'https://lazaruseq.com/alla/npcs/316067',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -1377.0, y = -766.0, z = -307.0, chance = 20.0, respawn_seconds = 720, source_url = 'https://lazaruseq.com/alla/npcs/316067', timer_source = 'lazarus_alla', ph_names = { 'a dragorn battlemaster' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 316062,
+          id = 316062,
+          name = 'Captor Supplescale',
+          source_url = 'https://lazaruseq.com/alla/npcs/316062',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -1264.0, y = -3089.0, z = -308.0, chance = 20.0, respawn_seconds = 720, source_url = 'https://lazaruseq.com/alla/npcs/316062', timer_source = 'lazarus_alla', ph_names = { 'a dragorn battlemaster', 'a dragorn sentinel' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 316066,
+          id = 316066,
+          name = 'Diodite Bluespark',
+          source_url = 'https://lazaruseq.com/alla/npcs/316066',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -1032.0, y = 245.0, z = -306.0, chance = 20.0, respawn_seconds = 720, source_url = 'https://lazaruseq.com/alla/npcs/316066', timer_source = 'lazarus_alla', ph_names = { 'a lightning warrior staticfist' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 316072,
+          id = 316072,
+          name = 'Fleshthreader Dashii',
+          source_url = 'https://lazaruseq.com/alla/npcs/316072',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -1913.0, y = -801.0, z = -308.0, chance = 20.0, respawn_seconds = 720, source_url = 'https://lazaruseq.com/alla/npcs/316072', timer_source = 'lazarus_alla', ph_names = { 'an elite ukun deathfang', 'an elite kyv hunter', 'an elite noc cleaver' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 316031,
+          id = 316031,
+          name = 'Girplan Scavenger',
+          source_url = 'https://lazaruseq.com/alla/npcs/316031',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 0.0, y = 83.0, z = -297.0, chance = 100.0, respawn_seconds = 7264, source_url = 'https://lazaruseq.com/alla/npcs/316031', timer_source = 'lazarus_alla', ph_names = {  } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 316064,
+          id = 316064,
+          name = 'Lieutenant Commander Nak`Muram',
+          source_url = 'https://lazaruseq.com/alla/npcs/316064',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 1829.0, y = -4465.0, z = -305.0, chance = 20.0, respawn_seconds = 720, source_url = 'https://lazaruseq.com/alla/npcs/316064', timer_source = 'lazarus_alla', ph_names = { 'a dragorn battlemaster', 'a dragorn champion', 'a dragorn sentinel' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 316034,
+          id = 316034,
+          name = 'Lightningcaller Vhalek',
+          source_url = 'https://lazaruseq.com/alla/npcs/316034',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 798.0, y = -4397.0, z = -310.0, chance = 100.0, respawn_seconds = 7264, source_url = 'https://lazaruseq.com/alla/npcs/316034', timer_source = 'lazarus_alla', ph_names = {  } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 316045,
+          id = 316045,
+          name = 'Miseryfiend Ghio',
+          source_url = 'https://lazaruseq.com/alla/npcs/316045',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -1129.0, y = -992.0, z = -290.0, chance = 20.0, respawn_seconds = 720, source_url = 'https://lazaruseq.com/alla/npcs/316045', timer_source = 'lazarus_alla', ph_names = { 'an elite kyv hunter', 'an elite noc cleaver' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 316043,
+          id = 316043,
+          name = 'Pashia Clouddancer',
+          source_url = 'https://lazaruseq.com/alla/npcs/316043',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -1887.0, y = -939.0, z = -307.0, chance = 100.0, respawn_seconds = 720, source_url = 'https://lazaruseq.com/alla/npcs/316043', timer_source = 'lazarus_alla', ph_names = {  } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 316057,
+          id = 316057,
+          name = 'Possessed Brute',
+          source_url = 'https://lazaruseq.com/alla/npcs/316057',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 551.0, y = -2253.0, z = -304.0, chance = 100.0, respawn_seconds = 8400, source_url = 'https://lazaruseq.com/alla/npcs/316057', timer_source = 'lazarus_alla', ph_names = {  } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 316042,
+          id = 316042,
+          name = 'Stilled Lightning Warrior',
+          source_url = 'https://lazaruseq.com/alla/npcs/316042',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -1815.0, y = -2871.0, z = -300.0, chance = 100.0, respawn_seconds = 720, source_url = 'https://lazaruseq.com/alla/npcs/316042', timer_source = 'lazarus_alla', ph_names = {  } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 316063,
+          id = 316063,
+          name = 'Stormer',
+          source_url = 'https://lazaruseq.com/alla/npcs/316063',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -1836.0, y = -4178.0, z = -308.0, chance = 20.0, respawn_seconds = 720, source_url = 'https://lazaruseq.com/alla/npcs/316063', timer_source = 'lazarus_alla', ph_names = { 'a lightning warrior staticfist' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 316070,
+          id = 316070,
+          name = 'Strategist Kin`Muram',
+          source_url = 'https://lazaruseq.com/alla/npcs/316070',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = 2383.0, y = -944.0, z = -307.0, chance = 20.0, respawn_seconds = 720, source_url = 'https://lazaruseq.com/alla/npcs/316070', timer_source = 'lazarus_alla', ph_names = { 'a huvul commander' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 316052,
+          id = 316052,
+          name = 'Taskfiend Caikap',
+          source_url = 'https://lazaruseq.com/alla/npcs/316052',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -22.0, y = -3760.0, z = -306.0, chance = 20.0, respawn_seconds = 720, source_url = 'https://lazaruseq.com/alla/npcs/316052', timer_source = 'lazarus_alla', ph_names = { 'a discordling taskfiend' } },
+          },
+        },
+        {
+          schema = 'TurboMobsAllaSeedNpc',
+          npc_id = 316030,
+          id = 316030,
+          name = 'a Dragorn Tactician',
+          source_url = 'https://lazaruseq.com/alla/npcs/316030',
+          timer_source = 'lazarus_alla',
+          points = {
+            { x = -1701.0, y = -1305.0, z = -305.0, chance = 25.0, respawn_seconds = 720, source_url = 'https://lazaruseq.com/alla/npcs/316030', timer_source = 'lazarus_alla', ph_names = { 'a dragorn sentinel' } },
+            { x = 993.0, y = -1178.0, z = -305.0, chance = 25.0, respawn_seconds = 720, source_url = 'https://lazaruseq.com/alla/npcs/316030', timer_source = 'lazarus_alla', ph_names = { 'a dragorn sentinel' } },
+            { x = 1127.0, y = -4178.0, z = -305.0, chance = 25.0, respawn_seconds = 720, source_url = 'https://lazaruseq.com/alla/npcs/316030', timer_source = 'lazarus_alla', ph_names = { 'a dragorn sentinel' } },
+            { x = -601.0, y = -3728.0, z = -305.0, chance = 25.0, respawn_seconds = 720, source_url = 'https://lazaruseq.com/alla/npcs/316030', timer_source = 'lazarus_alla', ph_names = { 'a dragorn sentinel' } },
+          },
+        },
+      },
+    },
+  },
+}
