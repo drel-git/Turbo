@@ -1,28 +1,25 @@
-# Turbo Suite
+<img width="861" height="114" alt="TurboSuite" src="https://github.com/user-attachments/assets/c2c5ad06-d38b-4faa-82e5-cb64f12af4af" />
 
-> Quality-of-life tools for EverQuest EMU servers (E3Next / MacroQuest): smart looting, fleet-wide inventory and BiS tracking, loot announcements, spell research automation, spawn tracking, raid rolls, and more.
+
+> Quality-of-life tools for EverQuest EMU servers (E3Next / MacroQuest): smart looting, fleet-wide inventory and BiS tracking, loot announcements, spell research automation, spawn tracking, raid rolls, and more. It's your loot, do whatever you want with it.
 
 **On this page:** [Install](#install-in-under-a-minute) · [What's included](#whats-included) · [Feature tour](#feature-tour) · [Updating](#updating) · [Your settings are safe](#your-settings-are-safe) · [Manual install](#manual-install)
 
-<!-- Add a screenshot or banner here when ready:
-![Turbo Suite](docs/banner.png)
--->
 
 ## Install in Under a Minute
 
-1. **Download the patcher:** [TurboPatcher.exe (direct download)](https://github.com/drel-git/TurboPatcher/releases/latest/download/TurboPatcher.exe). Drop it in your MacroQuest folder (any spot works, but that location lets the in-game Turbo Patcher button find it).
+1. `Windows` - [**Download the patcher, TurboPatcher.exe**](https://github.com/drel-git/TurboPatcher/releases/latest/download/TurboPatcher.exe). Drop it in your MacroQuest folder (any spot works, but that location lets the in-game Turbo Patcher button find it).
+2. `Linux` - [**Download the latest release**](https://github.com/drel-git/Turbo/releases) and extract to your E3Next or MQ folder.
 2. **Run `TurboPatcher.exe`.** It finds your MacroQuest folder automatically (or click Browse and pick the folder that contains `lua` and `Macros`).
 3. **Click Install.** That's it. The patcher shows the patch notes and keeps you updated from then on.
-4. **For Linux:** Download the zip files and extract to your E3Next or MQ folder.
+
 
 > Windows may show a SmartScreen prompt the first time since the exe is unsigned. Click "More info", then "Run anyway".
 
 Then in game:
 
 ```
-/lua run Turbo          the suite hub (setup, auto-loot toggle, looter picker)
-/lua run turbogear      fleet inventory, BiS lists, needs announcements
-/mac turboloot          loot nearby corpses using your rules
+/lua run Turbo          the suite hub
 ```
 
 ## What's Included
@@ -30,9 +27,9 @@ Then in game:
 | Tool | Run | What it does |
 | ---- | --- | ------------ |
 | **Turbo** (hub) | `/lua run Turbo` | Central control panel: auto-loot on/off, pick the group looter, one-click INI setup, rulepack browser, loot gains and skip tracking |
-| **TurboLoot** | `/mac turboloot` | INI-driven corpse looting, then selling, banking, tributing, and destroying in town. [Full guide here](https://github.com/drel-git/TurboLoot) |
+| **TurboLoot** | `/mac turboloot` | INI-driven corpse looting, then selling, banking, tributing, and destroying in town. [More info](https://github.com/drel-git/TurboLoot) |
 | **TurboKey** | `/mac TurboKey RULE` | Pick an item up, run one command, and it's categorized in your loot rules (KEEP, SELL, BANK, TRIBUTE, DESTROY, IGNORE) |
-| **TurboGive** | `/mac TurboGive` | Hand out and collect items between your characters using a shared give list |
+| **TurboGive** | `/mac TurboGive` | Hand out and collect items between your characters using a shared give list [More info](https://github.com/drel-git/TurboLoot/blob/main/TurboGive%20Getting%20Started.md) |
 | **TurboGear** | `/lua run turbogear` | Live inventory of every boxed character in one window, BiS upgrade flags, and automatic "who needs this" announcements when an item is linked in chat |
 | **TurboMobs** | `/lua run TurboMobs` | Lightweight NPC spawn tracker with alerts |
 | **TurboRolls** | `/lua run TurboRolls` | Raid roll tracking: start a roll range, see everyone's rolls ranked live |
