@@ -2244,10 +2244,12 @@ Sub BeginLooting
     /varset _attemptedLootThisPass FALSE
     /varset _transientSlotSkip FALSE
     /if (${loottotal} < 8) /varset loottotal 8
-    | Capture stable corpse ID for skip dedup/message keys. Target can change to a player/pet mid-loop.
+    | Prefer the loot-loop corpse id over Target.ID: target can drift to a
+    | different corpse mid-pass and would stamp the wrong (ID: n) onto [ANNOUNCE]
+    | / [SKIP] lines (and onto TurboGear Go-loot buttons).
     /varset _skipCorpseID 0
-    /if (${Target.ID} && ${Target.Type.Equal[Corpse]}) /varset _skipCorpseID ${Target.ID}
-    /if (!${_skipCorpseID} && ${corpseID}) /varset _skipCorpseID ${corpseID}
+    /if (${corpseID}) /varset _skipCorpseID ${corpseID}
+    /if (!${_skipCorpseID} && ${Target.ID} && ${Target.Type.Equal[Corpse]}) /varset _skipCorpseID ${Target.ID}
 
     /for lootslot ${loottotal} downto 1
         /call CheckLootAbortState
@@ -6074,7 +6076,9 @@ Sub AnnounceBankSellPerItem(string msg)
 /return
 
 Sub AnnounceSkipped(string key, string msg)
-    /if (${SkippedAnnouncedKeys.Length} > 2000) /varset SkippedAnnouncedKeys ""
+    | Raised from 2000 (~40 keys) to 12000 (~200 keys). A full wipe mid-pull
+    | re-emitted [ANNOUNCE] for items still on corpses the loop revisited.
+    /if (${SkippedAnnouncedKeys.Length} > 12000) /varset SkippedAnnouncedKeys ""
     /if (${SkippedAnnouncedKeys.Length} && ${SkippedAnnouncedKeys.Find[|${key}|]}) /return
     /varset SkippedAnnouncedKeys "${SkippedAnnouncedKeys}|${key}|"
     /declare corpseIdFromKey int local 0

@@ -18,15 +18,19 @@ local function chat_payload(line)
     -- MQ console/chat windows may prepend timestamps or UI prefixes before the
     -- actual chat text. Keep the anchored checks below stable by trimming
     -- everything before a known EQ chat phrase.
+    -- Order matters: longer phrases before shorter ones ("says out of character,"
+    -- before "says,"; "tells the guild," before a generic tells match).
     local patterns = {
         "You tell the group,", "You tell your party,", "You tell your raid,",
-        "You say,",
-        "tells the group,", "tells the party,", "tells the raid,", "says,",
+        "You tell the guild,", "You say to your guild,",
+        "You say out of character,", "You say,",
+        "tells the group,", "tells the party,", "tells the raid,", "tells the guild,",
+        "says out of character,", "says,",
     }
     for _, pat in ipairs(patterns) do
         local s = line:find(pat, 1, true)
         if s then
-            if pat:sub(1, 5) == "tells" or pat == "says," then
+            if pat:sub(1, 5) == "tells" or pat:sub(1, 4) == "says" then
                 local before = line:sub(1, s - 1)
                 local who = before:match("([%w_'`%-]+)%s*$")
                 if who and who ~= "" then return who .. " " .. line:sub(s) end
@@ -54,15 +58,22 @@ function M.should_skip_line(line, me_name)
 end
 
 -- Any player chat line that can carry item links (self or others).
+-- Covers group/party/raid/guild/say/ooc. [TG] need-lines are filtered earlier
+-- by should_skip_line so we never re-announce our own (or a peer's) [TG] output.
 function M.is_player_link_chat_line(line)
     line = chat_payload(line)
     if line:find("^You tell the group,", 1) then return true end
     if line:find("^You tell your party,", 1) then return true end
     if line:find("^You tell your raid,", 1) then return true end
+    if line:find("^You tell the guild,", 1) then return true end
+    if line:find("^You say to your guild,", 1) then return true end
+    if line:find("^You say out of character,", 1) then return true end
     if line:find("^You say,", 1) then return true end
     if line:find("^.- tells the group,", 1) then return true end
     if line:find("^.- tells the party,", 1) then return true end
     if line:find("^.- tells the raid,", 1) then return true end
+    if line:find("^.- tells the guild,", 1) then return true end
+    if line:find("^.- says out of character,", 1) then return true end
     if line:find("^.- says,", 1) then return true end
     return false
 end
@@ -73,6 +84,9 @@ function M.is_self_loot_line(line)
     if line:find("^You tell the group,", 1) then return true end
     if line:find("^You tell your party,", 1) then return true end
     if line:find("^You tell your raid,", 1) then return true end
+    if line:find("^You tell the guild,", 1) then return true end
+    if line:find("^You say to your guild,", 1) then return true end
+    if line:find("^You say out of character,", 1) then return true end
     if line:find("^You say,", 1) then return true end
     return false
 end
@@ -84,6 +98,8 @@ function M.is_other_player_chat_line(line)
     if line:find("^.- tells the group,", 1) then return true end
     if line:find("^.- tells the party,", 1) then return true end
     if line:find("^.- tells the raid,", 1) then return true end
+    if line:find("^.- tells the guild,", 1) then return true end
+    if line:find("^.- says out of character,", 1) then return true end
     if line:find("^.- says,", 1) then return true end
     return false
 end

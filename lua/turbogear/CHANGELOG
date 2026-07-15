@@ -1,3 +1,19 @@
+1.2.3
+- Go loot: pause /afollow and stop /chaseme before walking to the corpse, then
+  /afollow unpause on finish - same prelude as TurboLoot sell/bank/tribute so
+  followers resume chase correctly instead of fighting nav or standing at the
+  corpse.
+- TurboLoot: [ANNOUNCE]/[SKIP] dedupe buffer raised (~40 keys -> ~200) so a
+  mid-pull wipe no longer double-announces items still on corpses; corpse (ID:)
+  stamps prefer the loot-loop corpse id over Target.ID so Go buttons cannot
+  point at the wrong corpse when target drifts.
+- Announce: also capture guild and OOC item links (group/raid/say already
+  worked). [TG] need-lines are still skipped so we never re-announce needs.
+- Needs index warm-up: the bg responder now builds peer needs even while
+  announce-passive (its direct catalogs persist to disk for the UI driver);
+  the queue is pruned to the announce roster; lean/minimized UIs temporarily
+  raise their index budget when the oldest queued rebuild is older than 60s.
+
 1.2.2
 - Go loot: the BiS tab's linked-items panel now shows a Go button per needer
   when TurboLoot left the item on a corpse (ANNOUNCE/SKIP rules). Clicking it

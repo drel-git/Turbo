@@ -61,6 +61,58 @@ local function stop_movement(used_nav)
     end)
 end
 
+-- Mirror turboloot.mac PauseAFollow / UnpauseAFollow / StopChaseForUtility /
+-- StopFollowAndMovement so a Go-loot run does not fight /afollow or leave the
+-- character stranded after the corpse. /chaseme off is fire-and-forget like the
+-- mac (the chase leader re-asserts); /afollow uses pause/unpause so the exact
+-- prior follow target is restored.
+local function advpath_following()
+    local ok, following = pcall(function()
+        local ap = mq.TLO.AdvPath
+        return ap ~= nil and ap.Following ~= nil and ap.Following() == true
+    end)
+    return ok and following == true
+end
+
+local function advpath_loaded()
+    local ok, loaded = pcall(function()
+        local name = mq.TLO.Plugin('MQ2AdvPath').Name()
+        return name ~= nil and tostring(name) ~= ""
+    end)
+    return ok and loaded == true
+end
+
+local function pause_follow_for_job()
+    local paused = false
+    if advpath_loaded() then
+        if advpath_following() then
+            paused = true
+        end
+    else
+        -- Plugin not loaded: assume /afollow might still be active (mac does this).
+        paused = true
+    end
+    if paused then
+        pcall(function() mq.cmd('/squelch /afollow pause') end)
+    end
+    return paused
+end
+
+local function resume_follow_for_job(was_paused)
+    if not was_paused then return end
+    local ok_fd, feigning = pcall(function() return mq.TLO.Me.Feigning() == true end)
+    if ok_fd and feigning then return end
+    pcall(function() mq.cmd('/squelch /afollow unpause') end)
+end
+
+local function stop_chase_and_stick()
+    pcall(function()
+        mq.cmd('/squelch /chaseme off')
+        mq.cmd('/squelch /stick off')
+        mq.cmd('/squelch /keypress forward')
+    end)
+end
+
 -- ---------------------------------------------------------------------------
 -- Pure decision core. ctx carries plain values; returns { action = <string>,
 -- note = <token or nil> }. Actions: "wait", "arrived", "fail", "open_window",
@@ -139,8 +191,10 @@ local function finish(ok, note)
     if not job then return end
     if job.moving then stop_movement(job.used_nav) end
     close_loot_window()
+    local was_paused = job.afollow_paused == true
     local j = job
     job = nil
+    resume_follow_for_job(was_paused)
     report(j, ok, note)
 end
 
@@ -159,6 +213,13 @@ function M.request(payload)
     local max_dist = tonumber(CFG.go_loot_max_distance) or 400
     if dist > max_dist then return false, "too_far" end
 
+    -- Same prelude as turboloot sell/bank/tribute/loot: stop chase, pause
+    -- afollow, clear stick/nav before we issue our own movement.
+    stop_chase_and_stick()
+    local afollow_paused = pause_follow_for_job()
+    stop_movement(true)
+    stop_movement(false)
+
     local used_nav = nav_available()
     if used_nav then
         mq.cmd(string.format('/squelch /nav id %d distance=%d', corpse_id, math.floor(ARRIVE_DIST) - 5))
@@ -175,6 +236,7 @@ function M.request(payload)
         used_nav = used_nav,
         moving = true,
         slot = 0,
+        afollow_paused = afollow_paused,
     }
     print(string.format("\at[TurboGear]\ax go-loot: heading to corpse %d for %s (%s)",
         corpse_id, job.item_name, used_nav and "nav" or "moveto"))

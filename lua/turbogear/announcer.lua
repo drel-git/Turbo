@@ -720,10 +720,10 @@ end
 
 local function peer_index_allowed()
     if CFG.needs_index_build_peers ~= true then return false end
-    if state.bg == true then return false end
-    -- Lean UI is still the linked-needs coordinator. Keep peers enabled here
-    -- and rely on the small lean index budget instead of falling back to a
-    -- local-only index that misses group BIS announces.
+    -- Both the UI driver and bg responder build peer needs. When a UI is up
+    -- the bg is announce-passive but still ticks the index (init.lua) so its
+    -- direct catalogs land on disk for the UI to load; the UI also boosts its
+    -- lean budget when the oldest queued rebuild goes stale.
     return true
 end
 
@@ -2400,8 +2400,20 @@ function M.tick()
         -- individually-small budgets can't sum into a visible frame spike. The
         -- time-sensitive announce drains further down are NOT gated by this.
         local frame_budget_ms
+        local oldest_queue_s = 0
+        if index_enabled then
+            local ok_age, age = pcall(function() return needs_index.oldest_queue_age_s() end)
+            if ok_age then oldest_queue_s = tonumber(age) or 0 end
+        end
+        local stale_s = tonumber(CFG.needs_index_stale_queue_s) or 60
+        local index_stale = oldest_queue_s >= stale_s
         if state.bg then
             frame_budget_ms = tonumber(CFG.frame_work_budget_bg_ms) or 40
+        elseif index_stale then
+            -- Announce driver is lean/minimized but the needs queue is aging:
+            -- temporarily spend like a light bg tick so warm-up finishes.
+            frame_budget_ms = tonumber(CFG.frame_work_budget_stale_ms)
+                or tonumber(CFG.frame_work_budget_ms) or 30
         elseif state.lean and state.lean() then
             frame_budget_ms = tonumber(CFG.frame_work_budget_lean_ms) or 6
         else
@@ -2435,7 +2447,9 @@ function M.tick()
         if index_enabled and index_needed then
             local idx_budget
             if state.bg then
-                idx_budget = tonumber(CFG.needs_index_budget_bg_ms) or 20
+                idx_budget = tonumber(CFG.needs_index_budget_bg_ms) or 25
+            elseif index_stale then
+                idx_budget = tonumber(CFG.needs_index_budget_stale_ms) or 20
             elseif state.lean and state.lean() then
                 idx_budget = tonumber(CFG.needs_index_budget_lean_ms) or tonumber(CFG.needs_index_budget_ms) or 4
             else
@@ -2650,6 +2664,11 @@ function M.register()
     add("MeGroupItems", 'You tell your party, #*#', on_chat_self)
     add("MeGroupTellGroup", 'You tell the group, #*#', on_chat_self)
     add("PartyItems", '#*# tells the party, #*#', on_chat_other)
+    add("GuildItems", '#*# tells the guild, #*#', on_chat_other)
+    add("MeGuildItems", 'You tell the guild, #*#', on_chat_self)
+    add("MeGuildSay", 'You say to your guild, #*#', on_chat_self)
+    add("OocItems", '#*# says out of character, #*#', on_chat_other)
+    add("MeOocItems", 'You say out of character, #*#', on_chat_self)
     M.registered = true
     needs_index_warm = true
 end

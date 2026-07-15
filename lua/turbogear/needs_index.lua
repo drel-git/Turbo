@@ -457,7 +457,15 @@ end
 local function sig_brief(sig)
     sig = tostring(sig or "")
     if sig == "" then return "empty" end
-    return string.format("len=%d head=%s", #sig, sig:sub(1, 24):gsub("[%c\31\30]", "."))
+    -- Sampled djb2 so status/enqueue logs stay short and cheap even when the
+    -- store signature is a 50KB+ inventory serialization. Equality checks still
+    -- use the full interned string (== is content/pointer-fast for identicals).
+    local h, n = 5381, #sig
+    local step = math.max(1, math.floor(n / 256))
+    for i = 1, n, step do
+        h = ((h * 33) + sig:byte(i)) % 4294967296
+    end
+    return string.format("len=%d hash=%08x", n, h)
 end
 
 local function store_change_brief(char_key)
@@ -755,6 +763,24 @@ local function continue_char_build(deadline)
     return processed
 end
 
+local function prune_queue_to(present)
+    if type(present) ~= "table" then return end
+    local kept, kept_queued, kept_at = {}, {}, {}
+    for _, key in ipairs(state_idx.queue or {}) do
+        if present[key] and not kept_queued[key] then
+            kept[#kept + 1] = key
+            kept_queued[key] = true
+            kept_at[key] = state_idx.queued_at[key]
+        end
+    end
+    state_idx.queue = kept
+    state_idx.queued = kept_queued
+    state_idx.queued_at = kept_at
+    if state_idx.building and not present[state_idx.building.char_key] then
+        state_idx.building = nil
+    end
+end
+
 local function scan_for_changes(opts)
     opts = type(opts) == "table" and opts or {}
     local allow_peers = opts.allow_peers ~= false and opts.local_only ~= true
@@ -785,6 +811,12 @@ local function scan_for_changes(opts)
         diag.event("needs_index.settings", "settings signature changed; clearing indexed chars")
         state_idx.settings_sig = sig
         state_idx.chars = {}
+        -- Drop queued rebuilds too: they may belong to the previous roster
+        -- scope (e.g. Live Peers -> Group left 15 peers queued for a 6-char group).
+        state_idx.queue = {}
+        state_idx.queued = {}
+        state_idx.queued_at = {}
+        state_idx.building = nil
     end
 
     local building_key = state_idx.building and state_idx.building.char_key or nil
@@ -809,6 +841,9 @@ local function scan_for_changes(opts)
                 state_idx.chars[key] = nil
             end
         end
+        -- Keep the work queue scoped to the announce roster. Leftover peer keys
+        -- from a wider scope (or visibility churn) otherwise burn warm-up budget.
+        prune_queue_to(present)
     end
 end
 
@@ -949,6 +984,22 @@ function M.char_count()
     return n
 end
 
+-- Cheap probe for the announcer's adaptive warm-up budget (avoids building a
+-- full status table every tick).
+function M.oldest_queue_age_s()
+    local oldest = 0
+    local now = os.clock()
+    for _, queued_at in pairs(state_idx.queued_at or {}) do
+        local age = now - (tonumber(queued_at) or now)
+        if age > oldest then oldest = age end
+    end
+    if state_idx.building and state_idx.building.started_at then
+        local age = now - (tonumber(state_idx.building.started_at) or now)
+        if age > oldest then oldest = age end
+    end
+    return oldest
+end
+
 function M.invalidate(reason)
     diag.event("needs_index.invalidate", tostring(reason or "manual"))
     state_idx.chars = {}
@@ -980,16 +1031,7 @@ function M.status()
             catalog_progress = catalog.direct_build_progress()
         end
     end)
-    local oldest_queue_age_s = 0
-    local now = os.clock()
-    for _, queued_at in pairs(state_idx.queued_at or {}) do
-        local age = now - (tonumber(queued_at) or now)
-        if age > oldest_queue_age_s then oldest_queue_age_s = age end
-    end
-    if state_idx.building and state_idx.building.started_at then
-        local age = now - (tonumber(state_idx.building.started_at) or now)
-        if age > oldest_queue_age_s then oldest_queue_age_s = age end
-    end
+    local oldest_queue_age_s = M.oldest_queue_age_s()
     return {
         ready = M.ready(),
         local_ready = M.local_ready(),

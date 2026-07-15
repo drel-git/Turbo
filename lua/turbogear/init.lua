@@ -870,7 +870,20 @@ local function run_loop(inspect_tick, peer_refresh)
         end
         Store.tick()
         inventory_watch.tick()
-        if not announcer.is_passive() then announcer.tick() end
+        if announcer.is_passive() then
+            -- UI owns [TG] emission while present, but the bg still advances the
+            -- peer needs index. Direct catalogs persist to disk (dcat_*), so the
+            -- UI driver's warm-up can load them instead of rebuilding from scratch.
+            if CFG.needs_index_enabled ~= false and CFG.needs_index_build_peers == true then
+                pcall(function()
+                    require('needs_index').tick(
+                        tonumber(CFG.needs_index_budget_bg_ms) or 25,
+                        { allow_peers = true })
+                end)
+            end
+        else
+            announcer.tick()
+        end
         require('go_loot').tick()
         if inspect_tick then inspect_tick() end
         tick_perfdiag_capture()
