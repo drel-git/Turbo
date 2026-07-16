@@ -276,13 +276,6 @@ local function expand_jonas_hand_chain(list, class_bucket, out)
     return out
 end
 
-local function strict_first_id_for_bag_list(out)
-    if type(out.ids) == "table" and #out.ids > 1 then
-        out.ids = { out.ids[1] }
-    end
-    return out
-end
-
 -- DoN Shadow section: owning the finished class Shadow counts as having used
 -- Primary/Secondary/Tertiary Materium of Legends (mark those rows green).
 local function expand_don_shadow_chain(list, class_bucket, out)
@@ -501,8 +494,6 @@ function M.resolve_entry(list_id, class_name, slot)
     elseif list_id == "don" then
         expand_don_shadow_chain(list, class_bucket, out)
         expand_don_scales_chain(out, class_name)
-    elseif list_id == "bagitems" then
-        strict_first_id_for_bag_list(out)
     end
     return out
 end

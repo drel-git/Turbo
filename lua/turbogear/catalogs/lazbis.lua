@@ -4613,6 +4613,7 @@ return {
       template = {
         ["Adventurer's Tattered Sack (Arcwoven) (UP3)"] = {
           ids = {
+            151056,
             151057,
           },
           item = "Adventurer's Tattered Sack (Arcwoven)",
@@ -4623,6 +4624,7 @@ return {
         },
         ["Adventurer's Tattered Sack (Base) (T1 Named)"] = {
           ids = {
+            151053,
             151054,
             151055,
             151056,
@@ -4636,6 +4638,7 @@ return {
         },
         ["Adventurer's Tattered Sack (Bound) (UP2)"] = {
           ids = {
+            151055,
             151056,
             151057,
           },
@@ -4647,6 +4650,7 @@ return {
         },
         ["Adventurer's Tattered Sack (Celestial)"] = {
           ids = {
+            151057,
           },
           item = "Adventurer's Tattered Sack (Celestial)",
           names = {
@@ -4656,6 +4660,7 @@ return {
         },
         ["Adventurer's Tattered Sack (Reinforced) (UP1)"] = {
           ids = {
+            151054,
             151055,
             151056,
             151057,
@@ -5192,10 +5197,8 @@ return {
         },
         ["Reinforced Stitching Frame (T2 Trash)"] = {
           ids = {
-            151054,
-            151055,
-            151056,
             151057,
+            151058,
           },
           item = "Reinforced Stitching Frame",
           names = {
@@ -39600,6 +39603,9 @@ return {
           name = "Discordian",
           slots = {
             "Annihilation(Spell Damage)",
+            "VolatileDiscordian(Spell Damage)",
+            "FocusDestruction(Overall Spell damage)",
+            "FocusAtrophy(Overall DoT damage)",
             "Evasion(Avoidance)",
             "MysticalAegis(DoT Shield)",
             "Precision(Accuracy)",
@@ -39620,6 +39626,7 @@ return {
             "MysticalAegis(Spell Shield)",
             "Prowess(Offense)",
             "Striking(Kick)",
+            "VolatilePlanar(Spell Damage)",
           },
         },
         {
@@ -39774,6 +39781,28 @@ return {
             },
             slot = "EscalatingOnslaught(HStr)",
           },
+          ["FocusAtrophy(Overall DoT damage)"] = {
+            ids = {
+              150048,
+            },
+            item = "Focus Shard of Atrophy",
+            names = {
+              "Focus Shard of Atrophy",
+            },
+            notes = "Not as strong as typed DoT-damage augs, but covers all DoT types. Useful for one broad boost while filling other slots with physical prowess or other augs.",
+            slot = "FocusAtrophy(Overall DoT damage)",
+          },
+          ["FocusDestruction(Overall Spell damage)"] = {
+            ids = {
+              150047,
+            },
+            item = "Focus Shard of Destruction",
+            names = {
+              "Focus Shard of Destruction",
+            },
+            notes = "Not as strong as typed spell-damage augs, but covers all spell types. Useful for one broad boost while filling other slots with physical prowess or other augs.",
+            slot = "FocusDestruction(Overall Spell damage)",
+          },
           IdolScale = {
             ids = {
               150977,
@@ -39810,6 +39839,26 @@ return {
               "Bottomless Venom Vial",
             },
             slot = "VenomVial",
+          },
+          ["VolatileDiscordian(Spell Damage)"] = {
+            ids = {
+              150040,
+            },
+            item = "Volatile Discordian Rune",
+            names = {
+              "Volatile Discordian Rune",
+            },
+            slot = "VolatileDiscordian(Spell Damage)",
+          },
+          ["VolatilePlanar(Spell Damage)"] = {
+            ids = {
+              150033,
+            },
+            item = "Volatile Planar Rune",
+            names = {
+              "Volatile Planar Rune",
+            },
+            slot = "VolatilePlanar(Spell Damage)",
           },
         },
         Berserker = {
@@ -39889,6 +39938,28 @@ return {
             },
             slot = "Bifold",
           },
+          ["FocusAtrophy(Overall DoT damage)"] = {
+            ids = {
+              150048,
+            },
+            item = "Focus Shard of Atrophy",
+            names = {
+              "Focus Shard of Atrophy",
+            },
+            notes = "Not as strong as typed DoT-damage augs, but covers all DoT types. Useful for one broad boost while filling other slots with physical prowess or other augs.",
+            slot = "FocusAtrophy(Overall DoT damage)",
+          },
+          ["FocusDestruction(Overall Spell damage)"] = {
+            ids = {
+              150047,
+            },
+            item = "Focus Shard of Destruction",
+            names = {
+              "Focus Shard of Destruction",
+            },
+            notes = "Not as strong as typed spell-damage augs, but covers all spell types. Useful for one broad boost while filling other slots with physical prowess or other augs.",
+            slot = "FocusDestruction(Overall Spell damage)",
+          },
           Manastone = {
             ids = {
             },
@@ -39907,6 +39978,26 @@ return {
               "Snake Charmer's Flute",
             },
             slot = "SnakeFlute",
+          },
+          ["VolatileDiscordian(Spell Damage)"] = {
+            ids = {
+              150040,
+            },
+            item = "Volatile Discordian Rune",
+            names = {
+              "Volatile Discordian Rune",
+            },
+            slot = "VolatileDiscordian(Spell Damage)",
+          },
+          ["VolatilePlanar(Spell Damage)"] = {
+            ids = {
+              150033,
+            },
+            item = "Volatile Planar Rune",
+            names = {
+              "Volatile Planar Rune",
+            },
+            slot = "VolatilePlanar(Spell Damage)",
           },
         },
         Druid = {
@@ -39919,6 +40010,28 @@ return {
             },
             slot = "Bifold",
           },
+          ["FocusAtrophy(Overall DoT damage)"] = {
+            ids = {
+              150048,
+            },
+            item = "Focus Shard of Atrophy",
+            names = {
+              "Focus Shard of Atrophy",
+            },
+            notes = "Not as strong as typed DoT-damage augs, but covers all DoT types. Useful for one broad boost while filling other slots with physical prowess or other augs.",
+            slot = "FocusAtrophy(Overall DoT damage)",
+          },
+          ["FocusDestruction(Overall Spell damage)"] = {
+            ids = {
+              150047,
+            },
+            item = "Focus Shard of Destruction",
+            names = {
+              "Focus Shard of Destruction",
+            },
+            notes = "Not as strong as typed spell-damage augs, but covers all spell types. Useful for one broad boost while filling other slots with physical prowess or other augs.",
+            slot = "FocusDestruction(Overall Spell damage)",
+          },
           Manastone = {
             ids = {
             },
@@ -39937,6 +40050,26 @@ return {
               "Snake Charmer's Flute",
             },
             slot = "SnakeFlute",
+          },
+          ["VolatileDiscordian(Spell Damage)"] = {
+            ids = {
+              150040,
+            },
+            item = "Volatile Discordian Rune",
+            names = {
+              "Volatile Discordian Rune",
+            },
+            slot = "VolatileDiscordian(Spell Damage)",
+          },
+          ["VolatilePlanar(Spell Damage)"] = {
+            ids = {
+              150033,
+            },
+            item = "Volatile Planar Rune",
+            names = {
+              "Volatile Planar Rune",
+            },
+            slot = "VolatilePlanar(Spell Damage)",
           },
         },
         Enchanter = {
@@ -39949,6 +40082,28 @@ return {
             },
             slot = "Bifold",
           },
+          ["FocusAtrophy(Overall DoT damage)"] = {
+            ids = {
+              150048,
+            },
+            item = "Focus Shard of Atrophy",
+            names = {
+              "Focus Shard of Atrophy",
+            },
+            notes = "Not as strong as typed DoT-damage augs, but covers all DoT types. Useful for one broad boost while filling other slots with physical prowess or other augs.",
+            slot = "FocusAtrophy(Overall DoT damage)",
+          },
+          ["FocusDestruction(Overall Spell damage)"] = {
+            ids = {
+              150047,
+            },
+            item = "Focus Shard of Destruction",
+            names = {
+              "Focus Shard of Destruction",
+            },
+            notes = "Not as strong as typed spell-damage augs, but covers all spell types. Useful for one broad boost while filling other slots with physical prowess or other augs.",
+            slot = "FocusDestruction(Overall Spell damage)",
+          },
           Manastone = {
             ids = {
             },
@@ -39967,6 +40122,26 @@ return {
               "Snake Charmer's Flute",
             },
             slot = "SnakeFlute",
+          },
+          ["VolatileDiscordian(Spell Damage)"] = {
+            ids = {
+              150040,
+            },
+            item = "Volatile Discordian Rune",
+            names = {
+              "Volatile Discordian Rune",
+            },
+            slot = "VolatileDiscordian(Spell Damage)",
+          },
+          ["VolatilePlanar(Spell Damage)"] = {
+            ids = {
+              150033,
+            },
+            item = "Volatile Planar Rune",
+            names = {
+              "Volatile Planar Rune",
+            },
+            slot = "VolatilePlanar(Spell Damage)",
           },
         },
         Magician = {
@@ -39979,6 +40154,28 @@ return {
             },
             slot = "Bifold",
           },
+          ["FocusAtrophy(Overall DoT damage)"] = {
+            ids = {
+              150048,
+            },
+            item = "Focus Shard of Atrophy",
+            names = {
+              "Focus Shard of Atrophy",
+            },
+            notes = "Not as strong as typed DoT-damage augs, but covers all DoT types. Useful for one broad boost while filling other slots with physical prowess or other augs.",
+            slot = "FocusAtrophy(Overall DoT damage)",
+          },
+          ["FocusDestruction(Overall Spell damage)"] = {
+            ids = {
+              150047,
+            },
+            item = "Focus Shard of Destruction",
+            names = {
+              "Focus Shard of Destruction",
+            },
+            notes = "Not as strong as typed spell-damage augs, but covers all spell types. Useful for one broad boost while filling other slots with physical prowess or other augs.",
+            slot = "FocusDestruction(Overall Spell damage)",
+          },
           Manastone = {
             ids = {
             },
@@ -39997,6 +40194,26 @@ return {
               "Snake Charmer's Flute",
             },
             slot = "SnakeFlute",
+          },
+          ["VolatileDiscordian(Spell Damage)"] = {
+            ids = {
+              150040,
+            },
+            item = "Volatile Discordian Rune",
+            names = {
+              "Volatile Discordian Rune",
+            },
+            slot = "VolatileDiscordian(Spell Damage)",
+          },
+          ["VolatilePlanar(Spell Damage)"] = {
+            ids = {
+              150033,
+            },
+            item = "Volatile Planar Rune",
+            names = {
+              "Volatile Planar Rune",
+            },
+            slot = "VolatilePlanar(Spell Damage)",
           },
         },
         Monk = {
@@ -40085,6 +40302,28 @@ return {
             },
             slot = "Bifold",
           },
+          ["FocusAtrophy(Overall DoT damage)"] = {
+            ids = {
+              150048,
+            },
+            item = "Focus Shard of Atrophy",
+            names = {
+              "Focus Shard of Atrophy",
+            },
+            notes = "Not as strong as typed DoT-damage augs, but covers all DoT types. Useful for one broad boost while filling other slots with physical prowess or other augs.",
+            slot = "FocusAtrophy(Overall DoT damage)",
+          },
+          ["FocusDestruction(Overall Spell damage)"] = {
+            ids = {
+              150047,
+            },
+            item = "Focus Shard of Destruction",
+            names = {
+              "Focus Shard of Destruction",
+            },
+            notes = "Not as strong as typed spell-damage augs, but covers all spell types. Useful for one broad boost while filling other slots with physical prowess or other augs.",
+            slot = "FocusDestruction(Overall Spell damage)",
+          },
           Manastone = {
             ids = {
             },
@@ -40103,6 +40342,26 @@ return {
               "Snake Charmer's Flute",
             },
             slot = "SnakeFlute",
+          },
+          ["VolatileDiscordian(Spell Damage)"] = {
+            ids = {
+              150040,
+            },
+            item = "Volatile Discordian Rune",
+            names = {
+              "Volatile Discordian Rune",
+            },
+            slot = "VolatileDiscordian(Spell Damage)",
+          },
+          ["VolatilePlanar(Spell Damage)"] = {
+            ids = {
+              150033,
+            },
+            item = "Volatile Planar Rune",
+            names = {
+              "Volatile Planar Rune",
+            },
+            slot = "VolatilePlanar(Spell Damage)",
           },
         },
         Paladin = {
@@ -40152,6 +40411,28 @@ return {
             },
             slot = "EscalatingOnslaught(HStr)",
           },
+          ["FocusAtrophy(Overall DoT damage)"] = {
+            ids = {
+              150048,
+            },
+            item = "Focus Shard of Atrophy",
+            names = {
+              "Focus Shard of Atrophy",
+            },
+            notes = "Not as strong as typed DoT-damage augs, but covers all DoT types. Useful for one broad boost while filling other slots with physical prowess or other augs.",
+            slot = "FocusAtrophy(Overall DoT damage)",
+          },
+          ["FocusDestruction(Overall Spell damage)"] = {
+            ids = {
+              150047,
+            },
+            item = "Focus Shard of Destruction",
+            names = {
+              "Focus Shard of Destruction",
+            },
+            notes = "Not as strong as typed spell-damage augs, but covers all spell types. Useful for one broad boost while filling other slots with physical prowess or other augs.",
+            slot = "FocusDestruction(Overall Spell damage)",
+          },
           IdolScale = {
             ids = {
               150977,
@@ -40179,6 +40460,26 @@ return {
               "Bottomless Venom Vial",
             },
             slot = "VenomVial",
+          },
+          ["VolatileDiscordian(Spell Damage)"] = {
+            ids = {
+              150040,
+            },
+            item = "Volatile Discordian Rune",
+            names = {
+              "Volatile Discordian Rune",
+            },
+            slot = "VolatileDiscordian(Spell Damage)",
+          },
+          ["VolatilePlanar(Spell Damage)"] = {
+            ids = {
+              150033,
+            },
+            item = "Volatile Planar Rune",
+            names = {
+              "Volatile Planar Rune",
+            },
+            slot = "VolatilePlanar(Spell Damage)",
           },
         },
         Ranger = {
@@ -40228,6 +40529,28 @@ return {
             },
             slot = "EscalatingOnslaught(HStr)",
           },
+          ["FocusAtrophy(Overall DoT damage)"] = {
+            ids = {
+              150048,
+            },
+            item = "Focus Shard of Atrophy",
+            names = {
+              "Focus Shard of Atrophy",
+            },
+            notes = "Not as strong as typed DoT-damage augs, but covers all DoT types. Useful for one broad boost while filling other slots with physical prowess or other augs.",
+            slot = "FocusAtrophy(Overall DoT damage)",
+          },
+          ["FocusDestruction(Overall Spell damage)"] = {
+            ids = {
+              150047,
+            },
+            item = "Focus Shard of Destruction",
+            names = {
+              "Focus Shard of Destruction",
+            },
+            notes = "Not as strong as typed spell-damage augs, but covers all spell types. Useful for one broad boost while filling other slots with physical prowess or other augs.",
+            slot = "FocusDestruction(Overall Spell damage)",
+          },
           Manastone = {
             ids = {
             },
@@ -40254,6 +40577,26 @@ return {
               "Bottomless Venom Vial",
             },
             slot = "VenomVial",
+          },
+          ["VolatileDiscordian(Spell Damage)"] = {
+            ids = {
+              150040,
+            },
+            item = "Volatile Discordian Rune",
+            names = {
+              "Volatile Discordian Rune",
+            },
+            slot = "VolatileDiscordian(Spell Damage)",
+          },
+          ["VolatilePlanar(Spell Damage)"] = {
+            ids = {
+              150033,
+            },
+            item = "Volatile Planar Rune",
+            names = {
+              "Volatile Planar Rune",
+            },
+            slot = "VolatilePlanar(Spell Damage)",
           },
         },
         Rogue = {
@@ -40361,6 +40704,28 @@ return {
             },
             slot = "EscalatingOnslaught(HStr)",
           },
+          ["FocusAtrophy(Overall DoT damage)"] = {
+            ids = {
+              150048,
+            },
+            item = "Focus Shard of Atrophy",
+            names = {
+              "Focus Shard of Atrophy",
+            },
+            notes = "Not as strong as typed DoT-damage augs, but covers all DoT types. Useful for one broad boost while filling other slots with physical prowess or other augs.",
+            slot = "FocusAtrophy(Overall DoT damage)",
+          },
+          ["FocusDestruction(Overall Spell damage)"] = {
+            ids = {
+              150047,
+            },
+            item = "Focus Shard of Destruction",
+            names = {
+              "Focus Shard of Destruction",
+            },
+            notes = "Not as strong as typed spell-damage augs, but covers all spell types. Useful for one broad boost while filling other slots with physical prowess or other augs.",
+            slot = "FocusDestruction(Overall Spell damage)",
+          },
           IdolScale = {
             ids = {
               150977,
@@ -40389,6 +40754,26 @@ return {
             },
             slot = "VenomVial",
           },
+          ["VolatileDiscordian(Spell Damage)"] = {
+            ids = {
+              150040,
+            },
+            item = "Volatile Discordian Rune",
+            names = {
+              "Volatile Discordian Rune",
+            },
+            slot = "VolatileDiscordian(Spell Damage)",
+          },
+          ["VolatilePlanar(Spell Damage)"] = {
+            ids = {
+              150033,
+            },
+            item = "Volatile Planar Rune",
+            names = {
+              "Volatile Planar Rune",
+            },
+            slot = "VolatilePlanar(Spell Damage)",
+          },
         },
         Shaman = {
           Bifold = {
@@ -40399,6 +40784,28 @@ return {
               "Bifold Focus of the Evil Eye",
             },
             slot = "Bifold",
+          },
+          ["FocusAtrophy(Overall DoT damage)"] = {
+            ids = {
+              150048,
+            },
+            item = "Focus Shard of Atrophy",
+            names = {
+              "Focus Shard of Atrophy",
+            },
+            notes = "Not as strong as typed DoT-damage augs, but covers all DoT types. Useful for one broad boost while filling other slots with physical prowess or other augs.",
+            slot = "FocusAtrophy(Overall DoT damage)",
+          },
+          ["FocusDestruction(Overall Spell damage)"] = {
+            ids = {
+              150047,
+            },
+            item = "Focus Shard of Destruction",
+            names = {
+              "Focus Shard of Destruction",
+            },
+            notes = "Not as strong as typed spell-damage augs, but covers all spell types. Useful for one broad boost while filling other slots with physical prowess or other augs.",
+            slot = "FocusDestruction(Overall Spell damage)",
           },
           Manastone = {
             ids = {
@@ -40418,6 +40825,26 @@ return {
               "Snake Charmer's Flute",
             },
             slot = "SnakeFlute",
+          },
+          ["VolatileDiscordian(Spell Damage)"] = {
+            ids = {
+              150040,
+            },
+            item = "Volatile Discordian Rune",
+            names = {
+              "Volatile Discordian Rune",
+            },
+            slot = "VolatileDiscordian(Spell Damage)",
+          },
+          ["VolatilePlanar(Spell Damage)"] = {
+            ids = {
+              150033,
+            },
+            item = "Volatile Planar Rune",
+            names = {
+              "Volatile Planar Rune",
+            },
+            slot = "VolatilePlanar(Spell Damage)",
           },
         },
         Warrior = {
@@ -40506,6 +40933,28 @@ return {
             },
             slot = "Bifold",
           },
+          ["FocusAtrophy(Overall DoT damage)"] = {
+            ids = {
+              150048,
+            },
+            item = "Focus Shard of Atrophy",
+            names = {
+              "Focus Shard of Atrophy",
+            },
+            notes = "Not as strong as typed DoT-damage augs, but covers all DoT types. Useful for one broad boost while filling other slots with physical prowess or other augs.",
+            slot = "FocusAtrophy(Overall DoT damage)",
+          },
+          ["FocusDestruction(Overall Spell damage)"] = {
+            ids = {
+              150047,
+            },
+            item = "Focus Shard of Destruction",
+            names = {
+              "Focus Shard of Destruction",
+            },
+            notes = "Not as strong as typed spell-damage augs, but covers all spell types. Useful for one broad boost while filling other slots with physical prowess or other augs.",
+            slot = "FocusDestruction(Overall Spell damage)",
+          },
           Manastone = {
             ids = {
             },
@@ -40524,6 +40973,26 @@ return {
               "Snake Charmer's Flute",
             },
             slot = "SnakeFlute",
+          },
+          ["VolatileDiscordian(Spell Damage)"] = {
+            ids = {
+              150040,
+            },
+            item = "Volatile Discordian Rune",
+            names = {
+              "Volatile Discordian Rune",
+            },
+            slot = "VolatileDiscordian(Spell Damage)",
+          },
+          ["VolatilePlanar(Spell Damage)"] = {
+            ids = {
+              150033,
+            },
+            item = "Volatile Planar Rune",
+            names = {
+              "Volatile Planar Rune",
+            },
+            slot = "VolatilePlanar(Spell Damage)",
           },
         },
       },

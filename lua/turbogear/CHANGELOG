@@ -1,3 +1,16 @@
+1.2.20
+- Bags BiS: Adventurer's Tattered Sack ranks (151053-151057) chain like fungal /
+  Jonas - owning a higher sack clears lower ranks. Reinforced Stitching Frame
+  (151058) stays needed until Celestial (151057), then Frame + lower sacks show
+  owned. Bag multi-ID ownership chains are honored again (no longer stripped).
+- Vendor BiS (CLR PAL RNG SHD DRU SHM NEC WIZ MAG ENC BST): Discordian adds
+  Volatile Discordian Rune (150040), Focus Shard of Destruction (150047) and
+  Focus Shard of Atrophy (150048) with hover notes that they are weaker than
+  typed augs but cover all spell/DoT types; Planar adds Volatile Planar Rune
+  (150033).
+- Rule pack: Epic Quest Items Mega (ANNOUNCE) for class epic quest items;
+  sits beside the smaller epic_quests KEEP pack.
+
 1.2.19
 - Characters pill (four modes) pinned under main tabs when relevant:
   Roster (Source / columns / teams) on BiS, Spells, Lockouts, and Stats Search;
