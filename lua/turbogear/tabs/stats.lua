@@ -13,11 +13,16 @@ local views = require('views')
 local item_actions = require('item_actions')
 local Engine = require('engine').Engine
 local Store = require('store').Store
+local characters = require('characters')
 
 local M = {}
 
 local search_text = ""
 local filtered_key, filtered_rows = nil, {}
+
+characters.set_on_changed(function()
+    filtered_key = nil
+end, "stats")
 
 local VIEW_MODES = {
     { key = "character", label = "Character" },
@@ -109,6 +114,13 @@ local function draw_view_tabs()
     end
 end
 
+-- Drawn above ##tg_main_scroll_body so Character / Plan / Search stay pinned.
+function M.draw_view_chrome()
+    ensure_defaults()
+    draw_view_tabs()
+    ImGui.Separator()
+end
+
 local function search_scope_label()
     for _, opt in ipairs(SEARCH_SCOPES) do
         if opt.key == (Settings.statsSearchScope or "all") then return opt.label end
@@ -134,28 +146,33 @@ end
 
 local function draw_mode_picker()
     local mode = view_mode()
+    local use_pill = Settings.showCharactersPill == true
     if mode == "character" then
-        ImGui.Text("Character:")
-        ImGui.SameLine()
-        local old = Settings.statsSourceKey or "__self__"
-        Settings.statsSourceKey = views.draw_source_picker("##stats_source_key", old, 220.0)
-        if Settings.statsSourceKey ~= old then
-            SaveSettings()
-            filtered_key = nil
-        end
-    elseif mode == "plan" then
-        ImGui.Text("List:")
-        ImGui.SameLine()
-        local ok_loadout, loadout = pcall(require, 'loadout')
-        if ok_loadout and loadout then
-            local old = Settings.statsLoadoutList or ""
-            Settings.statsLoadoutList = loadout.draw_list_picker("##stats_loadout_list", old ~= "" and old or loadout.selected_list_id(), 220.0)
-            if Settings.statsLoadoutList ~= old then
+        if not use_pill then
+            ImGui.Text("Character:")
+            ImGui.SameLine()
+            local old = Settings.statsSourceKey or "__self__"
+            Settings.statsSourceKey = views.draw_source_picker("##stats_source_key", old, 220.0)
+            if Settings.statsSourceKey ~= old then
                 SaveSettings()
                 filtered_key = nil
             end
         end
-    else
+    elseif mode == "plan" then
+        if not use_pill then
+            ImGui.Text("List:")
+            ImGui.SameLine()
+            local ok_loadout, loadout = pcall(require, 'loadout')
+            if ok_loadout and loadout then
+                local old = Settings.statsLoadoutList or ""
+                Settings.statsLoadoutList = loadout.draw_list_picker("##stats_loadout_list", old ~= "" and old or loadout.selected_list_id(), 220.0)
+                if Settings.statsLoadoutList ~= old then
+                    SaveSettings()
+                    filtered_key = nil
+                end
+            end
+        end
+    elseif not use_pill then
         ImGui.Text("Scope:")
         ImGui.SameLine()
         ImGui.SetNextItemWidth(120.0)
@@ -184,8 +201,22 @@ local function loc_toggle(label, setting_key)
 end
 
 local function row_source_allowed(row, e3_names)
+    if Settings.showCharactersPill == true and view_mode() == "search" then
+        local view = characters.get_view_key("stats_search")
+        if view == characters.VIEW_SELECTED then
+            local selected = Settings.statsSearchSelectedChars or {}
+            local clean = views.clean_name(row.owner)
+            return clean ~= "" and selected[clean] ~= nil
+        elseif view ~= characters.VIEW_ALL and view ~= "" then
+            local want = views.clean_name(views.source_owner_name(view))
+            return want ~= "" and views.clean_name(row.owner) == want
+        end
+    end
     local scope = Settings.statsSearchScope or "all"
     if scope == "all" then return true end
+    if scope == "self" then
+        return views.clean_name(row.owner) == views.clean_name(views.source_owner_name("__self__"))
+    end
     if scope == "online" then return row.ownerStatus == "live" end
     if scope == "group" then return views.is_group_member(row.owner) end
     if scope == "e3" then
@@ -423,8 +454,6 @@ local function draw_owner_totals(rows)
 end
 
 local function draw_controls()
-    draw_view_tabs()
-    ImGui.Separator()
     draw_mode_picker()
     if view_mode() == "search" then
         ImGui.SameLine()

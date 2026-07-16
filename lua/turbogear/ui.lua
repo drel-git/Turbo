@@ -34,6 +34,7 @@ local item_actions = require('item_actions')
 local inspect_dock = require('inspect_dock')
 local views = require('views')
 local location_color = theme.location_color
+local characters = require('characters')
 
 local M = {}
 M._last_main_rect = nil
@@ -471,91 +472,99 @@ local function sorted_search_rows(rows, needle)
     return search_sort.rows or rows
 end
 
+local function global_search_active()
+    return tostring(Settings.globalSearch or ""):gsub("^%s+", ""):gsub("%s+$", "") ~= ""
+end
+
 local function draw_global_search_results()
     local needle = tostring(Settings.globalSearch or ""):gsub("^%s+", ""):gsub("%s+$", "")
-    if needle ~= "" then
-        local rows = global_search.filter(needle, 60)
-        col_text(Theme.dim, string.format("%d inventory match(es)", #rows))
-        col_text(Theme.dim, "Searches worn gear, bags, bank, and installed augs. Tab = where a left-click opens.")
-        local max_h = math.min(200.0, 28.0 + (#rows * 22.0))
-        if #rows > 0 and views.begin_scroll_table then
-            local sortable = search_sort_supported()
-            local table_flags = views.scroll_table_flags(sortable and ImGuiTableFlags.Sortable or 0)
-            if views.begin_scroll_table("TGGlobalSearch", 5, table_flags, 96.0, max_h) then
-                local row_ok, row_err = pcall(function()
-                    ImGui.TableSetupColumn("Owner", ImGuiTableColumnFlags.WidthFixed, 108.0, SEARCH_COL_OWNER)
-                    ImGui.TableSetupColumn("Item", ImGuiTableColumnFlags.WidthStretch, 2.0, SEARCH_COL_ITEM)
-                    ImGui.TableSetupColumn("Qty", ImGuiTableColumnFlags.WidthFixed, 42.0, SEARCH_COL_QTY)
-                    ImGui.TableSetupColumn("Location", ImGuiTableColumnFlags.WidthStretch, 1.5, SEARCH_COL_LOCATION)
-                    ImGui.TableSetupColumn("Open", ImGuiTableColumnFlags.WidthFixed + (ImGuiTableColumnFlags.NoSort or 0), 88.0)
-                    if sortable and ImGui.TableHeadersRow then
-                        -- Standard headers so clicks drive the sort arrows.
-                        if ImGui.TableSetupScrollFreeze then pcall(ImGui.TableSetupScrollFreeze, 0, 1) end
-                        ImGui.TableHeadersRow()
-                        rows = sorted_search_rows(rows, needle)
-                    else
-                        views.table_headers_centered({ "Owner", "Item", "Qty", "Location", "Open" })
-                    end
-                    for i, row in ipairs(rows) do
-                        ImGui.TableNextRow()
-                        ImGui.TableSetColumnIndex(0)
-                        views.draw_owner_cell(row)
-                        ImGui.TableSetColumnIndex(1)
-                        local item_name = tostring(row.name or "?")
-                        if ImGui.Selectable(item_name .. "##tg_gs_" .. tostring(i), false) then
-                            global_search.apply_row(row)
-                        end
-                        item_actions.draw_context(item_name, row.id, "tg_gs_" .. tostring(i), item_actions.context_opts({
-                            sourceLocation = tostring(row.location or row.where or ""),
-                        }, row))
-                        ImGui.TableSetColumnIndex(2)
-                        local qty = tonumber(row.qty) or 0
-                        if qty > 1 then ImGui.Text(tostring(qty)) else ImGui.TextDisabled("-") end
-                        ImGui.TableSetColumnIndex(3)
-                        col_text(location_color(row.locationGroup, row.location), tostring(row.location or row.where or ""))
-                        ImGui.TableSetColumnIndex(4)
-                        ImGui.TextDisabled(global_search.row_hint(row))
-                    end
-                end)
-                ImGui.EndTable()
-                if not row_ok and not state.err_once then
-                    state.err_once = "Search table: " .. tostring(row_err)
+    if needle == "" then return end
+
+    col_text(Theme.dim, "Showing search results - Clear to return to the current tab.")
+    local rows = global_search.filter(needle, 60)
+    col_text(Theme.dim, string.format("%d inventory match(es)", #rows))
+    col_text(Theme.dim, "Searches worn gear, bags, bank, and installed augs. Tab = where a left-click opens.")
+    local max_h = math.min(320.0, 28.0 + math.max(1, #rows) * 22.0)
+    if #rows > 0 and views.begin_scroll_table then
+        local sortable = search_sort_supported()
+        local table_flags = views.scroll_table_flags(sortable and ImGuiTableFlags.Sortable or 0)
+        if views.begin_scroll_table("TGGlobalSearch", 5, table_flags, 8.0, max_h, max_h) then
+            local row_ok, row_err = pcall(function()
+                ImGui.TableSetupColumn("Owner", ImGuiTableColumnFlags.WidthFixed, 108.0, SEARCH_COL_OWNER)
+                ImGui.TableSetupColumn("Item", ImGuiTableColumnFlags.WidthStretch, 2.0, SEARCH_COL_ITEM)
+                ImGui.TableSetupColumn("Qty", ImGuiTableColumnFlags.WidthFixed, 42.0, SEARCH_COL_QTY)
+                ImGui.TableSetupColumn("Location", ImGuiTableColumnFlags.WidthStretch, 1.5, SEARCH_COL_LOCATION)
+                ImGui.TableSetupColumn("Open", ImGuiTableColumnFlags.WidthFixed + (ImGuiTableColumnFlags.NoSort or 0), 88.0)
+                if sortable and ImGui.TableHeadersRow then
+                    -- Standard headers so clicks drive the sort arrows.
+                    if ImGui.TableSetupScrollFreeze then pcall(ImGui.TableSetupScrollFreeze, 0, 1) end
+                    ImGui.TableHeadersRow()
+                    rows = sorted_search_rows(rows, needle)
+                else
+                    views.table_headers_centered({ "Owner", "Item", "Qty", "Location", "Open" })
                 end
+                for i, row in ipairs(rows) do
+                    ImGui.TableNextRow()
+                    ImGui.TableSetColumnIndex(0)
+                    views.draw_owner_cell(row)
+                    ImGui.TableSetColumnIndex(1)
+                    local item_name = tostring(row.name or "?")
+                    if ImGui.Selectable(item_name .. "##tg_gs_" .. tostring(i), false) then
+                        global_search.apply_row(row)
+                    end
+                    item_actions.draw_context(item_name, row.id, "tg_gs_" .. tostring(i), item_actions.context_opts({
+                        sourceLocation = tostring(row.location or row.where or ""),
+                    }, row))
+                    ImGui.TableSetColumnIndex(2)
+                    local qty = tonumber(row.qty) or 0
+                    if qty > 1 then ImGui.Text(tostring(qty)) else ImGui.TextDisabled("-") end
+                    ImGui.TableSetColumnIndex(3)
+                    col_text(location_color(row.locationGroup, row.location), tostring(row.location or row.where or ""))
+                    ImGui.TableSetColumnIndex(4)
+                    ImGui.TextDisabled(global_search.row_hint(row))
+                end
+            end)
+            ImGui.EndTable()
+            if not row_ok and not state.err_once then
+                state.err_once = "Search table: " .. tostring(row_err)
             end
         end
+    elseif #rows == 0 then
+        col_text(Theme.placeholder or Theme.dim, "No inventory matches.")
+    end
 
-        local bis_rows = global_search.filter_bis(needle, 30)
-        if #bis_rows > 0 and views.begin_scroll_table then
-            col_text(Theme.section or Theme.cyan, string.format("BiS recommendations (%d)", #bis_rows))
-            col_text(Theme.dim, "Left-click a row to open that list on TurboBiS.")
-            local bis_h = math.min(180.0, 28.0 + (#bis_rows * 22.0))
-            if views.begin_scroll_table("TGGlobalSearchBiS", 4, views.scroll_table_flags(), 120.0, bis_h) then
-                local row_ok, row_err = pcall(function()
-                    ImGui.TableSetupColumn("Item", ImGuiTableColumnFlags.WidthStretch, 2.0)
-                    ImGui.TableSetupColumn("List", ImGuiTableColumnFlags.WidthFixed, 88.0)
-                    ImGui.TableSetupColumn("Classes", ImGuiTableColumnFlags.WidthStretch, 1.2)
-                    ImGui.TableSetupColumn("Slot", ImGuiTableColumnFlags.WidthFixed, 96.0)
-                    views.table_headers_centered({ "Item", "List", "Classes", "Slot" })
-                    for i, row in ipairs(bis_rows) do
-                        ImGui.TableNextRow()
-                        ImGui.TableSetColumnIndex(0)
-                        local item_name = tostring(row.name or "?")
-                        if ImGui.Selectable(item_name .. "##tg_gs_bis_" .. tostring(i), false) then
-                            global_search.apply_bis_row(row)
-                        end
-                        item_actions.draw_context(item_name, row.id, "tg_gs_bis_" .. tostring(i))
-                        ImGui.TableSetColumnIndex(1)
-                        ImGui.Text(tostring(row.list_label or row.list_id or "?"))
-                        ImGui.TableSetColumnIndex(2)
-                        col_text(Theme.dim, tostring(row.classes or "-"))
-                        ImGui.TableSetColumnIndex(3)
-                        ImGui.Text(tostring(row.slot or ""))
+    local bis_rows = global_search.filter_bis(needle, 30)
+    if #bis_rows > 0 and views.begin_scroll_table then
+        ImGui.Spacing()
+        col_text(Theme.section or Theme.cyan, string.format("BiS recommendations (%d)", #bis_rows))
+        col_text(Theme.dim, "Left-click a row to open that list on TurboBiS.")
+        local bis_h = math.min(280.0, 28.0 + (#bis_rows * 22.0))
+        if views.begin_scroll_table("TGGlobalSearchBiS", 4, views.scroll_table_flags(), 8.0, bis_h, bis_h) then
+            local row_ok, row_err = pcall(function()
+                ImGui.TableSetupColumn("Item", ImGuiTableColumnFlags.WidthStretch, 2.0)
+                ImGui.TableSetupColumn("List", ImGuiTableColumnFlags.WidthFixed, 88.0)
+                ImGui.TableSetupColumn("Classes", ImGuiTableColumnFlags.WidthStretch, 1.2)
+                ImGui.TableSetupColumn("Slot", ImGuiTableColumnFlags.WidthFixed, 96.0)
+                views.table_headers_centered({ "Item", "List", "Classes", "Slot" })
+                for i, row in ipairs(bis_rows) do
+                    ImGui.TableNextRow()
+                    ImGui.TableSetColumnIndex(0)
+                    local item_name = tostring(row.name or "?")
+                    if ImGui.Selectable(item_name .. "##tg_gs_bis_" .. tostring(i), false) then
+                        global_search.apply_bis_row(row)
                     end
-                end)
-                ImGui.EndTable()
-                if not row_ok and not state.err_once then
-                    state.err_once = "BiS search table: " .. tostring(row_err)
+                    item_actions.draw_context(item_name, row.id, "tg_gs_bis_" .. tostring(i))
+                    ImGui.TableSetColumnIndex(1)
+                    ImGui.Text(tostring(row.list_label or row.list_id or "?"))
+                    ImGui.TableSetColumnIndex(2)
+                    ImGui.TextDisabled(tostring(row.classes or ""))
+                    ImGui.TableSetColumnIndex(3)
+                    ImGui.TextDisabled(tostring(row.slot or ""))
                 end
+            end)
+            ImGui.EndTable()
+            if not row_ok and not state.err_once then
+                state.err_once = "BiS search table: " .. tostring(row_err)
             end
         end
     end
@@ -800,96 +809,175 @@ local function set_gear_tab(tab)
     SaveSettings()
 end
 
-local function draw_gear()
-    return diag.time("ui.tab.gear", function()
-        local cur = Settings.gearTab or "inventory"
-        cur = draw_tab_buttons({
-            { key = "inventory", label = "Inventory" },
-            { key = "worn", label = "Worn Augs" },
-            { key = "stored", label = "Stored" },
-        }, cur, "tg_gear", true, set_gear_tab)
-        ImGui.Separator()
-        sync_current_view_if_needed()
-        if cur == "worn" then diag.time("ui.gear.worn", worn.draw)
-        elseif cur == "stored" then diag.time("ui.gear.stored", augbag.draw)
-        else diag.time("ui.gear.inventory", inventory.draw) end
-    end)
-end
-
-local function draw_inspect()
-    return diag.time("ui.tab.inspect", function()
-        local cur = Settings.inspectTab or "stats"
-        cur = draw_tab_buttons({
-            { key = "stats", label = "Stats" },
-            { key = "live", label = "Effects" },
-            { key = "focus", label = "Focus" },
-        }, cur, "tg_inspect", true, function(tab)
-            Settings.inspectTab = tab
-            SaveSettings()
-        end)
-        ImGui.Separator()
-        sync_current_view_if_needed()
-        if cur == "focus" then diag.time("ui.inspect.focus", focus.draw)
-        elseif cur == "live" then diag.time("ui.inspect.live", live_stats.draw)
-        else diag.time("ui.inspect.stats", stats.draw) end
-    end)
-end
-
-local function draw_upgrade()
-    return diag.time("ui.tab.upgrade", function()
-        local cur = Settings.upgradeTab or "suggestions"
-        cur = draw_tab_buttons({
-            { key = "suggestions", label = "Suggestions" },
-            { key = "compare", label = "Compare" },
-            { key = "empty", label = "Empty" },
-        }, cur, "tg_upgrade", true, function(tab)
-            Settings.upgradeTab = tab
-            SaveSettings()
-        end)
-        ImGui.Separator()
-        sync_current_view_if_needed()
-        if cur == "compare" then diag.time("ui.upgrade.compare", compare.draw)
-        elseif cur == "empty" then diag.time("ui.upgrade.empty", empty.draw)
-        else diag.time("ui.upgrade.suggestions", suggest.draw) end
-    end)
-end
-
-local function draw_bis_lists()
-    return diag.time("ui.tab.bis_lists", function()
-        if (Settings.bisListsTab or "catalog") ~= "edit" then
-            Settings.bisListsTab = tostring(Settings.bisListMode or "catalog") == "user" and "my" or "catalog"
+local function characters_tab_for_main(main)
+    main = tostring(main or "")
+    if main == "bis" then
+        if tostring(Settings.bisListsTab or "catalog") == "edit" then return nil end
+        return "bis"
+    end
+    if main == "spells" then return "spells" end
+    if main == "lockouts" then return "lockouts" end
+    if main == "inspect" then
+        local inspect = tostring(Settings.inspectTab or "stats")
+        if inspect == "live" then return "effects" end
+        if inspect == "focus" then return "focus" end
+        if inspect == "stats" then
+            local mode = tostring(Settings.statsViewMode or "character")
+            if mode == "search" then return "stats_search" end
+            if mode == "character" then return "stats_character" end
+            if mode == "plan" then return "stats_plan" end
+            return nil
         end
-        local cur = Settings.bisListsTab or "catalog"
-        cur = draw_tab_buttons({
-            { key = "catalog", label = "BiS Catalog" },
-            { key = "my", label = "Custom Lists" },
-            { key = "edit", label = "Manage Lists" },
-        }, cur, "tg_bis_lists", true, function(tab)
-            Settings.bisListsTab = tab
-            if tab == "catalog" then Settings.bisListMode = "catalog"
-            elseif tab == "my" then Settings.bisListMode = "user" end
-            SaveSettings()
-        end)
-        ImGui.Separator()
-        sync_current_view_if_needed()
-        if cur == "edit" then
-            if setup.draw_user_lists_editor then diag.time("ui.bis_lists.edit", setup.draw_user_lists_editor)
-            else col_text(Theme.amber, "List editor is unavailable.") end
-        else
-            if cur == "catalog" and Settings.bisListMode ~= "catalog" then
-                Settings.bisListMode = "catalog"; SaveSettings()
-            elseif cur == "my" and Settings.bisListMode ~= "user" then
-                Settings.bisListMode = "user"; SaveSettings()
-            end
-            diag.time("ui.bis_lists.catalog", bis.draw)
+        return nil
+    end
+    if main == "upgrade" then
+        local upgrade = tostring(Settings.upgradeTab or "suggestions")
+        if upgrade == "suggestions" then return "suggestions" end
+        if upgrade == "empty" then return "empty" end
+        if upgrade == "compare" then
+            if tostring(Settings.compareMode or "chars") == "list_list" then return nil end
+            return "compare"
         end
-    end)
+        return nil
+    end
+    if main == "gear" then
+        local gear = tostring(Settings.gearTab or "inventory")
+        if gear == "worn" then return "worn" end
+        if gear == "stored" then return "stored" end
+        return "inventory"
+    end
+    return nil
 end
 
-local function draw_main_tabs()
+local function draw_characters_chrome(main)
+    if Settings.showCharactersPill ~= true then return false end
+    local tab = characters_tab_for_main(main)
+    if not tab then return false end
+    local width = 260
+    if characters.is_list and characters.is_list(tab) then width = 280
+    elseif characters.is_primary(tab) then width = 320
+    elseif characters.is_picker(tab) then width = 280 end
+    characters.draw_pill(tab, { width = width, height = 22 })
+    local msg = characters.take_status()
+    if msg and msg ~= "" then
+        ImGui.SameLine()
+        col_text(Theme.dim, msg)
+    end
+    return true
+end
+
+local function draw_gear_chrome()
+    local cur = Settings.gearTab or "inventory"
+    cur = draw_tab_buttons({
+        { key = "inventory", label = "Inventory" },
+        { key = "worn", label = "Worn Augs" },
+        { key = "stored", label = "Stored" },
+    }, cur, "tg_gear", true, set_gear_tab)
+    ImGui.Separator()
+    return cur
+end
+
+local function draw_gear_body(cur)
+    cur = tostring(cur or Settings.gearTab or "inventory")
+    sync_current_view_if_needed()
+    if cur == "worn" then diag.time("ui.gear.worn", worn.draw)
+    elseif cur == "stored" then diag.time("ui.gear.stored", augbag.draw)
+    else diag.time("ui.gear.inventory", inventory.draw) end
+end
+
+local function draw_inspect_chrome()
+    local cur = Settings.inspectTab or "stats"
+    cur = draw_tab_buttons({
+        { key = "stats", label = "Stats" },
+        { key = "live", label = "Effects" },
+        { key = "focus", label = "Focus" },
+    }, cur, "tg_inspect", true, function(tab)
+        Settings.inspectTab = tab
+        SaveSettings()
+    end)
+    ImGui.Separator()
+    if cur == "stats" and stats.draw_view_chrome then
+        stats.draw_view_chrome()
+    end
+    return cur
+end
+
+local function draw_inspect_body(cur)
+    cur = tostring(cur or Settings.inspectTab or "stats")
+    sync_current_view_if_needed()
+    if cur == "focus" then diag.time("ui.inspect.focus", focus.draw)
+    elseif cur == "live" then diag.time("ui.inspect.live", live_stats.draw)
+    else diag.time("ui.inspect.stats", stats.draw) end
+end
+
+local function draw_upgrade_chrome()
+    local cur = Settings.upgradeTab or "suggestions"
+    cur = draw_tab_buttons({
+        { key = "suggestions", label = "Suggestions" },
+        { key = "compare", label = "Compare" },
+        { key = "empty", label = "Empty" },
+    }, cur, "tg_upgrade", true, function(tab)
+        Settings.upgradeTab = tab
+        SaveSettings()
+    end)
+    ImGui.Separator()
+    return cur
+end
+
+local function draw_upgrade_body(cur)
+    cur = tostring(cur or Settings.upgradeTab or "suggestions")
+    sync_current_view_if_needed()
+    if cur == "compare" then diag.time("ui.upgrade.compare", compare.draw)
+    elseif cur == "empty" then diag.time("ui.upgrade.empty", empty.draw)
+    else diag.time("ui.upgrade.suggestions", suggest.draw) end
+end
+
+local function draw_bis_lists_chrome()
+    if (Settings.bisListsTab or "catalog") ~= "edit" then
+        Settings.bisListsTab = tostring(Settings.bisListMode or "catalog") == "user" and "my" or "catalog"
+    end
+    local cur = Settings.bisListsTab or "catalog"
+    cur = draw_tab_buttons({
+        { key = "catalog", label = "BiS Catalog" },
+        { key = "my", label = "Custom Lists" },
+        { key = "edit", label = "Manage Lists" },
+    }, cur, "tg_bis_lists", true, function(tab)
+        Settings.bisListsTab = tab
+        if tab == "catalog" then Settings.bisListMode = "catalog"
+        elseif tab == "my" then Settings.bisListMode = "user" end
+        SaveSettings()
+    end)
+    ImGui.Separator()
+    return cur
+end
+
+local function draw_bis_lists_body(cur)
+    cur = tostring(cur or Settings.bisListsTab or "catalog")
+    sync_current_view_if_needed()
+    if cur == "edit" then
+        if setup.draw_user_lists_editor then diag.time("ui.bis_lists.edit", setup.draw_user_lists_editor)
+        else col_text(Theme.amber, "List editor is unavailable.") end
+    else
+        if cur == "catalog" and Settings.bisListMode ~= "catalog" then
+            Settings.bisListMode = "catalog"; SaveSettings()
+        elseif cur == "my" and Settings.bisListMode ~= "user" then
+            Settings.bisListMode = "user"; SaveSettings()
+        end
+        diag.time("ui.bis_lists.catalog", bis.draw)
+    end
+end
+
+local function draw_secondary_chrome(main)
+    main = tostring(main or "")
+    if main == "gear" then return draw_gear_chrome() end
+    if main == "inspect" then return draw_inspect_chrome() end
+    if main == "upgrade" then return draw_upgrade_chrome() end
+    if main == "bis" then return draw_bis_lists_chrome() end
+    return nil
+end
+
+local function draw_main_tab_chrome()
     local cur = Settings.mainTab or "bis"
-    local prev_tab = last_main_tab
-
     local tabs = {
         { key = "gear", label = "Gear" },
         { key = "inspect", label = "Inspect" },
@@ -906,37 +994,62 @@ local function draw_main_tabs()
         end
     end)
     ImGui.Separator()
+    if draw_characters_chrome(cur) then
+        ImGui.Separator()
+    end
+    local secondary = draw_secondary_chrome(cur)
+    return cur, secondary
+end
+
+local function draw_main_tab_body(cur, secondary)
+    cur = tostring(cur or Settings.mainTab or "bis")
+    local prev_tab = last_main_tab
     if prev_tab ~= cur then
         if cur == "spells" and spells_tab.on_tab_enter then spells_tab.on_tab_enter()
         elseif cur == "lockouts" and lockouts_tab.on_tab_enter then lockouts_tab.on_tab_enter() end
     end
     last_main_tab = cur
-    if cur == "gear" then draw_gear()
-    elseif cur == "inspect" then draw_inspect()
-    elseif cur == "upgrade" then draw_upgrade()
-    elseif cur == "bis" then draw_bis_lists()
+    if cur == "gear" then draw_gear_body(secondary)
+    elseif cur == "inspect" then draw_inspect_body(secondary)
+    elseif cur == "upgrade" then draw_upgrade_body(secondary)
+    elseif cur == "bis" then draw_bis_lists_body(secondary)
     else
         sync_current_view_if_needed()
         if cur == "spells" then diag.time("ui.tab.spells", spells_tab.draw)
         elseif cur == "lockouts" then diag.time("ui.tab.lockouts", lockouts_tab.draw)
         elseif cur == "setup" then diag.time("ui.tab.setup", setup.draw)
-        else draw_bis_lists() end
+        else draw_bis_lists_body(secondary) end
     end
 end
 
-local function draw_scroll_body()
-    diag.time("ui.global_search.results", draw_global_search_results)
-    if tostring(Settings.globalSearch or ""):gsub("^%s+", ""):gsub("%s+$", "") ~= "" then
-        ImGui.Separator()
-    end
-    draw_main_tabs()
-    if not Engine.ok then
-        ImGui.Separator()
-        if state.engine_claim_disabled then
-            col_text(Theme.dim, "Viewer mode - using TurboGear bg/cache data.")
-        else
-            col_text(Theme.amber, "Sync offline - showing cached data only.")
+local function begin_main_scroll_child()
+    local child_began, child_open = false, true
+    if not ImGui.BeginChild then return child_began, child_open end
+    -- Always reserve the vertical scrollbar so GetContentRegionAvail().x is
+    -- constant. Without this, the scrollbar appearing/disappearing shifts the
+    -- available width ~14px, which flips toolbar wrapping / the "Tip:" line /
+    -- column widths every frame -> the BiS dropdowns and roster jitter wildly.
+    local body_flags = (ImGuiWindowFlags and ImGuiWindowFlags.AlwaysVerticalScrollbar) or 0
+    local ok, open = pcall(function()
+        if ImVec2 then
+            return ImGui.BeginChild("##tg_main_scroll_body", ImVec2(0, 0), false, body_flags)
         end
+        return ImGui.BeginChild("##tg_main_scroll_body", 0, 0, false, body_flags)
+    end)
+    if ok then
+        child_began = true
+        child_open = (open ~= false)
+    end
+    return child_began, child_open
+end
+
+local function draw_scroll_body_offline_note()
+    if Engine.ok then return end
+    ImGui.Separator()
+    if state.engine_claim_disabled then
+        col_text(Theme.dim, "Viewer mode - using TurboGear bg/cache data.")
+    else
+        col_text(Theme.amber, "Sync offline - showing cached data only.")
     end
 end
 
@@ -950,29 +1063,25 @@ local function draw_main_body()
         diag.time("ui.global_search.bar", draw_global_search_bar)
         ImGui.Separator()
 
-        local child_began = false
-        local child_open = true
-        if ImGui.BeginChild then
-            -- Always reserve the vertical scrollbar so GetContentRegionAvail().x is
-            -- constant. Without this, the scrollbar appearing/disappearing shifts the
-            -- available width ~14px, which flips toolbar wrapping / the "Tip:" line /
-            -- column widths every frame -> the BiS dropdowns and roster jitter wildly.
-            local body_flags = (ImGuiWindowFlags and ImGuiWindowFlags.AlwaysVerticalScrollbar) or 0
-            local ok, open = pcall(function()
-                if ImVec2 then
-                    return ImGui.BeginChild("##tg_main_scroll_body", ImVec2(0, 0), false, body_flags)
-                end
-                return ImGui.BeginChild("##tg_main_scroll_body", 0, 0, false, body_flags)
-            end)
-            if ok then
-                child_began = true
-                child_open = (open ~= false)
-            end
+        local searching = global_search_active()
+        local cur, secondary = nil, nil
+        if not searching then
+            -- Keep main + secondary tabs (+ Characters pill) above the scroll
+            -- region so they stay visible on every tab, including Inspect.
+            cur, secondary = draw_main_tab_chrome()
         end
 
+        local child_began, child_open = begin_main_scroll_child()
         local ok, err = true, nil
         if child_open then
-            ok, err = pcall(draw_scroll_body)
+            ok, err = pcall(function()
+                if searching then
+                    diag.time("ui.global_search.results", draw_global_search_results)
+                else
+                    draw_main_tab_body(cur, secondary)
+                    draw_scroll_body_offline_note()
+                end
+            end)
         end
         if child_began then
             ImGui.EndChild()

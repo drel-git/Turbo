@@ -35,7 +35,7 @@ M.CFG = {
     script_name  = 'TurboGear',    -- display/settings/cache name
     lua_name     = 'turbogear',     -- folder/module name used by /lua run and /lua stop
     bg_lua_name  = 'turbogear_bg',  -- wrapper responder name; leaves /lua run turbogear free for UI
-    version      = '1.2.17',
+    version      = '1.2.19',
     mailbox      = 'turbogear',     -- shared actor mailbox name across all boxes
     proto        = 1,              -- snapshot protocol version (guards mismatched boxes)
     frame_round  = 5.0,
@@ -188,14 +188,17 @@ M.Settings = {
     storeBackend    = "auto",      -- "auto" (default): SQLite when lsqlite3 is available (auto-installed via PackageMan), else file. Also "file" / "sqlite".
     autoPeerRefresh = false,        -- when false, open UI uses cached peers until Sync Now/startup
     syncRosterScopeAcrossTabs = false, -- opt-in: changing roster scope in one tab updates matching roster tabs
+    showCharactersPill = true,         -- shared Characters pill (roster + primary tabs)
     hideOrnament    = true,
     augsViewMode    = "single",
     augsViewKey     = "__self__",
+    augsRosterScope = "online",
     emptyViewMode   = "single",
     emptyViewKey    = "__self__",
     emptyActionableOnly = true,
     storedViewMode  = "single",
     storedViewKey   = "__self__",
+    storedRosterScope = "online",
     storedLocFilter = "all",
     storedSortKey   = "scan",
     storedSortDesc  = false,
@@ -217,6 +220,8 @@ M.Settings = {
     statsAugsOnly = true,
     statsViewMode = "character",
     statsSearchScope = "all",
+    statsSearchViewKey = "__all__",
+    statsSearchSelectedChars = {},
     statsSourceScope = "character",
     statsSourceKey = "__self__",
     statsLoadoutList = "",
@@ -263,10 +268,12 @@ M.Settings = {
     bisViewSelectedChars = {},
     bisRosterScope = "online",
     lockoutsViewKey = "__all__",
+    lockoutsViewSelectedChars = {},
     lockoutsRosterScope = "online",
     inventoryViewKey = "__self__",
     inventoryViewMode = "table",
     inventoryScope = "single",
+    inventoryRosterScope = "online",
     inventoryLocationFilter = "all",
     inventorySearch = "",
     inventoryShowAugs = true,
@@ -278,6 +285,7 @@ M.Settings = {
     inventoryCompactAutoDefaulted = true,
     spellsRosterScope = "online",
     spellsViewKey = "__all__",
+    spellsViewSelectedChars = {},
     spellsLevelFilter = "all",
     spellsHideNonResearch = false,
     spellsHideOwned = false,
@@ -321,6 +329,8 @@ M.SharedSettings = {
     bisAnnounceIdx = 2,             -- Group (/g) by default
     bisAnnounceCustom = "/g",
     bisAnnounceDisabledLists = {},  -- list id -> true opts OUT of linked-needs announce
+    bisAnnounceListenGuild = false, -- listen for item links in guild chat (off by default)
+    bisAnnounceListenOoc = false,   -- listen for item links in OOC (off by default)
     announceUseActor = true,        -- broadcast LOOT_LINK to peers (reliable; chat remains fallback)
     ignoredChars = {},              -- normalized char name -> display name; muted/forgotten, hidden & not scanned (fleet-wide)
     characterSets = {},             -- id -> { name, members = { normalized char name -> display name } }
@@ -477,6 +487,12 @@ function M.sanitize_ui_settings()
     if type(M.Settings.bisViewSelectedChars) ~= "table" then
         M.Settings.bisViewSelectedChars = {}
     end
+    if type(M.Settings.spellsViewSelectedChars) ~= "table" then
+        M.Settings.spellsViewSelectedChars = {}
+    end
+    if type(M.Settings.lockoutsViewSelectedChars) ~= "table" then
+        M.Settings.lockoutsViewSelectedChars = {}
+    end
     local lo_scope = tostring(M.Settings.lockoutsRosterScope or "online")
     if not valid_roster_scope(lo_scope, true) then
         M.Settings.lockoutsRosterScope = "online"
@@ -511,6 +527,31 @@ function M.sanitize_ui_settings()
         inv_scope = "single"
     end
     M.Settings.inventoryScope = inv_scope
+    local inv_roster = tostring(M.Settings.inventoryRosterScope or "online")
+    if inv_roster == "e3" then inv_roster = "online" end
+    if inv_roster ~= "self" and inv_roster ~= "online" and inv_roster ~= "group" and inv_roster ~= "all"
+        and not inv_roster:match("^set:[%w_%-]+$") then
+        inv_roster = "online"
+    end
+    M.Settings.inventoryRosterScope = inv_roster
+    local augs_roster = tostring(M.Settings.augsRosterScope or "online")
+    if augs_roster == "e3" then augs_roster = "online" end
+    if augs_roster ~= "self" and augs_roster ~= "online" and augs_roster ~= "group" and augs_roster ~= "all"
+        and not augs_roster:match("^set:[%w_%-]+$") then
+        augs_roster = "online"
+    end
+    M.Settings.augsRosterScope = augs_roster
+    local stored_roster = tostring(M.Settings.storedRosterScope or "online")
+    if stored_roster == "e3" then stored_roster = "online" end
+    if stored_roster ~= "self" and stored_roster ~= "online" and stored_roster ~= "group" and stored_roster ~= "all"
+        and not stored_roster:match("^set:[%w_%-]+$") then
+        stored_roster = "online"
+    end
+    M.Settings.storedRosterScope = stored_roster
+    M.Settings.statsSearchViewKey = tostring(M.Settings.statsSearchViewKey or "__all__")
+    if type(M.Settings.statsSearchSelectedChars) ~= "table" then
+        M.Settings.statsSearchSelectedChars = {}
+    end
     local inv_loc = tostring(M.Settings.inventoryLocationFilter or "all")
     if inv_loc ~= "all" and inv_loc ~= "equipped" and inv_loc ~= "bags" and inv_loc ~= "bank" and inv_loc ~= "aug" then
         inv_loc = "all"
@@ -519,6 +560,8 @@ function M.sanitize_ui_settings()
     M.Settings.inventorySearch = tostring(M.Settings.inventorySearch or "")
     if #M.Settings.inventorySearch > 256 then M.Settings.inventorySearch = "" end
     if M.Settings.inventoryShowAugs == nil then M.Settings.inventoryShowAugs = true end
+    if M.Settings.showCharactersPill == nil then M.Settings.showCharactersPill = true end
+    M.Settings.showCharactersPill = M.Settings.showCharactersPill == true
     local stored_sort = tostring(M.Settings.storedSortKey or "scan")
     if stored_sort ~= "scan" and stored_sort ~= "loc" and stored_sort ~= "where" and stored_sort ~= "name" then
         stored_sort = "scan"
@@ -630,6 +673,10 @@ function M.apply_linked_roster_scope(scope, source)
     if source ~= "lockouts" then M.Settings.lockoutsRosterScope = scope end
     if source ~= "live_stats" then M.Settings.liveStatsRosterScope = scope end
     if source ~= "suggestions" then M.Settings.suggestSourceScope = scope end
+    if source ~= "inventory" then M.Settings.inventoryRosterScope = scope end
+    if source ~= "worn" then M.Settings.augsRosterScope = scope end
+    if source ~= "stored" then M.Settings.storedRosterScope = scope end
+    if source ~= "stats_search" then M.Settings.statsSearchScope = scope end
     return true
 end
 
@@ -649,12 +696,20 @@ function M.reset_ui_settings()
     M.Settings.bisViewSelectedChars = {}
     M.Settings.lockoutsRosterScope = "online"
     M.Settings.lockoutsViewKey = "__all__"
+    M.Settings.lockoutsViewSelectedChars = {}
     M.Settings.lockoutsLockedOnly = false
     M.Settings.lockoutsCompact = false
     M.Settings.lockoutsCollapsedCategories = {}
     M.Settings.inventoryViewKey = "__self__"
     M.Settings.inventoryViewMode = "table"
     M.Settings.inventoryScope = "single"
+    M.Settings.inventoryRosterScope = "online"
+    M.Settings.augsViewMode = "single"
+    M.Settings.augsViewKey = "__self__"
+    M.Settings.augsRosterScope = "online"
+    M.Settings.storedViewMode = "single"
+    M.Settings.storedViewKey = "__self__"
+    M.Settings.storedRosterScope = "online"
     M.Settings.inventoryLocationFilter = "all"
     M.Settings.inventorySearch = ""
     M.Settings.inventoryShowAugs = true
@@ -666,6 +721,7 @@ function M.reset_ui_settings()
     M.Settings.inventoryCompactAutoDefaulted = true
     M.Settings.autoPeerRefresh = false
     M.Settings.syncRosterScopeAcrossTabs = false
+    M.Settings.showCharactersPill = true
     M.Settings.bisListMode = "catalog"
     M.Settings.bisCollapsedCategories = {}
     M.sanitize_ui_settings()
@@ -900,6 +956,8 @@ function M.apply_bis_announcing_defaults()
     M.SharedSettings.bisAnnounceEnabled = true
     M.SharedSettings.announceUseActor = true
     M.SharedSettings.bisAnnounceIdx = 2
+    M.SharedSettings.bisAnnounceListenGuild = false
+    M.SharedSettings.bisAnnounceListenOoc = false
     M.SaveSettings()
     M.SaveSharedSettings()
 end

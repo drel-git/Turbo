@@ -100,11 +100,15 @@ local function draw_mode_picker()
 end
 
 local function draw_source_controls(mode)
+    local use_pill = Settings.showCharactersPill == true
     if mode == "worn_list" then
-        ImGui.Text("Worn:"); ImGui.SameLine()
-        local next1 = views.draw_source_picker("##cmp1", Settings.compareKey1 or "__self__", 180.0)
-        if next1 ~= Settings.compareKey1 then Settings.compareKey1 = next1; SaveSettings() end
-        ImGui.SameLine(); ImGui.Text("  vs  "); ImGui.SameLine()
+        if not use_pill then
+            ImGui.Text("Worn:"); ImGui.SameLine()
+            local next1 = views.draw_source_picker("##cmp1", Settings.compareKey1 or "__self__", 180.0)
+            if next1 ~= Settings.compareKey1 then Settings.compareKey1 = next1; SaveSettings() end
+            ImGui.SameLine()
+        end
+        ImGui.Text("  vs  "); ImGui.SameLine()
         ImGui.Text("List:"); ImGui.SameLine()
         local old = Settings.compareListKey or ""
         Settings.compareListKey = loadout.draw_list_picker("##cmp_list", old ~= "" and old or loadout.selected_list_id(), 180.0)
@@ -126,10 +130,13 @@ local function draw_source_controls(mode)
 
     local peer_keys = views.source_keys(false)
     if Settings.compareKey2 == nil then Settings.compareKey2 = peer_keys[1] or "__self__" end
-    ImGui.Text("Character 1:"); ImGui.SameLine()
-    local next1 = views.draw_source_picker("##cmp1", Settings.compareKey1 or "__self__", 180.0)
-    if next1 ~= Settings.compareKey1 then Settings.compareKey1 = next1; SaveSettings() end
-    ImGui.SameLine(); ImGui.Text("  vs  "); ImGui.SameLine()
+    if not use_pill then
+        ImGui.Text("Character 1:"); ImGui.SameLine()
+        local next1 = views.draw_source_picker("##cmp1", Settings.compareKey1 or "__self__", 180.0)
+        if next1 ~= Settings.compareKey1 then Settings.compareKey1 = next1; SaveSettings() end
+        ImGui.SameLine()
+    end
+    ImGui.Text("  vs  "); ImGui.SameLine()
     local next2 = views.draw_source_picker("##cmp2", Settings.compareKey2 or "__self__", 180.0)
     if next2 ~= Settings.compareKey2 then Settings.compareKey2 = next2; SaveSettings() end
 end

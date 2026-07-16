@@ -8,6 +8,7 @@ local Theme, col_text, toggle_button, themed_button = theme.Theme, theme.col_tex
 local cfg = require('config')
 local Settings, SaveSettings = cfg.Settings, cfg.SaveSettings
 local views = require('views')
+local characters = require('characters')
 local lockouts = require('lockouts')
 local lockout_ref = require('references.lockouts')
 local snapshot_mod = require('snapshot')
@@ -485,12 +486,16 @@ local function draw_view_picker()
     local cur = Settings.lockoutsViewKey or "__all__"
     if (Settings.lockoutsRosterScope or "online") == "self" then
         cur = "__self__"
+    elseif cur == characters.VIEW_SELECTED then
+        -- keep selected subset from Characters pill
     elseif cur ~= "__all__" then
         cur = views.validate_source_key(cur)
         if not key_in_scope(cur, keys) then cur = "__all__" end
     end
 
-    local label = cur == "__all__" and "All Characters" or views.source_label(cur)
+    local label = cur == "__all__" and "All Characters"
+        or (cur == characters.VIEW_SELECTED and string.format("Selected (%d)", #characters.active_keys("lockouts", SCOPE_OPTS)))
+        or views.source_label(cur)
     local changed = false
     ImGui.SetNextItemWidth(220.0)
     if ImGui.BeginCombo("##lockouts_view", "View: " .. label) then
@@ -518,6 +523,11 @@ local function draw_view_picker()
 end
 
 local function draw_scope_row()
+    if Settings.showCharactersPill == true then
+        local scoped = characters.source_keys("lockouts", SCOPE_OPTS)
+        local view = characters.get_view_key("lockouts")
+        return view, scoped
+    end
     draw_scope_picker()
     ImGui.SameLine()
     return draw_view_picker()
@@ -548,7 +558,11 @@ function M.draw()
     end
 
     local keys = scoped_keys or selected_keys_for_scope()
-    if view_key ~= "__all__" then keys = { view_key } end
+    if view_key == characters.VIEW_SELECTED then
+        keys = characters.active_keys("lockouts", SCOPE_OPTS)
+    elseif view_key ~= "__all__" then
+        keys = { view_key }
+    end
     if #keys == 0 then
         col_text(Theme.amber, "No characters in this scope.")
         return

@@ -5583,6 +5583,8 @@ Sub GoLootOneItem(int corpseId)
     /if (!${Corpse.Item[${slot}].ID}) {
         /echo ${tlTag} [GOLOOT] looted ${goItemName} (ID: ${corpseId})
         /squelch /tgearbg golootdone looted ${corpseId} ${goItemName}
+        | Turbo Review: drop the skip row once loot is confirmed (bind no-ops if hub is down).
+        /squelch /turboreviewgoloot looted ${corpseId} ${goItemName}
     } else /if (${LoreBlocked}) {
         /echo ${tlTag} [GOLOOT] failed lore (ID: ${corpseId})
         /squelch /tgearbg golootdone failed lore ${corpseId} ${goItemName}

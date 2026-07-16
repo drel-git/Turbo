@@ -371,7 +371,26 @@ local function draw_turbobis_settings()
         local nv = ImGui.InputText("##setup_bisannouncecustom", SharedSettings.bisAnnounceCustom or "/g") or "/g"
         if nv ~= SharedSettings.bisAnnounceCustom then SharedSettings.bisAnnounceCustom = nv; SaveSharedSettings() end
     end
+    ImGui.Spacing()
+    if toggle_button(SharedSettings.bisAnnounceListenGuild == true and "Listen guild links: ON" or "Listen guild links: OFF", SharedSettings.bisAnnounceListenGuild == true) then
+        SharedSettings.bisAnnounceListenGuild = not (SharedSettings.bisAnnounceListenGuild == true)
+        SaveSharedSettings()
+        announcer.invalidate()
+    end
+    if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
+        ImGui.SetTooltip("When ON, item links in guild chat can trigger linked-needs announces. Off by default.")
+    end
+    ImGui.SameLine()
+    if toggle_button(SharedSettings.bisAnnounceListenOoc == true and "Listen OOC links: ON" or "Listen OOC links: OFF", SharedSettings.bisAnnounceListenOoc == true) then
+        SharedSettings.bisAnnounceListenOoc = not (SharedSettings.bisAnnounceListenOoc == true)
+        SaveSharedSettings()
+        announcer.invalidate()
+    end
+    if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
+        ImGui.SetTooltip("When ON, item links in OOC can trigger linked-needs announces. Off by default.")
+    end
     col_text(Theme.dim, "Linked-needs announce is shared across all TurboGear characters on this install.")
+    col_text(Theme.dim, "Guild/OOC link listening is off by default; group/raid/say still work when Linked needs is ON.")
     col_text(Theme.dim, "Roster Compact toggle is on the TurboBiS tab.")
     col_text(Theme.dim, "Add custom lockouts on the Lockouts tab (Add Lockout panel).")
 

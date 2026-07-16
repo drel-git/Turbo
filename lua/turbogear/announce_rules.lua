@@ -78,6 +78,21 @@ function M.is_player_link_chat_line(line)
     return false
 end
 
+function M.is_guild_link_chat_line(line)
+    line = chat_payload(line)
+    if line:find("^You tell the guild,", 1) then return true end
+    if line:find("^You say to your guild,", 1) then return true end
+    if line:find("^.- tells the guild,", 1) then return true end
+    return false
+end
+
+function M.is_ooc_link_chat_line(line)
+    line = chat_payload(line)
+    if line:find("^You say out of character,", 1) then return true end
+    if line:find("^.- says out of character,", 1) then return true end
+    return false
+end
+
 -- Our own outgoing chat lines.
 function M.is_self_loot_line(line)
     line = chat_payload(line)

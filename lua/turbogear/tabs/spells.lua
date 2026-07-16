@@ -12,6 +12,7 @@ local Theme, col_text, toggle_button, themed_button, segmented_text = theme.Them
 local cfg = require('config')
 local Settings, SaveSettings = cfg.Settings, cfg.SaveSettings
 local views = require('views')
+local characters = require('characters')
 local snapshot_mod = require('snapshot')
 local Engine = require('engine').Engine
 local item_actions = require('item_actions')
@@ -94,8 +95,12 @@ local function source_snap(key)
 end
 
 local function column_keys_for_view(view_key, scoped_keys)
-    if view_key == "__all__" then
+    view_key = tostring(view_key or Settings.spellsViewKey or "__all__")
+    if view_key == "__all__" or view_key == "" then
         return scoped_keys or selected_keys_for_scope()
+    end
+    if view_key == characters.VIEW_SELECTED then
+        return characters.active_keys("spells", SCOPE_OPTS)
     end
     return { view_key }
 end
@@ -340,12 +345,16 @@ local function draw_view_picker()
     local cur = Settings.spellsViewKey or "__all__"
     if (Settings.spellsRosterScope or "online") == "self" then
         cur = "__self__"
+    elseif cur == characters.VIEW_SELECTED then
+        -- keep selected subset from Characters pill
     elseif cur ~= "__all__" then
         cur = views.validate_source_key(cur)
         if not key_in_scope(cur, keys) then cur = "__all__" end
     end
 
-    local label = cur == "__all__" and "All Characters" or views.source_label(cur)
+    local label = cur == "__all__" and "All Characters"
+        or (cur == characters.VIEW_SELECTED and string.format("Selected (%d)", #characters.active_keys("spells", SCOPE_OPTS)))
+        or views.source_label(cur)
     local changed = false
     ImGui.SetNextItemWidth(220.0)
     if ImGui.BeginCombo("##spells_view", "View: " .. label) then
@@ -881,9 +890,15 @@ function M.draw()
     tick_pending_refresh()
     tick_spell_refresh()
 
-    draw_scope_picker()
-    ImGui.SameLine()
-    local view_key, scoped_keys = draw_view_picker()
+    local view_key, scoped_keys
+    if Settings.showCharactersPill == true then
+        scoped_keys = characters.source_keys("spells", SCOPE_OPTS)
+        view_key = characters.get_view_key("spells")
+    else
+        draw_scope_picker()
+        ImGui.SameLine()
+        view_key, scoped_keys = draw_view_picker()
+    end
     draw_toolbar(view_key, scoped_keys)
 
     if (Settings.spellsRosterScope or "online") == "self" then

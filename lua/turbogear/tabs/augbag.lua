@@ -276,16 +276,22 @@ function M.draw()
     ImGui.SameLine(); ImGui.SetNextItemWidth(200.0)
     aug_filter = input_text_hint("##augfilter", "Search", aug_filter or "")
     ImGui.NewLine()
-    draw_mode_picker()
+    local use_pill = Settings.showCharactersPill == true
     local snap
-    if Settings.storedViewMode == "single" then
+    if not use_pill then
+        draw_mode_picker()
+        if Settings.storedViewMode == "single" then
+            ImGui.SameLine()
+            local old = Settings.storedViewKey
+            Settings.storedViewKey = views.draw_source_picker("##stored_source", Settings.storedViewKey or "__self__", 220.0)
+            if old ~= Settings.storedViewKey then SaveSettings() end
+            snap = views.source_snapshot(Settings.storedViewKey)
+        end
         ImGui.SameLine()
-        local old = Settings.storedViewKey
-        Settings.storedViewKey = views.draw_source_picker("##stored_source", Settings.storedViewKey or "__self__", 220.0)
-        if old ~= Settings.storedViewKey then SaveSettings() end
-        snap = views.source_snapshot(Settings.storedViewKey)
+    else
+        if Settings.storedViewMode ~= "single" then Settings.storedViewMode = "single" end
+        snap = views.source_snapshot(Settings.storedViewKey or "__self__")
     end
-    ImGui.SameLine()
     draw_loc_legend()
     ImGui.Separator()
 

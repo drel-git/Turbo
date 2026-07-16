@@ -258,13 +258,20 @@ function M.draw()
         empty_key = nil
     end
     ImGui.Separator()
-    draw_mode_picker()
+    local use_pill = Settings.showCharactersPill == true
+    if not use_pill then
+        draw_mode_picker()
+    elseif Settings.emptyViewMode ~= "single" then
+        Settings.emptyViewMode = "single"
+    end
     local snap, _, dname
     if Settings.emptyViewMode == "single" then
-        ImGui.SameLine()
-        local old = Settings.emptyViewKey
-        Settings.emptyViewKey = views.draw_source_picker("##empty_source", Settings.emptyViewKey or "__self__", 220.0)
-        if old ~= Settings.emptyViewKey then SaveSettings() end
+        if not use_pill then
+            ImGui.SameLine()
+            local old = Settings.emptyViewKey
+            Settings.emptyViewKey = views.draw_source_picker("##empty_source", Settings.emptyViewKey or "__self__", 220.0)
+            if old ~= Settings.emptyViewKey then SaveSettings() end
+        end
         snap, _, dname = views.source_snapshot(Settings.emptyViewKey)
     else
         snap = nil

@@ -138,9 +138,12 @@ local function draw_character_picker()
 end
 
 local function draw_controls()
-    draw_scope()
-    draw_character_picker()
-    ImGui.SameLine()
+    local use_pill = Settings.showCharactersPill == true
+    if not use_pill then
+        draw_scope()
+        draw_character_picker()
+        ImGui.SameLine()
+    end
     if theme.themed_button("Refresh##live_stats_refresh", Theme.blue) then
         Engine.request_all(true, { depth = "full" })
     end

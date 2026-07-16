@@ -1,3 +1,46 @@
+1.2.19
+- Characters pill (four modes) pinned under main tabs when relevant:
+  Roster (Source / columns / teams) on BiS, Spells, Lockouts, and Stats Search;
+  Primary (Source + one character) on Upgrade Suggestions and Gear Inventory
+  (Source drives Slot Across Characters; Character drives the inventory view);
+  Picker (flat character list) on Worn / Stored, Inspect Effects / Focus /
+  Stats Character, Upgrade Empty, and Compare Worn / Char 1; List (loadout
+  picker) on Stats Plan in the same pill slot. Legacy who-controls hide when
+  the pill is on (Settings.showCharactersPill, default on). Pill uses muted-teal
+  chrome. Gear Inventory: Slot Across Characters moves above the worn/item
+  layout, collapses, and sizes to the character row count. Main + secondary tabs
+  (Gear/Inspect/Upgrade/BiS) stay pinned above the scroll body. Search Everywhere
+  is a search mode: results only until cleared. Gear multi Group/E3 modes remain
+  when the pill is off.
+- Suggestions segments renamed Gear upgrades / Empty sockets (N) / Socket plan.
+  Gear is home with collapsible Empty/Plan teasers; Empty sockets quiet when 0
+  (diagnostics under Why?); Socket plan quiet when no positive net gains (funnel
+  under Why?); Top Actions only lists gain moves.
+- Inspect Stats: Character / Plan / Search stay pinned above the scroll body
+  (with Stats / Effects / Focus). Worn totals header uses higher-contrast text.
+- Review right-click: Go loot (same TurboLoot GO path as linked-needs). Sends
+  the skip source character when remote, else Me. Needs a corpse id; local Me
+  also aborts on zone mismatch. Does not prove the item is still on the corpse.
+  On TurboLoot `[GOLOOT] looted` (or TurboGear relay), the skip row is dismissed
+  from Review automatically; failed go-loot leaves the row for retry. Routes via
+  `/tgearbg` when the bg responder is up, else `/tgear` (UI), else local
+  `/mac TurboLoot go`. Does not call `mq.doevents` in the hub loop (that broke
+  TurboLoot GO). Go loot is a submenu: pick any group member (Src first, then
+  you, then the rest) — not limited to the designated looter.
+
+1.2.18
+- DoN / Dragons of Norrath Raid BiS tab: LazBiS `don` list + catalog regen, UI
+  button, TurboLoot BiS_announce_list names. Spell packs clear when the pack is
+  owned or all pack spells/discs are known; Mnemonic/Imbued Glyphs stay item-only.
+  Refinements: Ranged+Aug pairs, Icon clickies, Shadow/Materium chain, Cryptic
+  Clutch short labels linked to Vacant Vessel IDs, foci hover notes. Misc4 Scales
+  of the Lava Dragon also clears when the class Draconic epic is owned. Category
+  order: Spells → Glyphs → Foci → Clickies → Shadow → Misc.
+- Linked-needs: guild and OOC item-link listening off by default; Setup toggles
+  to enable either without changing group/raid/say behavior.
+- BiS hover: slimmed (name + notes + location); foci notes use ASCII dashes;
+  melee / defense / heal-beneficial note colors added.
+
 1.2.17
 - Go loot: item name was the literal string NULL — `BuildGoItemName` ran as a
   Sub so `${Param2}` was that Sub's empty args (MQ NULL), not Main's `/mac`

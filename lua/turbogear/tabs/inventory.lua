@@ -16,6 +16,7 @@ local transfers = require('turbogive_transfers')
 local ui_table = require('ui_table')
 local diag = require('diagnostics')
 local Engine = require('engine').Engine
+local characters = require('characters')
 local okShell, ShellOpen = pcall(require, 'Turbo.shell_open')
 if not okShell then ShellOpen = nil end
 
@@ -29,6 +30,12 @@ local anim_items
 local rows_key, rows_cache, rows_meta = nil, {}, {}
 local stock_rows_key, stock_rows_cache = nil, {}
 local scope_cache = { key = nil, at = 0, keys = nil }
+
+characters.set_on_changed(function()
+    rows_key = nil
+    stock_rows_key = nil
+    scope_cache = { key = nil, at = 0, keys = nil }
+end, "inventory")
 
 local LOCATION_FILTERS = {
     { key = "all", label = "All" },
@@ -502,30 +509,35 @@ local function draw_equipped_grid(snap)
 end
 
 local function draw_filters()
-    ImGui.Text("Viewing:")
-    ImGui.SameLine()
-    local old_key = Settings.inventoryViewKey
-    Settings.inventoryViewKey = views.draw_source_picker("##inventory_source", Settings.inventoryViewKey or "__self__", 220.0)
-    if old_key ~= Settings.inventoryViewKey then
-        rows_key = nil
-        SaveSettings()
-    end
-    ImGui.SameLine()
-    ImGui.Text("Source:")
-    ImGui.SameLine()
-    ImGui.SetNextItemWidth(106.0)
-    if ImGui.BeginCombo("##inventory_scope", scope_label()) then
-        for _, opt in ipairs(SCOPE_OPTIONS) do
-            if ImGui.Selectable(opt.label .. "##inv_scope_" .. opt.key, Settings.inventoryScope == opt.key) then
-                Settings.inventoryScope = opt.key
-                Settings.inventorySelectedContainer = ""
-                rows_key = nil
-                SaveSettings()
-            end
+    local use_pill = Settings.showCharactersPill == true
+    if not use_pill then
+        ImGui.Text("Viewing:")
+        ImGui.SameLine()
+        local old_key = Settings.inventoryViewKey
+        Settings.inventoryViewKey = views.draw_source_picker("##inventory_source", Settings.inventoryViewKey or "__self__", 220.0)
+        if old_key ~= Settings.inventoryViewKey then
+            rows_key = nil
+            SaveSettings()
         end
-        ImGui.EndCombo()
+        ImGui.SameLine()
+        ImGui.Text("Source:")
+        ImGui.SameLine()
+        ImGui.SetNextItemWidth(106.0)
+        if ImGui.BeginCombo("##inventory_scope", scope_label()) then
+            for _, opt in ipairs(SCOPE_OPTIONS) do
+                if ImGui.Selectable(opt.label .. "##inv_scope_" .. opt.key, Settings.inventoryScope == opt.key) then
+                    Settings.inventoryScope = opt.key
+                    Settings.inventorySelectedContainer = ""
+                    rows_key = nil
+                    SaveSettings()
+                end
+            end
+            ImGui.EndCombo()
+        end
+        ImGui.SameLine()
+    elseif Settings.inventoryScope ~= "single" then
+        Settings.inventoryScope = "single"
     end
-    ImGui.SameLine()
     if toggle_button("Items##inv_mode_table", Settings.inventoryViewMode == "table", 62, 0) then
         Settings.inventoryViewMode = "table"
         SaveSettings()
@@ -1298,13 +1310,32 @@ local function slot_item_for_snap(snap, slot_id)
     return views.index_equipped(snap or {})[tonumber(slot_id)]
 end
 
+local function slot_compare_keys()
+    local primary = characters.get_primary("inventory")
+    local keys = characters.source_keys("inventory")
+    if #keys == 0 then
+        keys = views.source_keys(true) or {}
+    end
+    local out, seen = {}, {}
+    local function add(key)
+        key = tostring(key or "")
+        if key == "" or seen[key] then return end
+        seen[key] = true
+        out[#out + 1] = key
+    end
+    add(primary)
+    for _, key in ipairs(keys) do add(key) end
+    return out
+end
+
 local function draw_slot_compare()
     local slot_id = tonumber(Settings.inventorySelectedSlotId)
     if not slot_id then return end
     local slot_name = items.slot_display_name(slot_id)
-    ImGui.Separator()
-    col_text(Theme.section or Theme.header, "Slot Across Characters: " .. tostring(slot_name))
-    local keys = views.source_keys(true)
+    local open = theme.collapsing_section(
+        "Slot Across Characters: " .. tostring(slot_name), true)
+    if not open then return end
+    local keys = slot_compare_keys()
     local rows = {}
     for _, key in ipairs(keys) do
         local snap = views.source_snapshot(key)
@@ -1316,7 +1347,14 @@ local function draw_slot_compare()
             }
         end
     end
-    if views.begin_scroll_table("InventorySlotCompare", 6, views.scroll_table_flags(), 72.0, 160.0) then
+    if #rows == 0 then
+        col_text(Theme.dim, "No characters in this Source yet. Open the Characters pill to change Source.")
+        return
+    end
+    -- Fit height to row count (ScrollY tables otherwise eat remaining window height).
+    local table_h = 26.0 + (#rows * 22.0) + 6.0
+    if table_h > 220.0 then table_h = 220.0 end
+    if views.begin_scroll_table("InventorySlotCompare", 6, views.scroll_table_flags(), 8.0, table_h, table_h) then
         ImGui.TableSetupColumn("Character", ImGuiTableColumnFlags.WidthFixed, 132.0)
         ImGui.TableSetupColumn("Icon", ImGuiTableColumnFlags.WidthFixed, 34.0)
         ImGui.TableSetupColumn("Item", ImGuiTableColumnFlags.WidthStretch, 2.0)
@@ -1325,11 +1363,16 @@ local function draw_slot_compare()
         ImGui.TableSetupColumn("Mana", ImGuiTableColumnFlags.WidthFixed, 58.0)
         views.setup_scroll_freeze("InventorySlotCompare", 0, 1)
         views.table_headers_centered({ "Character", "Icon", "Item", "AC", "HP", "Mana" })
+        local primary = characters.get_primary("inventory")
         for i, rec in ipairs(rows) do
             local item = rec.item
             ImGui.TableNextRow()
             ImGui.TableSetColumnIndex(0)
-            col_text(views.source_header_color(rec.key), views.source_label(rec.key):gsub("%s*%[[^%]]+%]", ""))
+            local name_color = views.source_header_color(rec.key)
+            if rec.key == primary then
+                name_color = Theme.item or name_color
+            end
+            col_text(name_color, views.source_label(rec.key):gsub("%s*%[[^%]]+%]", ""))
             ImGui.TableSetColumnIndex(1)
             if item then draw_icon(item.icon, 22.0) else col_text(Theme.placeholder or Theme.dim, "-") end
             ImGui.TableSetColumnIndex(2)
@@ -1402,6 +1445,8 @@ local function draw_inventory_content()
     local bank_text, bank_color = bank_status_text(snap)
     if bank_text then col_text(bank_color, bank_text) end
 
+    draw_slot_compare()
+
     if ImGui.BeginTable("InventoryMainLayout", 2, ImGuiTableFlags.Resizable + ImGuiTableFlags.BordersInnerV) then
         ImGui.TableSetupColumn("Worn", ImGuiTableColumnFlags.WidthFixed, 226.0)
         ImGui.TableSetupColumn("Inventory", ImGuiTableColumnFlags.WidthStretch, 1.0)
@@ -1431,8 +1476,6 @@ local function draw_inventory_content()
             draw_item_table(rows, #records > 1)
         end
     end
-
-    draw_slot_compare()
 end
 
 local function draw_inventory_body()

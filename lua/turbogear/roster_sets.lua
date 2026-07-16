@@ -245,7 +245,7 @@ function M.active_source_keys(scope, opts)
 
     local out = {}
     if view_key == M.VIEW_SELECTED then
-        local selected = selected_members()
+        local selected = type(opts.selected) == "table" and opts.selected or selected_members()
         for _, key in ipairs(base) do
             local clean = M.clean_name(source_name_for_key(key))
             if clean ~= "" and selected[clean] ~= nil then out[#out + 1] = key end

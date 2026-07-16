@@ -4,7 +4,7 @@ return {
     group = "Raid Best In Slot",
     index = 4,
   },
-  generated_from = "TurboGear Inspiration/lazbis/bis.lua",
+  generated_from = "../lazbis/bis.lua",
   groups = {
     {
       lists = {
@@ -40,6 +40,10 @@ return {
         {
           id = "veksar",
           name = "Veksar",
+        },
+        {
+          id = "don",
+          name = "Dragons of Norrath",
         },
       },
       name = "Raid Best In Slot",
@@ -5302,6 +5306,7024 @@ return {
             "Treated Expedition Straps",
           },
           slot = "Treated Expedition Straps (T3 Trash)",
+        },
+      },
+      visible = {
+      },
+    },
+    don = {
+      categories = {
+        {
+          name = "Visibles",
+          slots = {
+            "Head",
+            "Chest",
+            "Arms",
+            "Wrist1",
+            "Hands",
+            "Legs",
+            "Feet",
+            "Wrist2",
+          },
+        },
+        {
+          name = "Non-Visibles",
+          slots = {
+            "Ear1",
+            "Ear2",
+            "Face",
+            "Neck",
+            "Back",
+            "Shoulder",
+            "Waist",
+            "Finger1",
+            "Finger2",
+          },
+        },
+        {
+          name = "Ranged + Charm",
+          slots = {
+            "Ranged",
+            "RangedAug",
+            "Duality",
+            "CharmExtreme",
+            "CharmSafe",
+          },
+        },
+        {
+          name = "Spells",
+          slots = {
+            "Pack1",
+            "Pack2",
+            "Pack3",
+            "Pack4",
+            "Pack5",
+          },
+        },
+        {
+          name = "Glyphs",
+          slots = {
+            "Glyph1",
+            "Glyph2",
+            "Glyph3",
+            "Glyph4",
+            "Glyph5",
+            "Glyph6",
+          },
+        },
+        {
+          name = "Cryptic Clutch Foci Augs",
+          slots = {
+            "Aug1",
+            "Aug2",
+            "Aug3",
+            "Aug4",
+            "Aug5",
+            "Aug6",
+            "Aug7",
+            "Aug8",
+            "Aug9",
+            "Aug10",
+            "Aug11",
+            "Aug12",
+          },
+        },
+        {
+          name = "Clickies",
+          slots = {
+            "Clicky",
+          },
+        },
+        {
+          name = "Shadow",
+          slots = {
+            "Materium1",
+            "Materium2",
+            "Materium3",
+            "Shadow",
+          },
+        },
+        {
+          name = "Misc",
+          slots = {
+            "Misc1",
+            "Misc2",
+            "Misc3",
+            "Misc4",
+            "Misc5",
+          },
+        },
+      },
+      classes = {
+        Bard = {
+          Arms = {
+            ids = {
+              60459,
+            },
+            item = "Keeper's Ascendant Armbands of Harmony",
+            names = {
+              "Keeper's Ascendant Armbands of Harmony",
+            },
+            slot = "Arms",
+          },
+          Aug1 = {
+            ids = {
+              62551,
+              63017,
+            },
+            item = "Benevolent Extension",
+            names = {
+              "Benevolent Extension",
+              "Cryptic Clutch of Benevolent Extension",
+              "Vacant Vessel of Benevolent Extension",
+            },
+            notes = "+40% beneficial spell duration | +10 hWIS",
+            slot = "Aug1",
+          },
+          Aug2 = {
+            ids = {
+              62540,
+              62560,
+            },
+            item = "Malevolent Efficiency",
+            names = {
+              "Malevolent Efficiency",
+              "Cryptic Clutch of Malevolent Efficiency",
+              "Vacant Vessel of Malevolent Efficiency",
+            },
+            notes = "-11-33% detrimental spell mana cost | +10 hINT",
+            slot = "Aug2",
+          },
+          Aug3 = {
+            ids = {
+              62552,
+              63018,
+            },
+            item = "Expanded Reach",
+            names = {
+              "Expanded Reach",
+              "Cryptic Clutch of Expanded Reach",
+              "Vacant Vessel of Expanded Reach",
+            },
+            notes = "+50% spell range | +10 hWIS, +10 hINT",
+            slot = "Aug3",
+          },
+          Aug4 = {
+            ids = {
+              62556,
+              64050,
+            },
+            item = "Nimble Elusion",
+            names = {
+              "Nimble Elusion",
+              "Cryptic Clutch of Nimble Elusion",
+              "Vacant Vessel of Nimble Elusion",
+            },
+            notes = "+70% dodge | +10 hAGI",
+            slot = "Aug4",
+          },
+          Aug5 = {
+            ids = {
+              62555,
+              64049,
+            },
+            item = "Adept Guard",
+            names = {
+              "Adept Guard",
+              "Cryptic Clutch of Adept Guard",
+              "Vacant Vessel of Adept Guard",
+            },
+            notes = "+70% parry, +70% block | +10 hSTA",
+            slot = "Aug5",
+          },
+          Aug6 = {
+            ids = {
+              62554,
+              63020,
+            },
+            item = "Visceral Malice",
+            names = {
+              "Visceral Malice",
+              "Cryptic Clutch of Visceral Malice",
+              "Vacant Vessel of Visceral Malice",
+            },
+            notes = "+300% melee critical damage | +10 hSTR",
+            slot = "Aug6",
+          },
+          Aug7 = {
+            ids = {
+              62553,
+              63019,
+            },
+            item = "Wanton Assault",
+            names = {
+              "Wanton Assault",
+              "Cryptic Clutch of Wanton Assault",
+              "Vacant Vessel of Wanton Assault",
+            },
+            notes = "+21% double attack, +7% triple attack, +5% chance to hit | +10 hSTR",
+            slot = "Aug7",
+          },
+          Aug8 = {
+            ids = {
+              62558,
+              66533,
+            },
+            item = "Physical Prowess",
+            names = {
+              "Physical Prowess",
+              "Cryptic Clutch of Physical Prowess",
+              "Vacant Vessel of Physical Prowess",
+            },
+            notes = "No focus effect | +5 hSTR, +5 hSTA, +5 hAGI, +5 hDEX",
+            slot = "Aug8",
+          },
+          Back = {
+            ids = {
+              71665,
+            },
+            item = "Cloak of Deepshadow",
+            names = {
+              "Cloak of Deepshadow",
+            },
+            slot = "Back",
+          },
+          Chest = {
+            ids = {
+              60458,
+            },
+            item = "Keeper's Ascendant Chestguard of Harmony",
+            names = {
+              "Keeper's Ascendant Chestguard of Harmony",
+            },
+            slot = "Chest",
+          },
+          Clicky = {
+            ids = {
+              56757,
+            },
+            item = "Icon of Potent Prowess",
+            names = {
+              "Icon of Potent Prowess",
+            },
+            slot = "Clicky",
+          },
+          Ear1 = {
+            ids = {
+              71584,
+            },
+            item = "Cloudkiller's Bauble",
+            names = {
+              "Cloudkiller's Bauble",
+            },
+            slot = "Ear1",
+          },
+          Ear2 = {
+            ids = {
+              71668,
+            },
+            item = "Accursed Earhoop of Pain",
+            names = {
+              "Accursed Earhoop of Pain",
+            },
+            slot = "Ear2",
+          },
+          Face = {
+            ids = {
+              71626,
+            },
+            item = "Mask of the Dawn Scorcher",
+            names = {
+              "Mask of the Dawn Scorcher",
+            },
+            slot = "Face",
+          },
+          Feet = {
+            ids = {
+              60463,
+            },
+            item = "Keeper's Ascendant Boots of Harmony",
+            names = {
+              "Keeper's Ascendant Boots of Harmony",
+            },
+            slot = "Feet",
+          },
+          Finger1 = {
+            ids = {
+              71634,
+            },
+            item = "Glimmering Fire Opal Band",
+            names = {
+              "Glimmering Fire Opal Band",
+            },
+            slot = "Finger1",
+          },
+          Finger2 = {
+            ids = {
+              71588,
+            },
+            item = "Bloodstained Ring of Evisceration",
+            names = {
+              "Bloodstained Ring of Evisceration",
+            },
+            slot = "Finger2",
+          },
+          Glyph1 = {
+            ids = {
+              80071,
+            },
+            item = "Mnemonic Glyph: Cantata of Nife",
+            names = {
+              "Mnemonic Glyph: Cantata of Nife",
+            },
+            slot = "Glyph1",
+          },
+          Glyph2 = {
+            ids = {
+              80084,
+            },
+            item = "Mnemonic Glyph: Symphony of Sound",
+            names = {
+              "Mnemonic Glyph: Symphony of Sound",
+            },
+            slot = "Glyph2",
+          },
+          Glyph3 = {
+            ids = {
+              80072,
+            },
+            item = "Imbued Glyph: Echoes of the Ancient",
+            names = {
+              "Imbued Glyph: Echoes of the Ancient",
+            },
+            slot = "Glyph3",
+          },
+          Hands = {
+            ids = {
+              60461,
+            },
+            item = "Keeper's Ascendant Gloves of Harmony",
+            names = {
+              "Keeper's Ascendant Gloves of Harmony",
+            },
+            slot = "Hands",
+          },
+          Head = {
+            ids = {
+              60457,
+            },
+            item = "Keeper's Ascendant Helm of Harmony",
+            names = {
+              "Keeper's Ascendant Helm of Harmony",
+            },
+            slot = "Head",
+          },
+          Legs = {
+            ids = {
+              60462,
+            },
+            item = "Keeper's Ascendant Legguards of Harmony",
+            names = {
+              "Keeper's Ascendant Legguards of Harmony",
+            },
+            slot = "Legs",
+          },
+          Neck = {
+            ids = {
+              71612,
+            },
+            item = "Necklace of Sandstorms",
+            names = {
+              "Necklace of Sandstorms",
+            },
+            slot = "Neck",
+          },
+          Pack1 = {
+            ids = {
+              82821,
+            },
+            item = "Spell Pack: Cantata of Nife",
+            names = {
+              "Spell Pack: Cantata of Nife",
+            },
+            slot = "Pack1",
+            spell = "Cantata of Nife",
+            spells = {
+              "Cantata of Nife",
+            },
+          },
+          Pack2 = {
+            ids = {
+              82822,
+            },
+            item = "Spell Pack: Symphony of Sound",
+            names = {
+              "Spell Pack: Symphony of Sound",
+            },
+            slot = "Pack2",
+            spell = "Symphony of Sound",
+            spells = {
+              "Symphony of Sound",
+            },
+          },
+          Pack3 = {
+            ids = {
+              82823,
+            },
+            item = "Spell Pack: Echoes of the Ancient",
+            names = {
+              "Spell Pack: Echoes of the Ancient",
+            },
+            slot = "Pack3",
+            spell = "Echoes of the Ancient",
+            spells = {
+              "Echoes of the Ancient",
+            },
+          },
+          Ranged = {
+            ids = {
+              55052,
+            },
+            item = "Head of the Putrid Drake",
+            names = {
+              "Head of the Putrid Drake",
+            },
+            slot = "Ranged",
+          },
+          RangedAug = {
+            ids = {
+              71620,
+            },
+            item = "Preserved Eye of the Putrid Drake",
+            names = {
+              "Preserved Eye of the Putrid Drake",
+            },
+            slot = "RangedAug",
+          },
+          Shadow = {
+            ids = {
+              60668,
+            },
+            item = "Shadow of a Legendary Bard Weapon",
+            names = {
+              "Shadow of a Legendary Bard Weapon",
+            },
+            slot = "Shadow",
+          },
+          Shoulder = {
+            ids = {
+              71654,
+            },
+            item = "Lightning Singed Mantle",
+            names = {
+              "Lightning Singed Mantle",
+            },
+            slot = "Shoulder",
+          },
+          Waist = {
+            ids = {
+              71657,
+            },
+            item = "Thundercrash Girdle",
+            names = {
+              "Thundercrash Girdle",
+            },
+            slot = "Waist",
+          },
+          Wrist1 = {
+            ids = {
+              60460,
+            },
+            item = "Keeper's Ascendant Wristguard of Harmony",
+            names = {
+              "Keeper's Ascendant Wristguard of Harmony",
+            },
+            slot = "Wrist1",
+          },
+          Wrist2 = {
+            ids = {
+              60464,
+            },
+            item = "Keeper's Eternal Bracer of Harmony",
+            names = {
+              "Keeper's Eternal Bracer of Harmony",
+            },
+            slot = "Wrist2",
+          },
+        },
+        Beastlord = {
+          Arms = {
+            ids = {
+              60529,
+            },
+            item = "Keeper's Ascendant Sleeves of the Wilds",
+            names = {
+              "Keeper's Ascendant Sleeves of the Wilds",
+            },
+            slot = "Arms",
+          },
+          Aug1 = {
+            ids = {
+              62551,
+              63017,
+            },
+            item = "Benevolent Extension",
+            names = {
+              "Benevolent Extension",
+              "Cryptic Clutch of Benevolent Extension",
+              "Vacant Vessel of Benevolent Extension",
+            },
+            notes = "+40% beneficial spell duration | +10 hWIS",
+            slot = "Aug1",
+          },
+          Aug10 = {
+            ids = {
+              62553,
+              63019,
+            },
+            item = "Wanton Assault",
+            names = {
+              "Wanton Assault",
+              "Cryptic Clutch of Wanton Assault",
+              "Vacant Vessel of Wanton Assault",
+            },
+            notes = "+21% double attack, +7% triple attack, +5% chance to hit | +10 hSTR",
+            slot = "Aug10",
+          },
+          Aug11 = {
+            ids = {
+              62546,
+              62566,
+            },
+            item = "Chilling Demise",
+            names = {
+              "Chilling Demise",
+              "Cryptic Clutch of Chilling Demise",
+              "Vacant Vessel of Chilling Demise",
+            },
+            notes = "+10-60% cold spell damage | +5 hINT, +25 hCR",
+            slot = "Aug11",
+          },
+          Aug12 = {
+            ids = {
+              62558,
+              66533,
+            },
+            item = "Physical Prowess",
+            names = {
+              "Physical Prowess",
+              "Cryptic Clutch of Physical Prowess",
+              "Vacant Vessel of Physical Prowess",
+            },
+            notes = "No focus effect | +5 hSTR, +5 hSTA, +5 hAGI, +5 hDEX",
+            slot = "Aug12",
+          },
+          Aug2 = {
+            ids = {
+              62540,
+              62560,
+            },
+            item = "Malevolent Efficiency",
+            names = {
+              "Malevolent Efficiency",
+              "Cryptic Clutch of Malevolent Efficiency",
+              "Vacant Vessel of Malevolent Efficiency",
+            },
+            notes = "-11-33% detrimental spell mana cost | +10 hINT",
+            slot = "Aug2",
+          },
+          Aug3 = {
+            ids = {
+              62550,
+              63016,
+            },
+            item = "Malevolent Extension",
+            names = {
+              "Malevolent Extension",
+              "Cryptic Clutch of Malevolent Extension",
+              "Vacant Vessel of Malevolent Extension",
+            },
+            notes = "+40% detrimental spell duration | +10 hINT",
+            slot = "Aug3",
+          },
+          Aug4 = {
+            ids = {
+              62547,
+              62567,
+            },
+            item = "Noxious Demise",
+            names = {
+              "Noxious Demise",
+              "Cryptic Clutch of Noxious Demise",
+              "Vacant Vessel of Noxious Demise",
+            },
+            notes = "+10-60% poison spell damage | +5 hINT, +25 hPR",
+            slot = "Aug4",
+          },
+          Aug5 = {
+            ids = {
+              62548,
+              62568,
+            },
+            item = "Festering Demise",
+            names = {
+              "Festering Demise",
+              "Cryptic Clutch of Festering Demise",
+              "Vacant Vessel of Festering Demise",
+            },
+            notes = "+10-60% disease spell damage | +5 hINT, +25 hDR",
+            slot = "Aug5",
+          },
+          Aug6 = {
+            ids = {
+              62549,
+              62569,
+            },
+            item = "Merciful Mending",
+            names = {
+              "Merciful Mending",
+              "Cryptic Clutch of Merciful Mending",
+              "Vacant Vessel of Merciful Mending",
+            },
+            notes = "+10-60% healing | +10 hWIS",
+            slot = "Aug6",
+          },
+          Aug7 = {
+            ids = {
+              62556,
+              64050,
+            },
+            item = "Nimble Elusion",
+            names = {
+              "Nimble Elusion",
+              "Cryptic Clutch of Nimble Elusion",
+              "Vacant Vessel of Nimble Elusion",
+            },
+            notes = "+70% dodge | +10 hAGI",
+            slot = "Aug7",
+          },
+          Aug8 = {
+            ids = {
+              62555,
+              64049,
+            },
+            item = "Adept Guard",
+            names = {
+              "Adept Guard",
+              "Cryptic Clutch of Adept Guard",
+              "Vacant Vessel of Adept Guard",
+            },
+            notes = "+70% parry, +70% block | +10 hSTA",
+            slot = "Aug8",
+          },
+          Aug9 = {
+            ids = {
+              62554,
+              63020,
+            },
+            item = "Visceral Malice",
+            names = {
+              "Visceral Malice",
+              "Cryptic Clutch of Visceral Malice",
+              "Vacant Vessel of Visceral Malice",
+            },
+            notes = "+300% melee critical damage | +10 hSTR",
+            slot = "Aug9",
+          },
+          Back = {
+            ids = {
+              71665,
+            },
+            item = "Cloak of Deepshadow",
+            names = {
+              "Cloak of Deepshadow",
+            },
+            slot = "Back",
+          },
+          Chest = {
+            ids = {
+              60528,
+            },
+            item = "Keeper's Ascendant Jerkin of the Wilds",
+            names = {
+              "Keeper's Ascendant Jerkin of the Wilds",
+            },
+            slot = "Chest",
+          },
+          Clicky = {
+            ids = {
+              56757,
+            },
+            item = "Icon of Potent Prowess",
+            names = {
+              "Icon of Potent Prowess",
+            },
+            slot = "Clicky",
+          },
+          Ear1 = {
+            ids = {
+              71574,
+            },
+            item = "Hoop of the Drakeborn",
+            names = {
+              "Hoop of the Drakeborn",
+            },
+            slot = "Ear1",
+          },
+          Ear2 = {
+            ids = {
+              71668,
+            },
+            item = "Accursed Earhoop of Pain",
+            names = {
+              "Accursed Earhoop of Pain",
+            },
+            slot = "Ear2",
+          },
+          Face = {
+            ids = {
+              71643,
+            },
+            item = "Entrancing Silk Veil",
+            names = {
+              "Entrancing Silk Veil",
+            },
+            slot = "Face",
+          },
+          Feet = {
+            ids = {
+              60533,
+            },
+            item = "Keeper's Ascendant Sandals of the Wilds",
+            names = {
+              "Keeper's Ascendant Sandals of the Wilds",
+            },
+            slot = "Feet",
+          },
+          Finger1 = {
+            ids = {
+              71625,
+            },
+            item = "Thought Sieve Ring",
+            names = {
+              "Thought Sieve Ring",
+            },
+            slot = "Finger1",
+          },
+          Finger2 = {
+            ids = {
+              71588,
+            },
+            item = "Bloodstained Ring of Evisceration",
+            names = {
+              "Bloodstained Ring of Evisceration",
+            },
+            slot = "Finger2",
+          },
+          Glyph1 = {
+            ids = {
+              80067,
+            },
+            item = "Mnemonic Glyph: Spiritual Vibrance",
+            names = {
+              "Mnemonic Glyph: Spiritual Vibrance",
+            },
+            slot = "Glyph1",
+          },
+          Glyph2 = {
+            ids = {
+              80068,
+            },
+            item = "Mnemonic Glyph: Roaring Spirit of Tirranun",
+            names = {
+              "Mnemonic Glyph: Roaring Spirit of Tirranun",
+            },
+            slot = "Glyph2",
+          },
+          Glyph3 = {
+            ids = {
+              80069,
+            },
+            item = "Mnemonic Glyph: Growl of the Mountain Puma",
+            names = {
+              "Mnemonic Glyph: Growl of the Mountain Puma",
+            },
+            slot = "Glyph3",
+          },
+          Glyph4 = {
+            ids = {
+              80070,
+            },
+            item = "Imbued Glyph: Sha's Urgent Renewal",
+            names = {
+              "Imbued Glyph: Sha's Urgent Renewal",
+            },
+            slot = "Glyph4",
+          },
+          Hands = {
+            ids = {
+              60531,
+            },
+            item = "Keeper's Ascendant Gloves of the Wilds",
+            names = {
+              "Keeper's Ascendant Gloves of the Wilds",
+            },
+            slot = "Hands",
+          },
+          Head = {
+            ids = {
+              60527,
+            },
+            item = "Keeper's Ascendant Cap of the Wilds",
+            names = {
+              "Keeper's Ascendant Cap of the Wilds",
+            },
+            slot = "Head",
+          },
+          Legs = {
+            ids = {
+              60532,
+            },
+            item = "Keeper's Ascendant Legguards of the Wilds",
+            names = {
+              "Keeper's Ascendant Legguards of the Wilds",
+            },
+            slot = "Legs",
+          },
+          Neck = {
+            ids = {
+              71612,
+            },
+            item = "Necklace of Sandstorms",
+            names = {
+              "Necklace of Sandstorms",
+            },
+            slot = "Neck",
+          },
+          Pack1 = {
+            ids = {
+              82817,
+            },
+            item = "Spell Pack: Spiritual Vibrance",
+            names = {
+              "Spell Pack: Spiritual Vibrance",
+            },
+            slot = "Pack1",
+            spell = "Spiritual Vibrance",
+            spells = {
+              "Spiritual Vibrance",
+            },
+          },
+          Pack2 = {
+            ids = {
+              82818,
+            },
+            item = "Spell Pack: Roaring Spirit of Tirranun",
+            names = {
+              "Spell Pack: Roaring Spirit of Tirranun",
+            },
+            slot = "Pack2",
+            spell = "Roaring Spirit of Tirranun",
+            spells = {
+              "Roaring Spirit of Tirranun",
+            },
+          },
+          Pack3 = {
+            ids = {
+              82819,
+            },
+            item = "Spell Pack: Growl of the Mountain Puma",
+            names = {
+              "Spell Pack: Growl of the Mountain Puma",
+            },
+            slot = "Pack3",
+            spell = "Growl of the Mountain Puma",
+            spells = {
+              "Growl of the Mountain Puma",
+            },
+          },
+          Pack4 = {
+            ids = {
+              82820,
+            },
+            item = "Spell Pack: Sha's Urgent Renewal",
+            names = {
+              "Spell Pack: Sha's Urgent Renewal",
+            },
+            slot = "Pack4",
+            spell = "Sha's Urgent Renewal",
+            spells = {
+              "Sha's Urgent Renewal",
+            },
+          },
+          Ranged = {
+            ids = {
+              71627,
+            },
+            item = "Branch of the Twisting Tree",
+            names = {
+              "Branch of the Twisting Tree",
+            },
+            slot = "Ranged",
+          },
+          RangedAug = {
+            ids = {
+              55053,
+            },
+            item = "Fallen Leaf of the Twisting Tree",
+            names = {
+              "Fallen Leaf of the Twisting Tree",
+            },
+            slot = "RangedAug",
+          },
+          Shadow = {
+            ids = {
+              62534,
+            },
+            item = "Shadow of a Legendary Beastlord Weapon",
+            names = {
+              "Shadow of a Legendary Beastlord Weapon",
+            },
+            slot = "Shadow",
+          },
+          Shoulder = {
+            ids = {
+              71635,
+            },
+            item = "Brimstone Spaulders",
+            names = {
+              "Brimstone Spaulders",
+            },
+            slot = "Shoulder",
+          },
+          Waist = {
+            ids = {
+              71621,
+            },
+            item = "Windwatcher Sash",
+            names = {
+              "Windwatcher Sash",
+            },
+            slot = "Waist",
+          },
+          Wrist1 = {
+            ids = {
+              60530,
+            },
+            item = "Keeper's Ascendant Wristband of the Wilds",
+            names = {
+              "Keeper's Ascendant Wristband of the Wilds",
+            },
+            slot = "Wrist1",
+          },
+          Wrist2 = {
+            ids = {
+              60534,
+            },
+            item = "Keeper's Eternal Bracer of the Wilds",
+            names = {
+              "Keeper's Eternal Bracer of the Wilds",
+            },
+            slot = "Wrist2",
+          },
+        },
+        Berserker = {
+          Arms = {
+            ids = {
+              60451,
+            },
+            item = "Keeper's Ascendant Sleeves of the Vindicator",
+            names = {
+              "Keeper's Ascendant Sleeves of the Vindicator",
+            },
+            slot = "Arms",
+          },
+          Aug1 = {
+            ids = {
+              62551,
+              63017,
+            },
+            item = "Benevolent Extension",
+            names = {
+              "Benevolent Extension",
+              "Cryptic Clutch of Benevolent Extension",
+              "Vacant Vessel of Benevolent Extension",
+            },
+            notes = "+40% beneficial spell duration | +10 hWIS",
+            slot = "Aug1",
+          },
+          Aug2 = {
+            ids = {
+              62550,
+              63016,
+            },
+            item = "Malevolent Extension",
+            names = {
+              "Malevolent Extension",
+              "Cryptic Clutch of Malevolent Extension",
+              "Vacant Vessel of Malevolent Extension",
+            },
+            notes = "+40% detrimental spell duration | +10 hINT",
+            slot = "Aug2",
+          },
+          Aug3 = {
+            ids = {
+              62547,
+              62567,
+            },
+            item = "Noxious Demise",
+            names = {
+              "Noxious Demise",
+              "Cryptic Clutch of Noxious Demise",
+              "Vacant Vessel of Noxious Demise",
+            },
+            notes = "+10-60% poison spell damage | +5 hINT, +25 hPR",
+            slot = "Aug3",
+          },
+          Aug4 = {
+            ids = {
+              62556,
+              64050,
+            },
+            item = "Nimble Elusion",
+            names = {
+              "Nimble Elusion",
+              "Cryptic Clutch of Nimble Elusion",
+              "Vacant Vessel of Nimble Elusion",
+            },
+            notes = "+70% dodge | +10 hAGI",
+            slot = "Aug4",
+          },
+          Aug5 = {
+            ids = {
+              62555,
+              64049,
+            },
+            item = "Adept Guard",
+            names = {
+              "Adept Guard",
+              "Cryptic Clutch of Adept Guard",
+              "Vacant Vessel of Adept Guard",
+            },
+            notes = "+70% parry, +70% block | +10 hSTA",
+            slot = "Aug5",
+          },
+          Aug6 = {
+            ids = {
+              62554,
+              63020,
+            },
+            item = "Visceral Malice",
+            names = {
+              "Visceral Malice",
+              "Cryptic Clutch of Visceral Malice",
+              "Vacant Vessel of Visceral Malice",
+            },
+            notes = "+300% melee critical damage | +10 hSTR",
+            slot = "Aug6",
+          },
+          Aug7 = {
+            ids = {
+              62553,
+              63019,
+            },
+            item = "Wanton Assault",
+            names = {
+              "Wanton Assault",
+              "Cryptic Clutch of Wanton Assault",
+              "Vacant Vessel of Wanton Assault",
+            },
+            notes = "+21% double attack, +7% triple attack, +5% chance to hit | +10 hSTR",
+            slot = "Aug7",
+          },
+          Aug8 = {
+            ids = {
+              62557,
+              64326,
+            },
+            item = "Lethal Barrage",
+            names = {
+              "Lethal Barrage",
+              "Cryptic Clutch of Lethal Barrage",
+              "Vacant Vessel of Lethal Barrage",
+            },
+            notes = "+28% archery and throwing chance to hit | +20 hDEX",
+            slot = "Aug8",
+          },
+          Aug9 = {
+            ids = {
+              62558,
+              66533,
+            },
+            item = "Physical Prowess",
+            names = {
+              "Physical Prowess",
+              "Cryptic Clutch of Physical Prowess",
+              "Vacant Vessel of Physical Prowess",
+            },
+            notes = "No focus effect | +5 hSTR, +5 hSTA, +5 hAGI, +5 hDEX",
+            slot = "Aug9",
+          },
+          Back = {
+            ids = {
+              71665,
+            },
+            item = "Cloak of Deepshadow",
+            names = {
+              "Cloak of Deepshadow",
+            },
+            slot = "Back",
+          },
+          Chest = {
+            ids = {
+              60450,
+            },
+            item = "Keeper's Ascendant Chestguard of the Vindicator",
+            names = {
+              "Keeper's Ascendant Chestguard of the Vindicator",
+            },
+            slot = "Chest",
+          },
+          Clicky = {
+            ids = {
+              56757,
+            },
+            item = "Icon of Potent Prowess",
+            names = {
+              "Icon of Potent Prowess",
+            },
+            slot = "Clicky",
+          },
+          Ear1 = {
+            ids = {
+              71584,
+            },
+            item = "Cloudkiller's Bauble",
+            names = {
+              "Cloudkiller's Bauble",
+            },
+            slot = "Ear1",
+          },
+          Ear2 = {
+            ids = {
+              71668,
+            },
+            item = "Accursed Earhoop of Pain",
+            names = {
+              "Accursed Earhoop of Pain",
+            },
+            slot = "Ear2",
+          },
+          Face = {
+            ids = {
+              71626,
+            },
+            item = "Mask of the Dawn Scorcher",
+            names = {
+              "Mask of the Dawn Scorcher",
+            },
+            slot = "Face",
+          },
+          Feet = {
+            ids = {
+              60455,
+            },
+            item = "Keeper's Ascendant Boots of the Vindicator",
+            names = {
+              "Keeper's Ascendant Boots of the Vindicator",
+            },
+            slot = "Feet",
+          },
+          Finger1 = {
+            ids = {
+              71634,
+            },
+            item = "Glimmering Fire Opal Band",
+            names = {
+              "Glimmering Fire Opal Band",
+            },
+            slot = "Finger1",
+          },
+          Finger2 = {
+            ids = {
+              71588,
+            },
+            item = "Bloodstained Ring of Evisceration",
+            names = {
+              "Bloodstained Ring of Evisceration",
+            },
+            slot = "Finger2",
+          },
+          Glyph1 = {
+            ids = {
+              80076,
+            },
+            item = "Imbued Glyph: Ancient: Annihilator's Volley",
+            names = {
+              "Imbued Glyph: Ancient: Annihilator's Volley",
+            },
+            slot = "Glyph1",
+          },
+          Hands = {
+            ids = {
+              60453,
+            },
+            item = "Keeper's Ascendant Gloves of the Vindicator",
+            names = {
+              "Keeper's Ascendant Gloves of the Vindicator",
+            },
+            slot = "Hands",
+          },
+          Head = {
+            ids = {
+              60449,
+            },
+            item = "Keeper's Ascendant Helm of the Vindicator",
+            names = {
+              "Keeper's Ascendant Helm of the Vindicator",
+            },
+            slot = "Head",
+          },
+          Legs = {
+            ids = {
+              60454,
+            },
+            item = "Keeper's Ascendant Leggings of the Vindicator",
+            names = {
+              "Keeper's Ascendant Leggings of the Vindicator",
+            },
+            slot = "Legs",
+          },
+          Neck = {
+            ids = {
+              71612,
+            },
+            item = "Necklace of Sandstorms",
+            names = {
+              "Necklace of Sandstorms",
+            },
+            slot = "Neck",
+          },
+          Pack1 = {
+            ids = {
+              82657,
+            },
+            item = "Tome Pack: Ancient: Annihilator's Volley",
+            names = {
+              "Tome Pack: Ancient: Annihilator's Volley",
+            },
+            slot = "Pack1",
+            spell = "Ancient: Annihilator's Volley",
+            spells = {
+              "Ancient: Annihilator's Volley",
+            },
+          },
+          Ranged = {
+            ids = {
+              55052,
+            },
+            item = "Head of the Putrid Drake",
+            names = {
+              "Head of the Putrid Drake",
+            },
+            slot = "Ranged",
+          },
+          RangedAug = {
+            ids = {
+              71620,
+            },
+            item = "Preserved Eye of the Putrid Drake",
+            names = {
+              "Preserved Eye of the Putrid Drake",
+            },
+            slot = "RangedAug",
+          },
+          Shadow = {
+            ids = {
+              60667,
+            },
+            item = "Shadow of a Legendary Berserker Augment",
+            names = {
+              "Shadow of a Legendary Berserker Augment",
+            },
+            slot = "Shadow",
+          },
+          Shoulder = {
+            ids = {
+              71654,
+            },
+            item = "Lightning Singed Mantle",
+            names = {
+              "Lightning Singed Mantle",
+            },
+            slot = "Shoulder",
+          },
+          Waist = {
+            ids = {
+              71657,
+            },
+            item = "Thundercrash Girdle",
+            names = {
+              "Thundercrash Girdle",
+            },
+            slot = "Waist",
+          },
+          Wrist1 = {
+            ids = {
+              60452,
+            },
+            item = "Keeper's Ascendant Wristguard of the Vindicator",
+            names = {
+              "Keeper's Ascendant Wristguard of the Vindicator",
+            },
+            slot = "Wrist1",
+          },
+          Wrist2 = {
+            ids = {
+              60456,
+            },
+            item = "Keeper's Eternal Bracer of the Vindicator",
+            names = {
+              "Keeper's Eternal Bracer of the Vindicator",
+            },
+            slot = "Wrist2",
+          },
+        },
+        Cleric = {
+          Arms = {
+            ids = {
+              57146,
+            },
+            item = "Keeper's Ascendant Armguards of Conviction",
+            names = {
+              "Keeper's Ascendant Armguards of Conviction",
+            },
+            slot = "Arms",
+          },
+          Aug1 = {
+            ids = {
+              62541,
+              62561,
+            },
+            item = "Benevolent Efficiency",
+            names = {
+              "Benevolent Efficiency",
+              "Cryptic Clutch of Benevolent Efficiency",
+              "Vacant Vessel of Benevolent Efficiency",
+            },
+            notes = "-11-33% beneficial spell mana cost | +10 hWIS",
+            slot = "Aug1",
+          },
+          Aug10 = {
+            ids = {
+              62556,
+              64050,
+            },
+            item = "Nimble Elusion",
+            names = {
+              "Nimble Elusion",
+              "Cryptic Clutch of Nimble Elusion",
+              "Vacant Vessel of Nimble Elusion",
+            },
+            notes = "+70% dodge | +10 hAGI",
+            slot = "Aug10",
+          },
+          Aug11 = {
+            ids = {
+              62559,
+              66720,
+            },
+            item = "Mental Prowess",
+            names = {
+              "Mental Prowess",
+              "Cryptic Clutch of Mental Prowess",
+              "Vacant Vessel of Mental Prowess",
+            },
+            notes = "No focus effect | +10 hINT, +10 hWIS, +10 heroic resists",
+            slot = "Aug11",
+          },
+          Aug2 = {
+            ids = {
+              62551,
+              63017,
+            },
+            item = "Benevolent Extension",
+            names = {
+              "Benevolent Extension",
+              "Cryptic Clutch of Benevolent Extension",
+              "Vacant Vessel of Benevolent Extension",
+            },
+            notes = "+40% beneficial spell duration | +10 hWIS",
+            slot = "Aug2",
+          },
+          Aug3 = {
+            ids = {
+              62543,
+              62563,
+            },
+            item = "Benevolent Alacrity",
+            names = {
+              "Benevolent Alacrity",
+              "Cryptic Clutch of Benevolent Alacrity",
+              "Vacant Vessel of Benevolent Alacrity",
+            },
+            notes = "-40% beneficial spell cast time | +10 hWIS",
+            slot = "Aug3",
+          },
+          Aug4 = {
+            ids = {
+              62540,
+              62560,
+            },
+            item = "Malevolent Efficiency",
+            names = {
+              "Malevolent Efficiency",
+              "Cryptic Clutch of Malevolent Efficiency",
+              "Vacant Vessel of Malevolent Efficiency",
+            },
+            notes = "-11-33% detrimental spell mana cost | +10 hINT",
+            slot = "Aug4",
+          },
+          Aug5 = {
+            ids = {
+              62550,
+              63016,
+            },
+            item = "Malevolent Extension",
+            names = {
+              "Malevolent Extension",
+              "Cryptic Clutch of Malevolent Extension",
+              "Vacant Vessel of Malevolent Extension",
+            },
+            notes = "+40% detrimental spell duration | +10 hINT",
+            slot = "Aug5",
+          },
+          Aug6 = {
+            ids = {
+              62542,
+              62562,
+            },
+            item = "Malevolent Alacrity",
+            names = {
+              "Malevolent Alacrity",
+              "Cryptic Clutch of Malevolent Alacrity",
+              "Vacant Vessel of Malevolent Alacrity",
+            },
+            notes = "-40% detrimental spell cast time | +10 hINT",
+            slot = "Aug6",
+          },
+          Aug7 = {
+            ids = {
+              62544,
+              62564,
+            },
+            item = "Arcane Demise",
+            names = {
+              "Arcane Demise",
+              "Cryptic Clutch of Arcane Demise",
+              "Vacant Vessel of Arcane Demise",
+            },
+            notes = "+10-60% magic spell damage | +5 hINT, +25 hMR",
+            slot = "Aug7",
+          },
+          Aug8 = {
+            ids = {
+              62552,
+              63018,
+            },
+            item = "Expanded Reach",
+            names = {
+              "Expanded Reach",
+              "Cryptic Clutch of Expanded Reach",
+              "Vacant Vessel of Expanded Reach",
+            },
+            notes = "+50% spell range | +10 hWIS, +10 hINT",
+            slot = "Aug8",
+          },
+          Aug9 = {
+            ids = {
+              62549,
+              62569,
+            },
+            item = "Merciful Mending",
+            names = {
+              "Merciful Mending",
+              "Cryptic Clutch of Merciful Mending",
+              "Vacant Vessel of Merciful Mending",
+            },
+            notes = "+10-60% healing | +10 hWIS",
+            slot = "Aug9",
+          },
+          Back = {
+            ids = {
+              71613,
+            },
+            item = "Cape of Serenity",
+            names = {
+              "Cape of Serenity",
+            },
+            slot = "Back",
+          },
+          Chest = {
+            ids = {
+              57145,
+            },
+            item = "Keeper's Ascendant Breastplate of Conviction",
+            names = {
+              "Keeper's Ascendant Breastplate of Conviction",
+            },
+            slot = "Chest",
+          },
+          Clicky = {
+            ids = {
+              56756,
+            },
+            item = "Icon of Scribe's Endurance",
+            names = {
+              "Icon of Scribe's Endurance",
+            },
+            slot = "Clicky",
+          },
+          Ear1 = {
+            ids = {
+              71589,
+            },
+            item = "Earring of Contemplation",
+            names = {
+              "Earring of Contemplation",
+            },
+            slot = "Ear1",
+          },
+          Ear2 = {
+            ids = {
+              71642,
+            },
+            item = "Tear of Kessdona",
+            names = {
+              "Tear of Kessdona",
+            },
+            slot = "Ear2",
+          },
+          Face = {
+            ids = {
+              71594,
+            },
+            item = "Young Dragon Mask",
+            names = {
+              "Young Dragon Mask",
+            },
+            slot = "Face",
+          },
+          Feet = {
+            ids = {
+              57150,
+            },
+            item = "Keeper's Ascendant Boots of Conviction",
+            names = {
+              "Keeper's Ascendant Boots of Conviction",
+            },
+            slot = "Feet",
+          },
+          Finger1 = {
+            ids = {
+              71592,
+            },
+            item = "Dragon Nursery Ring",
+            names = {
+              "Dragon Nursery Ring",
+            },
+            slot = "Finger1",
+          },
+          Finger2 = {
+            ids = {
+              71652,
+            },
+            item = "Eye of Tirranun",
+            names = {
+              "Eye of Tirranun",
+            },
+            slot = "Finger2",
+          },
+          Glyph1 = {
+            ids = {
+              76563,
+            },
+            item = "Mnemonic Glyph: Allegiance",
+            names = {
+              "Mnemonic Glyph: Allegiance",
+            },
+            slot = "Glyph1",
+          },
+          Glyph2 = {
+            ids = {
+              76564,
+            },
+            item = "Mnemonic Glyph: Hand of Allegiance",
+            names = {
+              "Mnemonic Glyph: Hand of Allegiance",
+            },
+            slot = "Glyph2",
+          },
+          Glyph3 = {
+            ids = {
+              76565,
+            },
+            item = "Mnemonic Glyph: Symbol of Elushar",
+            names = {
+              "Mnemonic Glyph: Symbol of Elushar",
+            },
+            slot = "Glyph3",
+          },
+          Glyph4 = {
+            ids = {
+              76566,
+            },
+            item = "Mnemonic Glyph: Armor of the Sacred",
+            names = {
+              "Mnemonic Glyph: Armor of the Sacred",
+            },
+            slot = "Glyph4",
+          },
+          Glyph5 = {
+            ids = {
+              76567,
+            },
+            item = "Imbued Glyph: Aegis of Vie",
+            names = {
+              "Imbued Glyph: Aegis of Vie",
+            },
+            slot = "Glyph5",
+          },
+          Hands = {
+            ids = {
+              57148,
+            },
+            item = "Keeper's Ascendant Gloves of Conviction",
+            names = {
+              "Keeper's Ascendant Gloves of Conviction",
+            },
+            slot = "Hands",
+          },
+          Head = {
+            ids = {
+              57144,
+            },
+            item = "Keeper's Ascendant Cap of Conviction",
+            names = {
+              "Keeper's Ascendant Cap of Conviction",
+            },
+            slot = "Head",
+          },
+          Legs = {
+            ids = {
+              57149,
+            },
+            item = "Keeper's Ascendant Leggings of Conviction",
+            names = {
+              "Keeper's Ascendant Leggings of Conviction",
+            },
+            slot = "Legs",
+          },
+          Neck = {
+            ids = {
+              71655,
+            },
+            item = "Locket of Raining Tears",
+            names = {
+              "Locket of Raining Tears",
+            },
+            slot = "Neck",
+          },
+          Pack1 = {
+            ids = {
+              82658,
+            },
+            item = "Spell Pack: Allegiance",
+            names = {
+              "Spell Pack: Allegiance",
+            },
+            slot = "Pack1",
+            spell = "Allegiance",
+            spells = {
+              "Allegiance",
+              "Hand of Allegiance",
+              "Symbol of Elushar",
+            },
+          },
+          Pack2 = {
+            ids = {
+              82660,
+            },
+            item = "Spell Pack: Armor of the Sacred",
+            names = {
+              "Spell Pack: Armor of the Sacred",
+            },
+            slot = "Pack2",
+            spell = "Armor of the Sacred",
+            spells = {
+              "Armor of the Sacred",
+            },
+          },
+          Pack3 = {
+            ids = {
+              82661,
+            },
+            item = "Spell Pack: Aegis of Vie",
+            names = {
+              "Spell Pack: Aegis of Vie",
+            },
+            slot = "Pack3",
+            spell = "Aegis of Vie",
+            spells = {
+              "Aegis of Vie",
+            },
+          },
+          Ranged = {
+            ids = {
+              60535,
+            },
+            item = "Crux of the First Brood",
+            names = {
+              "Crux of the First Brood",
+            },
+            slot = "Ranged",
+          },
+          RangedAug = {
+            ids = {
+              71578,
+            },
+            item = "Phial of the First Brood",
+            names = {
+              "Phial of the First Brood",
+            },
+            slot = "RangedAug",
+          },
+          Shadow = {
+            ids = {
+              60546,
+            },
+            item = "Shadow of a Legendary Cleric Staff",
+            names = {
+              "Shadow of a Legendary Cleric Staff",
+            },
+            slot = "Shadow",
+          },
+          Shoulder = {
+            ids = {
+              71666,
+            },
+            item = "Obsidian Pauldrons",
+            names = {
+              "Obsidian Pauldrons",
+            },
+            slot = "Shoulder",
+          },
+          Waist = {
+            ids = {
+              71621,
+            },
+            item = "Windwatcher Sash",
+            names = {
+              "Windwatcher Sash",
+            },
+            slot = "Waist",
+          },
+          Wrist1 = {
+            ids = {
+              57147,
+            },
+            item = "Keeper's Ascendant Wristband of Conviction",
+            names = {
+              "Keeper's Ascendant Wristband of Conviction",
+            },
+            slot = "Wrist1",
+          },
+          Wrist2 = {
+            ids = {
+              57151,
+            },
+            item = "Keeper's Eternal Bracer of Conviction",
+            names = {
+              "Keeper's Eternal Bracer of Conviction",
+            },
+            slot = "Wrist2",
+          },
+        },
+        Druid = {
+          Arms = {
+            ids = {
+              57162,
+            },
+            item = "Keeper's Ascendant Sleeves of the Tangled Briars",
+            names = {
+              "Keeper's Ascendant Sleeves of the Tangled Briars",
+            },
+            slot = "Arms",
+          },
+          Aug1 = {
+            ids = {
+              62541,
+              62561,
+            },
+            item = "Benevolent Efficiency",
+            names = {
+              "Benevolent Efficiency",
+              "Cryptic Clutch of Benevolent Efficiency",
+              "Vacant Vessel of Benevolent Efficiency",
+            },
+            notes = "-11-33% beneficial spell mana cost | +10 hWIS",
+            slot = "Aug1",
+          },
+          Aug10 = {
+            ids = {
+              62549,
+              62569,
+            },
+            item = "Merciful Mending",
+            names = {
+              "Merciful Mending",
+              "Cryptic Clutch of Merciful Mending",
+              "Vacant Vessel of Merciful Mending",
+            },
+            notes = "+10-60% healing | +10 hWIS",
+            slot = "Aug10",
+          },
+          Aug11 = {
+            ids = {
+              62556,
+              64050,
+            },
+            item = "Nimble Elusion",
+            names = {
+              "Nimble Elusion",
+              "Cryptic Clutch of Nimble Elusion",
+              "Vacant Vessel of Nimble Elusion",
+            },
+            notes = "+70% dodge | +10 hAGI",
+            slot = "Aug11",
+          },
+          Aug12 = {
+            ids = {
+              62559,
+              66720,
+            },
+            item = "Mental Prowess",
+            names = {
+              "Mental Prowess",
+              "Cryptic Clutch of Mental Prowess",
+              "Vacant Vessel of Mental Prowess",
+            },
+            notes = "No focus effect | +10 hINT, +10 hWIS, +10 heroic resists",
+            slot = "Aug12",
+          },
+          Aug2 = {
+            ids = {
+              62551,
+              63017,
+            },
+            item = "Benevolent Extension",
+            names = {
+              "Benevolent Extension",
+              "Cryptic Clutch of Benevolent Extension",
+              "Vacant Vessel of Benevolent Extension",
+            },
+            notes = "+40% beneficial spell duration | +10 hWIS",
+            slot = "Aug2",
+          },
+          Aug3 = {
+            ids = {
+              62543,
+              62563,
+            },
+            item = "Benevolent Alacrity",
+            names = {
+              "Benevolent Alacrity",
+              "Cryptic Clutch of Benevolent Alacrity",
+              "Vacant Vessel of Benevolent Alacrity",
+            },
+            notes = "-40% beneficial spell cast time | +10 hWIS",
+            slot = "Aug3",
+          },
+          Aug4 = {
+            ids = {
+              62540,
+              62560,
+            },
+            item = "Malevolent Efficiency",
+            names = {
+              "Malevolent Efficiency",
+              "Cryptic Clutch of Malevolent Efficiency",
+              "Vacant Vessel of Malevolent Efficiency",
+            },
+            notes = "-11-33% detrimental spell mana cost | +10 hINT",
+            slot = "Aug4",
+          },
+          Aug5 = {
+            ids = {
+              62550,
+              63016,
+            },
+            item = "Malevolent Extension",
+            names = {
+              "Malevolent Extension",
+              "Cryptic Clutch of Malevolent Extension",
+              "Vacant Vessel of Malevolent Extension",
+            },
+            notes = "+40% detrimental spell duration | +10 hINT",
+            slot = "Aug5",
+          },
+          Aug6 = {
+            ids = {
+              62542,
+              62562,
+            },
+            item = "Malevolent Alacrity",
+            names = {
+              "Malevolent Alacrity",
+              "Cryptic Clutch of Malevolent Alacrity",
+              "Vacant Vessel of Malevolent Alacrity",
+            },
+            notes = "-40% detrimental spell cast time | +10 hINT",
+            slot = "Aug6",
+          },
+          Aug7 = {
+            ids = {
+              62545,
+              62565,
+            },
+            item = "Fiery Demise",
+            names = {
+              "Fiery Demise",
+              "Cryptic Clutch of Fiery Demise",
+              "Vacant Vessel of Fiery Demise",
+            },
+            notes = "+10-60% fire spell damage | +5 hINT, +25 hFR",
+            slot = "Aug7",
+          },
+          Aug8 = {
+            ids = {
+              62544,
+              62564,
+            },
+            item = "Arcane Demise",
+            names = {
+              "Arcane Demise",
+              "Cryptic Clutch of Arcane Demise",
+              "Vacant Vessel of Arcane Demise",
+            },
+            notes = "+10-60% magic spell damage | +5 hINT, +25 hMR",
+            slot = "Aug8",
+          },
+          Aug9 = {
+            ids = {
+              62552,
+              63018,
+            },
+            item = "Expanded Reach",
+            names = {
+              "Expanded Reach",
+              "Cryptic Clutch of Expanded Reach",
+              "Vacant Vessel of Expanded Reach",
+            },
+            notes = "+50% spell range | +10 hWIS, +10 hINT",
+            slot = "Aug9",
+          },
+          Back = {
+            ids = {
+              71613,
+            },
+            item = "Cape of Serenity",
+            names = {
+              "Cape of Serenity",
+            },
+            slot = "Back",
+          },
+          Chest = {
+            ids = {
+              57161,
+            },
+            item = "Keeper's Ascendant Jerkin of the Tangled Briars",
+            names = {
+              "Keeper's Ascendant Jerkin of the Tangled Briars",
+            },
+            slot = "Chest",
+          },
+          Clicky = {
+            ids = {
+              56756,
+            },
+            item = "Icon of Scribe's Endurance",
+            names = {
+              "Icon of Scribe's Endurance",
+            },
+            slot = "Clicky",
+          },
+          Ear1 = {
+            ids = {
+              71589,
+            },
+            item = "Earring of Contemplation",
+            names = {
+              "Earring of Contemplation",
+            },
+            slot = "Ear1",
+          },
+          Ear2 = {
+            ids = {
+              71642,
+            },
+            item = "Tear of Kessdona",
+            names = {
+              "Tear of Kessdona",
+            },
+            slot = "Ear2",
+          },
+          Face = {
+            ids = {
+              71594,
+            },
+            item = "Young Dragon Mask",
+            names = {
+              "Young Dragon Mask",
+            },
+            slot = "Face",
+          },
+          Feet = {
+            ids = {
+              57178,
+            },
+            item = "Keeper's Ascendant Slippers of the Tangled Briars",
+            names = {
+              "Keeper's Ascendant Slippers of the Tangled Briars",
+            },
+            slot = "Feet",
+          },
+          Finger1 = {
+            ids = {
+              71592,
+            },
+            item = "Dragon Nursery Ring",
+            names = {
+              "Dragon Nursery Ring",
+            },
+            slot = "Finger1",
+          },
+          Finger2 = {
+            ids = {
+              71652,
+            },
+            item = "Eye of Tirranun",
+            names = {
+              "Eye of Tirranun",
+            },
+            slot = "Finger2",
+          },
+          Glyph1 = {
+            ids = {
+              76573,
+            },
+            item = "Mnemonic Glyph: Spiritoak Skin",
+            names = {
+              "Mnemonic Glyph: Spiritoak Skin",
+            },
+            slot = "Glyph1",
+          },
+          Glyph2 = {
+            ids = {
+              78227,
+            },
+            item = "Mnemonic Glyph: Blessing of Spiritoak",
+            names = {
+              "Mnemonic Glyph: Blessing of Spiritoak",
+            },
+            slot = "Glyph2",
+          },
+          Glyph3 = {
+            ids = {
+              79518,
+            },
+            item = "Mnemonic Glyph: Mossy Vigor",
+            names = {
+              "Mnemonic Glyph: Mossy Vigor",
+            },
+            slot = "Glyph3",
+          },
+          Glyph4 = {
+            ids = {
+              79519,
+            },
+            item = "Mnemonic Glyph: Blessing of Moss",
+            names = {
+              "Mnemonic Glyph: Blessing of Moss",
+            },
+            slot = "Glyph4",
+          },
+          Glyph5 = {
+            ids = {
+              79520,
+            },
+            item = "Imbued Glyph: Sun's Blistering Corona",
+            names = {
+              "Imbued Glyph: Sun's Blistering Corona",
+            },
+            slot = "Glyph5",
+          },
+          Hands = {
+            ids = {
+              57164,
+            },
+            item = "Keeper's Ascendant Mitts of the Tangled Briars",
+            names = {
+              "Keeper's Ascendant Mitts of the Tangled Briars",
+            },
+            slot = "Hands",
+          },
+          Head = {
+            ids = {
+              57160,
+            },
+            item = "Keeper's Ascendant Cap of the Tangled Briars",
+            names = {
+              "Keeper's Ascendant Cap of the Tangled Briars",
+            },
+            slot = "Head",
+          },
+          Legs = {
+            ids = {
+              57165,
+            },
+            item = "Keeper's Ascendant Pants of the Tangled Briars",
+            names = {
+              "Keeper's Ascendant Pants of the Tangled Briars",
+            },
+            slot = "Legs",
+          },
+          Neck = {
+            ids = {
+              71655,
+            },
+            item = "Locket of Raining Tears",
+            names = {
+              "Locket of Raining Tears",
+            },
+            slot = "Neck",
+          },
+          Pack1 = {
+            ids = {
+              82688,
+            },
+            item = "Spell Pack: Spiritoaks",
+            names = {
+              "Spell Pack: Spiritoaks",
+            },
+            slot = "Pack1",
+            spell = "Spiritoak Skin",
+            spells = {
+              "Spiritoak Skin",
+              "Blessing of Spiritoak",
+            },
+          },
+          Pack2 = {
+            ids = {
+              82777,
+            },
+            item = "Spell Pack: Clumped Moss",
+            names = {
+              "Spell Pack: Clumped Moss",
+            },
+            slot = "Pack2",
+            spell = "Mossy Vigor",
+            spells = {
+              "Mossy Vigor",
+              "Blessing of Moss",
+            },
+          },
+          Pack3 = {
+            ids = {
+              82778,
+            },
+            item = "Spell Pack: Sun's Blistering Corona",
+            names = {
+              "Spell Pack: Sun's Blistering Corona",
+            },
+            slot = "Pack3",
+            spell = "Sun's Blistering Corona",
+            spells = {
+              "Sun's Blistering Corona",
+            },
+          },
+          Ranged = {
+            ids = {
+              60535,
+            },
+            item = "Crux of the First Brood",
+            names = {
+              "Crux of the First Brood",
+            },
+            slot = "Ranged",
+          },
+          RangedAug = {
+            ids = {
+              71578,
+            },
+            item = "Phial of the First Brood",
+            names = {
+              "Phial of the First Brood",
+            },
+            slot = "RangedAug",
+          },
+          Shadow = {
+            ids = {
+              60548,
+            },
+            item = "Shadow of a Legendary Druid Staff",
+            names = {
+              "Shadow of a Legendary Druid Staff",
+            },
+            slot = "Shadow",
+          },
+          Shoulder = {
+            ids = {
+              71666,
+            },
+            item = "Obsidian Pauldrons",
+            names = {
+              "Obsidian Pauldrons",
+            },
+            slot = "Shoulder",
+          },
+          Waist = {
+            ids = {
+              71621,
+            },
+            item = "Windwatcher Sash",
+            names = {
+              "Windwatcher Sash",
+            },
+            slot = "Waist",
+          },
+          Wrist1 = {
+            ids = {
+              57163,
+            },
+            item = "Keeper's Ascendant Wristband of the Tangled Briars",
+            names = {
+              "Keeper's Ascendant Wristband of the Tangled Briars",
+            },
+            slot = "Wrist1",
+          },
+          Wrist2 = {
+            ids = {
+              57179,
+            },
+            item = "Keeper's Eternal Bracer of the Tangled Briars",
+            names = {
+              "Keeper's Eternal Bracer of the Tangled Briars",
+            },
+            slot = "Wrist2",
+          },
+        },
+        Enchanter = {
+          Arms = {
+            ids = {
+              60505,
+            },
+            item = "Keeper's Ascendant Armguards of Coercion",
+            names = {
+              "Keeper's Ascendant Armguards of Coercion",
+            },
+            slot = "Arms",
+          },
+          Aug1 = {
+            ids = {
+              62541,
+              62561,
+            },
+            item = "Benevolent Efficiency",
+            names = {
+              "Benevolent Efficiency",
+              "Cryptic Clutch of Benevolent Efficiency",
+              "Vacant Vessel of Benevolent Efficiency",
+            },
+            notes = "-11-33% beneficial spell mana cost | +10 hWIS",
+            slot = "Aug1",
+          },
+          Aug10 = {
+            ids = {
+              62559,
+              66720,
+            },
+            item = "Mental Prowess",
+            names = {
+              "Mental Prowess",
+              "Cryptic Clutch of Mental Prowess",
+              "Vacant Vessel of Mental Prowess",
+            },
+            notes = "No focus effect | +10 hINT, +10 hWIS, +10 heroic resists",
+            slot = "Aug10",
+          },
+          Aug2 = {
+            ids = {
+              62551,
+              63017,
+            },
+            item = "Benevolent Extension",
+            names = {
+              "Benevolent Extension",
+              "Cryptic Clutch of Benevolent Extension",
+              "Vacant Vessel of Benevolent Extension",
+            },
+            notes = "+40% beneficial spell duration | +10 hWIS",
+            slot = "Aug2",
+          },
+          Aug3 = {
+            ids = {
+              62543,
+              62563,
+            },
+            item = "Benevolent Alacrity",
+            names = {
+              "Benevolent Alacrity",
+              "Cryptic Clutch of Benevolent Alacrity",
+              "Vacant Vessel of Benevolent Alacrity",
+            },
+            notes = "-40% beneficial spell cast time | +10 hWIS",
+            slot = "Aug3",
+          },
+          Aug4 = {
+            ids = {
+              62540,
+              62560,
+            },
+            item = "Malevolent Efficiency",
+            names = {
+              "Malevolent Efficiency",
+              "Cryptic Clutch of Malevolent Efficiency",
+              "Vacant Vessel of Malevolent Efficiency",
+            },
+            notes = "-11-33% detrimental spell mana cost | +10 hINT",
+            slot = "Aug4",
+          },
+          Aug5 = {
+            ids = {
+              62550,
+              63016,
+            },
+            item = "Malevolent Extension",
+            names = {
+              "Malevolent Extension",
+              "Cryptic Clutch of Malevolent Extension",
+              "Vacant Vessel of Malevolent Extension",
+            },
+            notes = "+40% detrimental spell duration | +10 hINT",
+            slot = "Aug5",
+          },
+          Aug6 = {
+            ids = {
+              62542,
+              62562,
+            },
+            item = "Malevolent Alacrity",
+            names = {
+              "Malevolent Alacrity",
+              "Cryptic Clutch of Malevolent Alacrity",
+              "Vacant Vessel of Malevolent Alacrity",
+            },
+            notes = "-40% detrimental spell cast time | +10 hINT",
+            slot = "Aug6",
+          },
+          Aug7 = {
+            ids = {
+              62544,
+              62564,
+            },
+            item = "Arcane Demise",
+            names = {
+              "Arcane Demise",
+              "Cryptic Clutch of Arcane Demise",
+              "Vacant Vessel of Arcane Demise",
+            },
+            notes = "+10-60% magic spell damage | +5 hINT, +25 hMR",
+            slot = "Aug7",
+          },
+          Aug8 = {
+            ids = {
+              62552,
+              63018,
+            },
+            item = "Expanded Reach",
+            names = {
+              "Expanded Reach",
+              "Cryptic Clutch of Expanded Reach",
+              "Vacant Vessel of Expanded Reach",
+            },
+            notes = "+50% spell range | +10 hWIS, +10 hINT",
+            slot = "Aug8",
+          },
+          Aug9 = {
+            ids = {
+              62556,
+              64050,
+            },
+            item = "Nimble Elusion",
+            names = {
+              "Nimble Elusion",
+              "Cryptic Clutch of Nimble Elusion",
+              "Vacant Vessel of Nimble Elusion",
+            },
+            notes = "+70% dodge | +10 hAGI",
+            slot = "Aug9",
+          },
+          Back = {
+            ids = {
+              71656,
+            },
+            item = "Shroud of the Surging Storm",
+            names = {
+              "Shroud of the Surging Storm",
+            },
+            slot = "Back",
+          },
+          Chest = {
+            ids = {
+              60504,
+            },
+            item = "Keeper's Ascendant Vest of Coercion",
+            names = {
+              "Keeper's Ascendant Vest of Coercion",
+            },
+            slot = "Chest",
+          },
+          Clicky = {
+            ids = {
+              56756,
+            },
+            item = "Icon of Scribe's Endurance",
+            names = {
+              "Icon of Scribe's Endurance",
+            },
+            slot = "Clicky",
+          },
+          Ear1 = {
+            ids = {
+              71574,
+            },
+            item = "Hoop of the Drakeborn",
+            names = {
+              "Hoop of the Drakeborn",
+            },
+            slot = "Ear1",
+          },
+          Ear2 = {
+            ids = {
+              71603,
+            },
+            item = "Grelian Earring of Uncertainty",
+            names = {
+              "Grelian Earring of Uncertainty",
+            },
+            slot = "Ear2",
+          },
+          Face = {
+            ids = {
+              71643,
+            },
+            item = "Entrancing Silk Veil",
+            names = {
+              "Entrancing Silk Veil",
+            },
+            slot = "Face",
+          },
+          Feet = {
+            ids = {
+              60509,
+            },
+            item = "Keeper's Ascendant Shoes of Coercion",
+            names = {
+              "Keeper's Ascendant Shoes of Coercion",
+            },
+            slot = "Feet",
+          },
+          Finger1 = {
+            ids = {
+              71625,
+            },
+            item = "Thought Sieve Ring",
+            names = {
+              "Thought Sieve Ring",
+            },
+            slot = "Finger1",
+          },
+          Finger2 = {
+            ids = {
+              71658,
+            },
+            item = "Stormeye Band",
+            names = {
+              "Stormeye Band",
+            },
+            slot = "Finger2",
+          },
+          Glyph1 = {
+            ids = {
+              79529,
+            },
+            item = "Mnemonic Glyph: Seer's Intuition",
+            names = {
+              "Mnemonic Glyph: Seer's Intuition",
+            },
+            slot = "Glyph1",
+          },
+          Glyph2 = {
+            ids = {
+              79530,
+            },
+            item = "Mnemonic Glyph: Voice of Intuition",
+            names = {
+              "Mnemonic Glyph: Voice of Intuition",
+            },
+            slot = "Glyph2",
+          },
+          Glyph3 = {
+            ids = {
+              79531,
+            },
+            item = "Mnemonic Glyph: Speed of Ellowind",
+            names = {
+              "Mnemonic Glyph: Speed of Ellowind",
+            },
+            slot = "Glyph3",
+          },
+          Glyph4 = {
+            ids = {
+              79532,
+            },
+            item = "Mnemonic Glyph: Hastening of Ellowind",
+            names = {
+              "Mnemonic Glyph: Hastening of Ellowind",
+            },
+            slot = "Glyph4",
+          },
+          Glyph5 = {
+            ids = {
+              79533,
+            },
+            item = "Mnemonic Glyph: Presidio of the Seer",
+            names = {
+              "Mnemonic Glyph: Presidio of the Seer",
+            },
+            slot = "Glyph5",
+          },
+          Glyph6 = {
+            ids = {
+              79534,
+            },
+            item = "Imbued Glyph: Edict of Tashan",
+            names = {
+              "Imbued Glyph: Edict of Tashan",
+            },
+            slot = "Glyph6",
+          },
+          Hands = {
+            ids = {
+              60507,
+            },
+            item = "Keeper's Ascendant Handguards of Coercion",
+            names = {
+              "Keeper's Ascendant Handguards of Coercion",
+            },
+            slot = "Hands",
+          },
+          Head = {
+            ids = {
+              60503,
+            },
+            item = "Keeper's Ascendant Skullcap of Coercion",
+            names = {
+              "Keeper's Ascendant Skullcap of Coercion",
+            },
+            slot = "Head",
+          },
+          Legs = {
+            ids = {
+              60508,
+            },
+            item = "Keeper's Ascendant Leggings of Coercion",
+            names = {
+              "Keeper's Ascendant Leggings of Coercion",
+            },
+            slot = "Legs",
+          },
+          Neck = {
+            ids = {
+              71651,
+            },
+            item = "Choker of One Hundred Diamonds",
+            names = {
+              "Choker of One Hundred Diamonds",
+            },
+            slot = "Neck",
+          },
+          Pack1 = {
+            ids = {
+              82801,
+            },
+            item = "Spell Pack: Intuition",
+            names = {
+              "Spell Pack: Intuition",
+            },
+            slot = "Pack1",
+            spell = "Seer's Intuition",
+            spells = {
+              "Seer's Intuition",
+              "Voice of Intuition",
+            },
+          },
+          Pack2 = {
+            ids = {
+              82802,
+            },
+            item = "Spell Pack: Ellowind",
+            names = {
+              "Spell Pack: Ellowind",
+            },
+            slot = "Pack2",
+            spell = "Speed of Ellowind",
+            spells = {
+              "Speed of Ellowind",
+              "Hastening of Ellowind",
+            },
+          },
+          Pack3 = {
+            ids = {
+              82803,
+            },
+            item = "Spell Pack: Presidio of the Seer",
+            names = {
+              "Spell Pack: Presidio of the Seer",
+            },
+            slot = "Pack3",
+            spell = "Presidio of the Seer",
+            spells = {
+              "Presidio of the Seer",
+            },
+          },
+          Pack4 = {
+            ids = {
+              82804,
+            },
+            item = "Spell Pack: Edict of Tashan",
+            names = {
+              "Spell Pack: Edict of Tashan",
+            },
+            slot = "Pack4",
+            spell = "Edict of Tashan",
+            spells = {
+              "Edict of Tashan",
+            },
+          },
+          Ranged = {
+            ids = {
+              60536,
+            },
+            item = "Spark of the Skies",
+            names = {
+              "Spark of the Skies",
+            },
+            slot = "Ranged",
+          },
+          RangedAug = {
+            ids = {
+              71659,
+            },
+            item = "Core of the Skies",
+            names = {
+              "Core of the Skies",
+            },
+            slot = "RangedAug",
+          },
+          Shadow = {
+            ids = {
+              62531,
+            },
+            item = "Shadow of a Legendary Enchanter Shield",
+            names = {
+              "Shadow of a Legendary Enchanter Shield",
+            },
+            slot = "Shadow",
+          },
+          Shoulder = {
+            ids = {
+              71635,
+            },
+            item = "Brimstone Spaulders",
+            names = {
+              "Brimstone Spaulders",
+            },
+            slot = "Shoulder",
+          },
+          Waist = {
+            ids = {
+              71650,
+            },
+            item = "Sash of Frigidity",
+            names = {
+              "Sash of Frigidity",
+            },
+            slot = "Waist",
+          },
+          Wrist1 = {
+            ids = {
+              60506,
+            },
+            item = "Keeper's Ascendant Bracer of Coercion",
+            names = {
+              "Keeper's Ascendant Bracer of Coercion",
+            },
+            slot = "Wrist1",
+          },
+          Wrist2 = {
+            ids = {
+              60510,
+            },
+            item = "Keeper's Eternal Bracer of Coercion",
+            names = {
+              "Keeper's Eternal Bracer of Coercion",
+            },
+            slot = "Wrist2",
+          },
+        },
+        Magician = {
+          Arms = {
+            ids = {
+              60475,
+            },
+            item = "Keeper's Ascendant Sleeves of the Summoner",
+            names = {
+              "Keeper's Ascendant Sleeves of the Summoner",
+            },
+            slot = "Arms",
+          },
+          Aug1 = {
+            ids = {
+              62551,
+              63017,
+            },
+            item = "Benevolent Extension",
+            names = {
+              "Benevolent Extension",
+              "Cryptic Clutch of Benevolent Extension",
+              "Vacant Vessel of Benevolent Extension",
+            },
+            notes = "+40% beneficial spell duration | +10 hWIS",
+            slot = "Aug1",
+          },
+          Aug2 = {
+            ids = {
+              62543,
+              62563,
+            },
+            item = "Benevolent Alacrity",
+            names = {
+              "Benevolent Alacrity",
+              "Cryptic Clutch of Benevolent Alacrity",
+              "Vacant Vessel of Benevolent Alacrity",
+            },
+            notes = "-40% beneficial spell cast time | +10 hWIS",
+            slot = "Aug2",
+          },
+          Aug3 = {
+            ids = {
+              62540,
+              62560,
+            },
+            item = "Malevolent Efficiency",
+            names = {
+              "Malevolent Efficiency",
+              "Cryptic Clutch of Malevolent Efficiency",
+              "Vacant Vessel of Malevolent Efficiency",
+            },
+            notes = "-11-33% detrimental spell mana cost | +10 hINT",
+            slot = "Aug3",
+          },
+          Aug4 = {
+            ids = {
+              62550,
+              63016,
+            },
+            item = "Malevolent Extension",
+            names = {
+              "Malevolent Extension",
+              "Cryptic Clutch of Malevolent Extension",
+              "Vacant Vessel of Malevolent Extension",
+            },
+            notes = "+40% detrimental spell duration | +10 hINT",
+            slot = "Aug4",
+          },
+          Aug5 = {
+            ids = {
+              62542,
+              62562,
+            },
+            item = "Malevolent Alacrity",
+            names = {
+              "Malevolent Alacrity",
+              "Cryptic Clutch of Malevolent Alacrity",
+              "Vacant Vessel of Malevolent Alacrity",
+            },
+            notes = "-40% detrimental spell cast time | +10 hINT",
+            slot = "Aug5",
+          },
+          Aug6 = {
+            ids = {
+              62545,
+              62565,
+            },
+            item = "Fiery Demise",
+            names = {
+              "Fiery Demise",
+              "Cryptic Clutch of Fiery Demise",
+              "Vacant Vessel of Fiery Demise",
+            },
+            notes = "+10-60% fire spell damage | +5 hINT, +25 hFR",
+            slot = "Aug6",
+          },
+          Aug7 = {
+            ids = {
+              62552,
+              63018,
+            },
+            item = "Expanded Reach",
+            names = {
+              "Expanded Reach",
+              "Cryptic Clutch of Expanded Reach",
+              "Vacant Vessel of Expanded Reach",
+            },
+            notes = "+50% spell range | +10 hWIS, +10 hINT",
+            slot = "Aug7",
+          },
+          Aug8 = {
+            ids = {
+              62556,
+              64050,
+            },
+            item = "Nimble Elusion",
+            names = {
+              "Nimble Elusion",
+              "Cryptic Clutch of Nimble Elusion",
+              "Vacant Vessel of Nimble Elusion",
+            },
+            notes = "+70% dodge | +10 hAGI",
+            slot = "Aug8",
+          },
+          Aug9 = {
+            ids = {
+              62559,
+              66720,
+            },
+            item = "Mental Prowess",
+            names = {
+              "Mental Prowess",
+              "Cryptic Clutch of Mental Prowess",
+              "Vacant Vessel of Mental Prowess",
+            },
+            notes = "No focus effect | +10 hINT, +10 hWIS, +10 heroic resists",
+            slot = "Aug9",
+          },
+          Back = {
+            ids = {
+              71656,
+            },
+            item = "Shroud of the Surging Storm",
+            names = {
+              "Shroud of the Surging Storm",
+            },
+            slot = "Back",
+          },
+          Chest = {
+            ids = {
+              60474,
+            },
+            item = "Keeper's Ascendant Tunic of the Summoner",
+            names = {
+              "Keeper's Ascendant Tunic of the Summoner",
+            },
+            slot = "Chest",
+          },
+          Clicky = {
+            ids = {
+              56756,
+            },
+            item = "Icon of Scribe's Endurance",
+            names = {
+              "Icon of Scribe's Endurance",
+            },
+            slot = "Clicky",
+          },
+          Ear1 = {
+            ids = {
+              71574,
+            },
+            item = "Hoop of the Drakeborn",
+            names = {
+              "Hoop of the Drakeborn",
+            },
+            slot = "Ear1",
+          },
+          Ear2 = {
+            ids = {
+              71603,
+            },
+            item = "Grelian Earring of Uncertainty",
+            names = {
+              "Grelian Earring of Uncertainty",
+            },
+            slot = "Ear2",
+          },
+          Face = {
+            ids = {
+              71643,
+            },
+            item = "Entrancing Silk Veil",
+            names = {
+              "Entrancing Silk Veil",
+            },
+            slot = "Face",
+          },
+          Feet = {
+            ids = {
+              60501,
+            },
+            item = "Keeper's Ascendant Slippers of the Summoner",
+            names = {
+              "Keeper's Ascendant Slippers of the Summoner",
+            },
+            slot = "Feet",
+          },
+          Finger1 = {
+            ids = {
+              71625,
+            },
+            item = "Thought Sieve Ring",
+            names = {
+              "Thought Sieve Ring",
+            },
+            slot = "Finger1",
+          },
+          Finger2 = {
+            ids = {
+              71658,
+            },
+            item = "Stormeye Band",
+            names = {
+              "Stormeye Band",
+            },
+            slot = "Finger2",
+          },
+          Glyph1 = {
+            ids = {
+              79524,
+            },
+            item = "Mnemonic Glyph: Ward of the Conjurer",
+            names = {
+              "Mnemonic Glyph: Ward of the Conjurer",
+            },
+            slot = "Glyph1",
+          },
+          Glyph2 = {
+            ids = {
+              79525,
+            },
+            item = "Mnemonic Glyph: Circle of Magmaskin",
+            names = {
+              "Mnemonic Glyph: Circle of Magmaskin",
+            },
+            slot = "Glyph2",
+          },
+          Glyph3 = {
+            ids = {
+              79526,
+            },
+            item = "Imbued Glyph: Goner's Urgent Renewal",
+            names = {
+              "Imbued Glyph: Goner's Urgent Renewal",
+            },
+            slot = "Glyph3",
+          },
+          Hands = {
+            ids = {
+              60477,
+            },
+            item = "Keeper's Ascendant Gloves of the Summoner",
+            names = {
+              "Keeper's Ascendant Gloves of the Summoner",
+            },
+            slot = "Hands",
+          },
+          Head = {
+            ids = {
+              60473,
+            },
+            item = "Keeper's Ascendant Hat of the Summoner",
+            names = {
+              "Keeper's Ascendant Hat of the Summoner",
+            },
+            slot = "Head",
+          },
+          Legs = {
+            ids = {
+              60500,
+            },
+            item = "Keeper's Ascendant Leggings of the Summoner",
+            names = {
+              "Keeper's Ascendant Leggings of the Summoner",
+            },
+            slot = "Legs",
+          },
+          Neck = {
+            ids = {
+              71651,
+            },
+            item = "Choker of One Hundred Diamonds",
+            names = {
+              "Choker of One Hundred Diamonds",
+            },
+            slot = "Neck",
+          },
+          Pack1 = {
+            ids = {
+              82798,
+            },
+            item = "Spell Pack: Ward of the Conjurer",
+            names = {
+              "Spell Pack: Ward of the Conjurer",
+            },
+            slot = "Pack1",
+            spell = "Ward of the Conjurer",
+            spells = {
+              "Ward of the Conjurer",
+            },
+          },
+          Pack2 = {
+            ids = {
+              82799,
+            },
+            item = "Spell Pack: Circle of Magmaskin",
+            names = {
+              "Spell Pack: Circle of Magmaskin",
+            },
+            slot = "Pack2",
+            spell = "Circle of Magmaskin",
+            spells = {
+              "Circle of Magmaskin",
+            },
+          },
+          Pack3 = {
+            ids = {
+              82800,
+            },
+            item = "Spell Pack: Goner's Urgent Renewal",
+            names = {
+              "Spell Pack: Goner's Urgent Renewal",
+            },
+            slot = "Pack3",
+            spell = "Goner's Urgent Renewal",
+            spells = {
+              "Goner's Urgent Renewal",
+            },
+          },
+          Ranged = {
+            ids = {
+              60536,
+            },
+            item = "Spark of the Skies",
+            names = {
+              "Spark of the Skies",
+            },
+            slot = "Ranged",
+          },
+          RangedAug = {
+            ids = {
+              71659,
+            },
+            item = "Core of the Skies",
+            names = {
+              "Core of the Skies",
+            },
+            slot = "RangedAug",
+          },
+          Shadow = {
+            ids = {
+              62530,
+            },
+            item = "Shadow of a Legendary Magician Staff",
+            names = {
+              "Shadow of a Legendary Magician Staff",
+            },
+            slot = "Shadow",
+          },
+          Shoulder = {
+            ids = {
+              71635,
+            },
+            item = "Brimstone Spaulders",
+            names = {
+              "Brimstone Spaulders",
+            },
+            slot = "Shoulder",
+          },
+          Waist = {
+            ids = {
+              71650,
+            },
+            item = "Sash of Frigidity",
+            names = {
+              "Sash of Frigidity",
+            },
+            slot = "Waist",
+          },
+          Wrist1 = {
+            ids = {
+              60476,
+            },
+            item = "Keeper's Ascendant Wristband of the Summoner",
+            names = {
+              "Keeper's Ascendant Wristband of the Summoner",
+            },
+            slot = "Wrist1",
+          },
+          Wrist2 = {
+            ids = {
+              60502,
+            },
+            item = "Keeper's Eternal Bracer of the Summoner",
+            names = {
+              "Keeper's Eternal Bracer of the Summoner",
+            },
+            slot = "Wrist2",
+          },
+        },
+        Monk = {
+          Arms = {
+            ids = {
+              57711,
+            },
+            item = "Keeper's Ascendant Sleeves of the Focused",
+            names = {
+              "Keeper's Ascendant Sleeves of the Focused",
+            },
+            slot = "Arms",
+          },
+          Aug1 = {
+            ids = {
+              62551,
+              63017,
+            },
+            item = "Benevolent Extension",
+            names = {
+              "Benevolent Extension",
+              "Cryptic Clutch of Benevolent Extension",
+              "Vacant Vessel of Benevolent Extension",
+            },
+            notes = "+40% beneficial spell duration | +10 hWIS",
+            slot = "Aug1",
+          },
+          Aug2 = {
+            ids = {
+              62547,
+              62567,
+            },
+            item = "Noxious Demise",
+            names = {
+              "Noxious Demise",
+              "Cryptic Clutch of Noxious Demise",
+              "Vacant Vessel of Noxious Demise",
+            },
+            notes = "+10-60% poison spell damage | +5 hINT, +25 hPR",
+            slot = "Aug2",
+          },
+          Aug3 = {
+            ids = {
+              62556,
+              64050,
+            },
+            item = "Nimble Elusion",
+            names = {
+              "Nimble Elusion",
+              "Cryptic Clutch of Nimble Elusion",
+              "Vacant Vessel of Nimble Elusion",
+            },
+            notes = "+70% dodge | +10 hAGI",
+            slot = "Aug3",
+          },
+          Aug4 = {
+            ids = {
+              62555,
+              64049,
+            },
+            item = "Adept Guard",
+            names = {
+              "Adept Guard",
+              "Cryptic Clutch of Adept Guard",
+              "Vacant Vessel of Adept Guard",
+            },
+            notes = "+70% parry, +70% block | +10 hSTA",
+            slot = "Aug4",
+          },
+          Aug5 = {
+            ids = {
+              62554,
+              63020,
+            },
+            item = "Visceral Malice",
+            names = {
+              "Visceral Malice",
+              "Cryptic Clutch of Visceral Malice",
+              "Vacant Vessel of Visceral Malice",
+            },
+            notes = "+300% melee critical damage | +10 hSTR",
+            slot = "Aug5",
+          },
+          Aug6 = {
+            ids = {
+              62553,
+              63019,
+            },
+            item = "Wanton Assault",
+            names = {
+              "Wanton Assault",
+              "Cryptic Clutch of Wanton Assault",
+              "Vacant Vessel of Wanton Assault",
+            },
+            notes = "+21% double attack, +7% triple attack, +5% chance to hit | +10 hSTR",
+            slot = "Aug6",
+          },
+          Aug7 = {
+            ids = {
+              62558,
+              66533,
+            },
+            item = "Physical Prowess",
+            names = {
+              "Physical Prowess",
+              "Cryptic Clutch of Physical Prowess",
+              "Vacant Vessel of Physical Prowess",
+            },
+            notes = "No focus effect | +5 hSTR, +5 hSTA, +5 hAGI, +5 hDEX",
+            slot = "Aug7",
+          },
+          Back = {
+            ids = {
+              71665,
+            },
+            item = "Cloak of Deepshadow",
+            names = {
+              "Cloak of Deepshadow",
+            },
+            slot = "Back",
+          },
+          Chest = {
+            ids = {
+              57234,
+            },
+            item = "Keeper's Ascendant Shroud of the Focused",
+            names = {
+              "Keeper's Ascendant Shroud of the Focused",
+            },
+            slot = "Chest",
+          },
+          Clicky = {
+            ids = {
+              56757,
+            },
+            item = "Icon of Potent Prowess",
+            names = {
+              "Icon of Potent Prowess",
+            },
+            slot = "Clicky",
+          },
+          Ear1 = {
+            ids = {
+              71584,
+            },
+            item = "Cloudkiller's Bauble",
+            names = {
+              "Cloudkiller's Bauble",
+            },
+            slot = "Ear1",
+          },
+          Ear2 = {
+            ids = {
+              71668,
+            },
+            item = "Accursed Earhoop of Pain",
+            names = {
+              "Accursed Earhoop of Pain",
+            },
+            slot = "Ear2",
+          },
+          Face = {
+            ids = {
+              71626,
+            },
+            item = "Mask of the Dawn Scorcher",
+            names = {
+              "Mask of the Dawn Scorcher",
+            },
+            slot = "Face",
+          },
+          Feet = {
+            ids = {
+              59357,
+            },
+            item = "Keeper's Ascendant Tabis of the Focused",
+            names = {
+              "Keeper's Ascendant Tabis of the Focused",
+            },
+            slot = "Feet",
+          },
+          Finger1 = {
+            ids = {
+              71634,
+            },
+            item = "Glimmering Fire Opal Band",
+            names = {
+              "Glimmering Fire Opal Band",
+            },
+            slot = "Finger1",
+          },
+          Finger2 = {
+            ids = {
+              71588,
+            },
+            item = "Bloodstained Ring of Evisceration",
+            names = {
+              "Bloodstained Ring of Evisceration",
+            },
+            slot = "Finger2",
+          },
+          Glyph1 = {
+            ids = {
+              80074,
+            },
+            item = "Imbued Glyph: Ancient: Arachnid Fang",
+            names = {
+              "Imbued Glyph: Ancient: Arachnid Fang",
+            },
+            slot = "Glyph1",
+          },
+          Hands = {
+            ids = {
+              59169,
+            },
+            item = "Keeper's Ascendant Gloves of the Focused",
+            names = {
+              "Keeper's Ascendant Gloves of the Focused",
+            },
+            slot = "Hands",
+          },
+          Head = {
+            ids = {
+              57233,
+            },
+            item = "Keeper's Ascendant Cap of the Focused",
+            names = {
+              "Keeper's Ascendant Cap of the Focused",
+            },
+            slot = "Head",
+          },
+          Legs = {
+            ids = {
+              59170,
+            },
+            item = "Keeper's Ascendant Leggings of the Focused",
+            names = {
+              "Keeper's Ascendant Leggings of the Focused",
+            },
+            slot = "Legs",
+          },
+          Neck = {
+            ids = {
+              71612,
+            },
+            item = "Necklace of Sandstorms",
+            names = {
+              "Necklace of Sandstorms",
+            },
+            slot = "Neck",
+          },
+          Pack1 = {
+            ids = {
+              82655,
+            },
+            item = "Tome Pack: Ancient: Arachnid Fang",
+            names = {
+              "Tome Pack: Ancient: Arachnid Fang",
+            },
+            slot = "Pack1",
+            spell = "Ancient: Arachnid Fang",
+            spells = {
+              "Ancient: Arachnid Fang",
+            },
+          },
+          Ranged = {
+            ids = {
+              55052,
+            },
+            item = "Head of the Putrid Drake",
+            names = {
+              "Head of the Putrid Drake",
+            },
+            slot = "Ranged",
+          },
+          RangedAug = {
+            ids = {
+              71620,
+            },
+            item = "Preserved Eye of the Putrid Drake",
+            names = {
+              "Preserved Eye of the Putrid Drake",
+            },
+            slot = "RangedAug",
+          },
+          Shadow = {
+            ids = {
+              60549,
+            },
+            item = "Shadow of a Legendary Monk Weapon",
+            names = {
+              "Shadow of a Legendary Monk Weapon",
+            },
+            slot = "Shadow",
+          },
+          Shoulder = {
+            ids = {
+              71654,
+            },
+            item = "Lightning Singed Mantle",
+            names = {
+              "Lightning Singed Mantle",
+            },
+            slot = "Shoulder",
+          },
+          Waist = {
+            ids = {
+              71657,
+            },
+            item = "Thundercrash Girdle",
+            names = {
+              "Thundercrash Girdle",
+            },
+            slot = "Waist",
+          },
+          Wrist1 = {
+            ids = {
+              59168,
+            },
+            item = "Keeper's Ascendant Wristband of the Focused",
+            names = {
+              "Keeper's Ascendant Wristband of the Focused",
+            },
+            slot = "Wrist1",
+          },
+          Wrist2 = {
+            ids = {
+              59358,
+            },
+            item = "Keeper's Eternal Bracer of the Focused",
+            names = {
+              "Keeper's Eternal Bracer of the Focused",
+            },
+            slot = "Wrist2",
+          },
+        },
+        Necromancer = {
+          Arms = {
+            ids = {
+              60513,
+            },
+            item = "Keeper's Ascendant Armband of the Grave",
+            names = {
+              "Keeper's Ascendant Armband of the Grave",
+            },
+            slot = "Arms",
+          },
+          Aug1 = {
+            ids = {
+              62551,
+              63017,
+            },
+            item = "Benevolent Extension",
+            names = {
+              "Benevolent Extension",
+              "Cryptic Clutch of Benevolent Extension",
+              "Vacant Vessel of Benevolent Extension",
+            },
+            notes = "+40% beneficial spell duration | +10 hWIS",
+            slot = "Aug1",
+          },
+          Aug10 = {
+            ids = {
+              62552,
+              63018,
+            },
+            item = "Expanded Reach",
+            names = {
+              "Expanded Reach",
+              "Cryptic Clutch of Expanded Reach",
+              "Vacant Vessel of Expanded Reach",
+            },
+            notes = "+50% spell range | +10 hWIS, +10 hINT",
+            slot = "Aug10",
+          },
+          Aug11 = {
+            ids = {
+              62556,
+              64050,
+            },
+            item = "Nimble Elusion",
+            names = {
+              "Nimble Elusion",
+              "Cryptic Clutch of Nimble Elusion",
+              "Vacant Vessel of Nimble Elusion",
+            },
+            notes = "+70% dodge | +10 hAGI",
+            slot = "Aug11",
+          },
+          Aug12 = {
+            ids = {
+              62559,
+              66720,
+            },
+            item = "Mental Prowess",
+            names = {
+              "Mental Prowess",
+              "Cryptic Clutch of Mental Prowess",
+              "Vacant Vessel of Mental Prowess",
+            },
+            notes = "No focus effect | +10 hINT, +10 hWIS, +10 heroic resists",
+            slot = "Aug12",
+          },
+          Aug2 = {
+            ids = {
+              62543,
+              62563,
+            },
+            item = "Benevolent Alacrity",
+            names = {
+              "Benevolent Alacrity",
+              "Cryptic Clutch of Benevolent Alacrity",
+              "Vacant Vessel of Benevolent Alacrity",
+            },
+            notes = "-40% beneficial spell cast time | +10 hWIS",
+            slot = "Aug2",
+          },
+          Aug3 = {
+            ids = {
+              62540,
+              62560,
+            },
+            item = "Malevolent Efficiency",
+            names = {
+              "Malevolent Efficiency",
+              "Cryptic Clutch of Malevolent Efficiency",
+              "Vacant Vessel of Malevolent Efficiency",
+            },
+            notes = "-11-33% detrimental spell mana cost | +10 hINT",
+            slot = "Aug3",
+          },
+          Aug4 = {
+            ids = {
+              62550,
+              63016,
+            },
+            item = "Malevolent Extension",
+            names = {
+              "Malevolent Extension",
+              "Cryptic Clutch of Malevolent Extension",
+              "Vacant Vessel of Malevolent Extension",
+            },
+            notes = "+40% detrimental spell duration | +10 hINT",
+            slot = "Aug4",
+          },
+          Aug5 = {
+            ids = {
+              62542,
+              62562,
+            },
+            item = "Malevolent Alacrity",
+            names = {
+              "Malevolent Alacrity",
+              "Cryptic Clutch of Malevolent Alacrity",
+              "Vacant Vessel of Malevolent Alacrity",
+            },
+            notes = "-40% detrimental spell cast time | +10 hINT",
+            slot = "Aug5",
+          },
+          Aug6 = {
+            ids = {
+              62545,
+              62565,
+            },
+            item = "Fiery Demise",
+            names = {
+              "Fiery Demise",
+              "Cryptic Clutch of Fiery Demise",
+              "Vacant Vessel of Fiery Demise",
+            },
+            notes = "+10-60% fire spell damage | +5 hINT, +25 hFR",
+            slot = "Aug6",
+          },
+          Aug7 = {
+            ids = {
+              62547,
+              62567,
+            },
+            item = "Noxious Demise",
+            names = {
+              "Noxious Demise",
+              "Cryptic Clutch of Noxious Demise",
+              "Vacant Vessel of Noxious Demise",
+            },
+            notes = "+10-60% poison spell damage | +5 hINT, +25 hPR",
+            slot = "Aug7",
+          },
+          Aug8 = {
+            ids = {
+              62544,
+              62564,
+            },
+            item = "Arcane Demise",
+            names = {
+              "Arcane Demise",
+              "Cryptic Clutch of Arcane Demise",
+              "Vacant Vessel of Arcane Demise",
+            },
+            notes = "+10-60% magic spell damage | +5 hINT, +25 hMR",
+            slot = "Aug8",
+          },
+          Aug9 = {
+            ids = {
+              62548,
+              62568,
+            },
+            item = "Festering Demise",
+            names = {
+              "Festering Demise",
+              "Cryptic Clutch of Festering Demise",
+              "Vacant Vessel of Festering Demise",
+            },
+            notes = "+10-60% disease spell damage | +5 hINT, +25 hDR",
+            slot = "Aug9",
+          },
+          Back = {
+            ids = {
+              71656,
+            },
+            item = "Shroud of the Surging Storm",
+            names = {
+              "Shroud of the Surging Storm",
+            },
+            slot = "Back",
+          },
+          Chest = {
+            ids = {
+              60512,
+            },
+            item = "Keeper's Ascendant Tunic of the Grave",
+            names = {
+              "Keeper's Ascendant Tunic of the Grave",
+            },
+            slot = "Chest",
+          },
+          Clicky = {
+            ids = {
+              56756,
+            },
+            item = "Icon of Scribe's Endurance",
+            names = {
+              "Icon of Scribe's Endurance",
+            },
+            slot = "Clicky",
+          },
+          Ear1 = {
+            ids = {
+              71574,
+            },
+            item = "Hoop of the Drakeborn",
+            names = {
+              "Hoop of the Drakeborn",
+            },
+            slot = "Ear1",
+          },
+          Ear2 = {
+            ids = {
+              71603,
+            },
+            item = "Grelian Earring of Uncertainty",
+            names = {
+              "Grelian Earring of Uncertainty",
+            },
+            slot = "Ear2",
+          },
+          Face = {
+            ids = {
+              71643,
+            },
+            item = "Entrancing Silk Veil",
+            names = {
+              "Entrancing Silk Veil",
+            },
+            slot = "Face",
+          },
+          Feet = {
+            ids = {
+              60517,
+            },
+            item = "Keeper's Ascendant Sandals of the Grave",
+            names = {
+              "Keeper's Ascendant Sandals of the Grave",
+            },
+            slot = "Feet",
+          },
+          Finger1 = {
+            ids = {
+              71625,
+            },
+            item = "Thought Sieve Ring",
+            names = {
+              "Thought Sieve Ring",
+            },
+            slot = "Finger1",
+          },
+          Finger2 = {
+            ids = {
+              71658,
+            },
+            item = "Stormeye Band",
+            names = {
+              "Stormeye Band",
+            },
+            slot = "Finger2",
+          },
+          Glyph1 = {
+            ids = {
+              79527,
+            },
+            item = "Mnemonic Glyph: Sacrilege of the Wraith",
+            names = {
+              "Mnemonic Glyph: Sacrilege of the Wraith",
+            },
+            slot = "Glyph1",
+          },
+          Glyph2 = {
+            ids = {
+              79528,
+            },
+            item = "Mnemonic Glyph: Dull Agony",
+            names = {
+              "Mnemonic Glyph: Dull Agony",
+            },
+            slot = "Glyph2",
+          },
+          Glyph3 = {
+            ids = {
+              79526,
+            },
+            item = "Imbued Glyph: Goner's Urgent Renewal",
+            names = {
+              "Imbued Glyph: Goner's Urgent Renewal",
+            },
+            slot = "Glyph3",
+          },
+          Hands = {
+            ids = {
+              60515,
+            },
+            item = "Keeper's Ascendant Handguards of the Grave",
+            names = {
+              "Keeper's Ascendant Handguards of the Grave",
+            },
+            slot = "Hands",
+          },
+          Head = {
+            ids = {
+              60511,
+            },
+            item = "Keeper's Ascendant Cap of the Grave",
+            names = {
+              "Keeper's Ascendant Cap of the Grave",
+            },
+            slot = "Head",
+          },
+          Legs = {
+            ids = {
+              60516,
+            },
+            item = "Keeper's Ascendant Pants of the Grave",
+            names = {
+              "Keeper's Ascendant Pants of the Grave",
+            },
+            slot = "Legs",
+          },
+          Neck = {
+            ids = {
+              71651,
+            },
+            item = "Choker of One Hundred Diamonds",
+            names = {
+              "Choker of One Hundred Diamonds",
+            },
+            slot = "Neck",
+          },
+          Pack1 = {
+            ids = {
+              82805,
+            },
+            item = "Spell Pack: Sacrilege of the Wraith",
+            names = {
+              "Spell Pack: Sacrilege of the Wraith",
+            },
+            slot = "Pack1",
+            spell = "Sacrilege of the Wraith",
+            spells = {
+              "Sacrilege of the Wraith",
+            },
+          },
+          Pack2 = {
+            ids = {
+              82806,
+            },
+            item = "Spell Pack: Dull Agony",
+            names = {
+              "Spell Pack: Dull Agony",
+            },
+            slot = "Pack2",
+            spell = "Dull Agony",
+            spells = {
+              "Dull Agony",
+            },
+          },
+          Pack3 = {
+            ids = {
+              82800,
+            },
+            item = "Spell Pack: Goner's Urgent Renewal",
+            names = {
+              "Spell Pack: Goner's Urgent Renewal",
+            },
+            slot = "Pack3",
+            spell = "Goner's Urgent Renewal",
+            spells = {
+              "Goner's Urgent Renewal",
+            },
+          },
+          Ranged = {
+            ids = {
+              60536,
+            },
+            item = "Spark of the Skies",
+            names = {
+              "Spark of the Skies",
+            },
+            slot = "Ranged",
+          },
+          RangedAug = {
+            ids = {
+              71659,
+            },
+            item = "Core of the Skies",
+            names = {
+              "Core of the Skies",
+            },
+            slot = "RangedAug",
+          },
+          Shadow = {
+            ids = {
+              62532,
+            },
+            item = "Shadow of a Legendary Necromancer Shield",
+            names = {
+              "Shadow of a Legendary Necromancer Shield",
+            },
+            slot = "Shadow",
+          },
+          Shoulder = {
+            ids = {
+              71635,
+            },
+            item = "Brimstone Spaulders",
+            names = {
+              "Brimstone Spaulders",
+            },
+            slot = "Shoulder",
+          },
+          Waist = {
+            ids = {
+              71650,
+            },
+            item = "Sash of Frigidity",
+            names = {
+              "Sash of Frigidity",
+            },
+            slot = "Waist",
+          },
+          Wrist1 = {
+            ids = {
+              60514,
+            },
+            item = "Keeper's Ascendant Bracer of the Grave",
+            names = {
+              "Keeper's Ascendant Bracer of the Grave",
+            },
+            slot = "Wrist1",
+          },
+          Wrist2 = {
+            ids = {
+              60518,
+            },
+            item = "Keeper's Eternal Bracer of the Grave",
+            names = {
+              "Keeper's Eternal Bracer of the Grave",
+            },
+            slot = "Wrist2",
+          },
+        },
+        Paladin = {
+          Arms = {
+            ids = {
+              54962,
+            },
+            item = "Keeper's Ascendant Sleeves of the Defender",
+            names = {
+              "Keeper's Ascendant Sleeves of the Defender",
+            },
+            slot = "Arms",
+          },
+          Aug1 = {
+            ids = {
+              62541,
+              62561,
+            },
+            item = "Benevolent Efficiency",
+            names = {
+              "Benevolent Efficiency",
+              "Cryptic Clutch of Benevolent Efficiency",
+              "Vacant Vessel of Benevolent Efficiency",
+            },
+            notes = "-11-33% beneficial spell mana cost | +10 hWIS",
+            slot = "Aug1",
+          },
+          Aug10 = {
+            ids = {
+              62558,
+              66533,
+            },
+            item = "Physical Prowess",
+            names = {
+              "Physical Prowess",
+              "Cryptic Clutch of Physical Prowess",
+              "Vacant Vessel of Physical Prowess",
+            },
+            notes = "No focus effect | +5 hSTR, +5 hSTA, +5 hAGI, +5 hDEX",
+            slot = "Aug10",
+          },
+          Aug2 = {
+            ids = {
+              62551,
+              63017,
+            },
+            item = "Benevolent Extension",
+            names = {
+              "Benevolent Extension",
+              "Cryptic Clutch of Benevolent Extension",
+              "Vacant Vessel of Benevolent Extension",
+            },
+            notes = "+40% beneficial spell duration | +10 hWIS",
+            slot = "Aug2",
+          },
+          Aug3 = {
+            ids = {
+              62544,
+              62564,
+            },
+            item = "Arcane Demise",
+            names = {
+              "Arcane Demise",
+              "Cryptic Clutch of Arcane Demise",
+              "Vacant Vessel of Arcane Demise",
+            },
+            notes = "+10-60% magic spell damage | +5 hINT, +25 hMR",
+            slot = "Aug3",
+          },
+          Aug4 = {
+            ids = {
+              62552,
+              63018,
+            },
+            item = "Expanded Reach",
+            names = {
+              "Expanded Reach",
+              "Cryptic Clutch of Expanded Reach",
+              "Vacant Vessel of Expanded Reach",
+            },
+            notes = "+50% spell range | +10 hWIS, +10 hINT",
+            slot = "Aug4",
+          },
+          Aug5 = {
+            ids = {
+              62549,
+              62569,
+            },
+            item = "Merciful Mending",
+            names = {
+              "Merciful Mending",
+              "Cryptic Clutch of Merciful Mending",
+              "Vacant Vessel of Merciful Mending",
+            },
+            notes = "+10-60% healing | +10 hWIS",
+            slot = "Aug5",
+          },
+          Aug6 = {
+            ids = {
+              62556,
+              64050,
+            },
+            item = "Nimble Elusion",
+            names = {
+              "Nimble Elusion",
+              "Cryptic Clutch of Nimble Elusion",
+              "Vacant Vessel of Nimble Elusion",
+            },
+            notes = "+70% dodge | +10 hAGI",
+            slot = "Aug6",
+          },
+          Aug7 = {
+            ids = {
+              62555,
+              64049,
+            },
+            item = "Adept Guard",
+            names = {
+              "Adept Guard",
+              "Cryptic Clutch of Adept Guard",
+              "Vacant Vessel of Adept Guard",
+            },
+            notes = "+70% parry, +70% block | +10 hSTA",
+            slot = "Aug7",
+          },
+          Aug8 = {
+            ids = {
+              62554,
+              63020,
+            },
+            item = "Visceral Malice",
+            names = {
+              "Visceral Malice",
+              "Cryptic Clutch of Visceral Malice",
+              "Vacant Vessel of Visceral Malice",
+            },
+            notes = "+300% melee critical damage | +10 hSTR",
+            slot = "Aug8",
+          },
+          Aug9 = {
+            ids = {
+              62553,
+              63019,
+            },
+            item = "Wanton Assault",
+            names = {
+              "Wanton Assault",
+              "Cryptic Clutch of Wanton Assault",
+              "Vacant Vessel of Wanton Assault",
+            },
+            notes = "+21% double attack, +7% triple attack, +5% chance to hit | +10 hSTR",
+            slot = "Aug9",
+          },
+          Back = {
+            ids = {
+              71596,
+            },
+            item = "Cape of Dragon Scales",
+            names = {
+              "Cape of Dragon Scales",
+            },
+            slot = "Back",
+          },
+          Chest = {
+            ids = {
+              54961,
+            },
+            item = "Keeper's Ascendant Chestpiece of the Defender",
+            names = {
+              "Keeper's Ascendant Chestpiece of the Defender",
+            },
+            slot = "Chest",
+          },
+          Clicky = {
+            ids = {
+              56755,
+            },
+            item = "Icon of Unwavering Defense",
+            names = {
+              "Icon of Unwavering Defense",
+            },
+            slot = "Clicky",
+          },
+          Ear1 = {
+            ids = {
+              71624,
+            },
+            item = "Weighted Loop of Eternal Battle",
+            names = {
+              "Weighted Loop of Eternal Battle",
+            },
+            slot = "Ear1",
+          },
+          Ear2 = {
+            ids = {
+              71593,
+            },
+            item = "Hoop of the Nest Defender",
+            names = {
+              "Hoop of the Nest Defender",
+            },
+            slot = "Ear2",
+          },
+          Face = {
+            ids = {
+              71667,
+            },
+            item = "Face of Unfeeling",
+            names = {
+              "Face of Unfeeling",
+            },
+            slot = "Face",
+          },
+          Feet = {
+            ids = {
+              55037,
+            },
+            item = "Keeper's Ascendant Boots of the Defender",
+            names = {
+              "Keeper's Ascendant Boots of the Defender",
+            },
+            slot = "Feet",
+          },
+          Finger1 = {
+            ids = {
+              71608,
+            },
+            item = "Ring of Unsung Legends",
+            names = {
+              "Ring of Unsung Legends",
+            },
+            slot = "Finger1",
+          },
+          Finger2 = {
+            ids = {
+              71562,
+            },
+            item = "Ring of Living Malachite",
+            names = {
+              "Ring of Living Malachite",
+            },
+            slot = "Finger2",
+          },
+          Glyph1 = {
+            ids = {
+              79538,
+            },
+            item = "Mnemonic Glyph: Armor of the Savior",
+            names = {
+              "Mnemonic Glyph: Armor of the Savior",
+            },
+            slot = "Glyph1",
+          },
+          Glyph2 = {
+            ids = {
+              79539,
+            },
+            item = "Mnemonic Glyph: Virtuous Fervor",
+            names = {
+              "Mnemonic Glyph: Virtuous Fervor",
+            },
+            slot = "Glyph2",
+          },
+          Glyph3 = {
+            ids = {
+              79540,
+            },
+            item = "Imbued Glyph: Wave of the Stillmoon",
+            names = {
+              "Imbued Glyph: Wave of the Stillmoon",
+            },
+            slot = "Glyph3",
+          },
+          Hands = {
+            ids = {
+              54964,
+            },
+            item = "Keeper's Ascendant Mitts of the Defender",
+            names = {
+              "Keeper's Ascendant Mitts of the Defender",
+            },
+            slot = "Hands",
+          },
+          Head = {
+            ids = {
+              54960,
+            },
+            item = "Keeper's Ascendant Coif of the Defender",
+            names = {
+              "Keeper's Ascendant Coif of the Defender",
+            },
+            slot = "Head",
+          },
+          Legs = {
+            ids = {
+              54965,
+            },
+            item = "Keeper's Ascendant Leggings of the Defender",
+            names = {
+              "Keeper's Ascendant Leggings of the Defender",
+            },
+            slot = "Legs",
+          },
+          Neck = {
+            ids = {
+              71597,
+            },
+            item = "Necklace of Grimspirit Beads",
+            names = {
+              "Necklace of Grimspirit Beads",
+            },
+            slot = "Neck",
+          },
+          Pack1 = {
+            ids = {
+              82810,
+            },
+            item = "Spell Pack: Armor of the Savior",
+            names = {
+              "Spell Pack: Armor of the Savior",
+            },
+            slot = "Pack1",
+            spell = "Armor of the Savior",
+            spells = {
+              "Armor of the Savior",
+            },
+          },
+          Pack2 = {
+            ids = {
+              82811,
+            },
+            item = "Spell Pack: Virtuous Fervor",
+            names = {
+              "Spell Pack: Virtuous Fervor",
+            },
+            slot = "Pack2",
+            spell = "Virtuous Fervor",
+            spells = {
+              "Virtuous Fervor",
+            },
+          },
+          Pack3 = {
+            ids = {
+              82812,
+            },
+            item = "Spell Pack: Wave of the Stillmoon",
+            names = {
+              "Spell Pack: Wave of the Stillmoon",
+            },
+            slot = "Pack3",
+            spell = "Wave of the Stillmoon",
+            spells = {
+              "Wave of the Stillmoon",
+            },
+          },
+          Ranged = {
+            ids = {
+              71627,
+            },
+            item = "Branch of the Twisting Tree",
+            names = {
+              "Branch of the Twisting Tree",
+            },
+            slot = "Ranged",
+          },
+          RangedAug = {
+            ids = {
+              55053,
+            },
+            item = "Fallen Leaf of the Twisting Tree",
+            names = {
+              "Fallen Leaf of the Twisting Tree",
+            },
+            slot = "RangedAug",
+          },
+          Shadow = {
+            ids = {
+              60545,
+            },
+            item = "Shadow of a Legendary Paladin Shield",
+            names = {
+              "Shadow of a Legendary Paladin Shield",
+            },
+            slot = "Shadow",
+          },
+          Shoulder = {
+            ids = {
+              71590,
+            },
+            item = "Dark-Touched Mantle",
+            names = {
+              "Dark-Touched Mantle",
+            },
+            slot = "Shoulder",
+          },
+          Waist = {
+            ids = {
+              71664,
+            },
+            item = "Belt of the Black Dragon",
+            names = {
+              "Belt of the Black Dragon",
+            },
+            slot = "Waist",
+          },
+          Wrist1 = {
+            ids = {
+              54963,
+            },
+            item = "Keeper's Ascendant Wristguard of the Defender",
+            names = {
+              "Keeper's Ascendant Wristguard of the Defender",
+            },
+            slot = "Wrist1",
+          },
+          Wrist2 = {
+            ids = {
+              55050,
+            },
+            item = "Keeper's Eternal Bracer of the Defender",
+            names = {
+              "Keeper's Eternal Bracer of the Defender",
+            },
+            slot = "Wrist2",
+          },
+        },
+        Ranger = {
+          Arms = {
+            ids = {
+              60521,
+            },
+            item = "Keeper's Ascendant Sleeves of Journeys",
+            names = {
+              "Keeper's Ascendant Sleeves of Journeys",
+            },
+            slot = "Arms",
+          },
+          Aug1 = {
+            ids = {
+              62551,
+              63017,
+            },
+            item = "Benevolent Extension",
+            names = {
+              "Benevolent Extension",
+              "Cryptic Clutch of Benevolent Extension",
+              "Vacant Vessel of Benevolent Extension",
+            },
+            notes = "+40% beneficial spell duration | +10 hWIS",
+            slot = "Aug1",
+          },
+          Aug10 = {
+            ids = {
+              62554,
+              63020,
+            },
+            item = "Visceral Malice",
+            names = {
+              "Visceral Malice",
+              "Cryptic Clutch of Visceral Malice",
+              "Vacant Vessel of Visceral Malice",
+            },
+            notes = "+300% melee critical damage | +10 hSTR",
+            slot = "Aug10",
+          },
+          Aug11 = {
+            ids = {
+              62553,
+              63019,
+            },
+            item = "Wanton Assault",
+            names = {
+              "Wanton Assault",
+              "Cryptic Clutch of Wanton Assault",
+              "Vacant Vessel of Wanton Assault",
+            },
+            notes = "+21% double attack, +7% triple attack, +5% chance to hit | +10 hSTR",
+            slot = "Aug11",
+          },
+          Aug12 = {
+            ids = {
+              62557,
+              64326,
+            },
+            item = "Lethal Barrage",
+            names = {
+              "Lethal Barrage",
+              "Cryptic Clutch of Lethal Barrage",
+              "Vacant Vessel of Lethal Barrage",
+            },
+            notes = "+28% archery and throwing chance to hit | +20 hDEX",
+            slot = "Aug12",
+          },
+          Aug2 = {
+            ids = {
+              62540,
+              62560,
+            },
+            item = "Malevolent Efficiency",
+            names = {
+              "Malevolent Efficiency",
+              "Cryptic Clutch of Malevolent Efficiency",
+              "Vacant Vessel of Malevolent Efficiency",
+            },
+            notes = "-11-33% detrimental spell mana cost | +10 hINT",
+            slot = "Aug2",
+          },
+          Aug3 = {
+            ids = {
+              62550,
+              63016,
+            },
+            item = "Malevolent Extension",
+            names = {
+              "Malevolent Extension",
+              "Cryptic Clutch of Malevolent Extension",
+              "Vacant Vessel of Malevolent Extension",
+            },
+            notes = "+40% detrimental spell duration | +10 hINT",
+            slot = "Aug3",
+          },
+          Aug4 = {
+            ids = {
+              62545,
+              62565,
+            },
+            item = "Fiery Demise",
+            names = {
+              "Fiery Demise",
+              "Cryptic Clutch of Fiery Demise",
+              "Vacant Vessel of Fiery Demise",
+            },
+            notes = "+10-60% fire spell damage | +5 hINT, +25 hFR",
+            slot = "Aug4",
+          },
+          Aug5 = {
+            ids = {
+              62544,
+              62564,
+            },
+            item = "Arcane Demise",
+            names = {
+              "Arcane Demise",
+              "Cryptic Clutch of Arcane Demise",
+              "Vacant Vessel of Arcane Demise",
+            },
+            notes = "+10-60% magic spell damage | +5 hINT, +25 hMR",
+            slot = "Aug5",
+          },
+          Aug6 = {
+            ids = {
+              62552,
+              63018,
+            },
+            item = "Expanded Reach",
+            names = {
+              "Expanded Reach",
+              "Cryptic Clutch of Expanded Reach",
+              "Vacant Vessel of Expanded Reach",
+            },
+            notes = "+50% spell range | +10 hWIS, +10 hINT",
+            slot = "Aug6",
+          },
+          Aug7 = {
+            ids = {
+              62549,
+              62569,
+            },
+            item = "Merciful Mending",
+            names = {
+              "Merciful Mending",
+              "Cryptic Clutch of Merciful Mending",
+              "Vacant Vessel of Merciful Mending",
+            },
+            notes = "+10-60% healing | +10 hWIS",
+            slot = "Aug7",
+          },
+          Aug8 = {
+            ids = {
+              62556,
+              64050,
+            },
+            item = "Nimble Elusion",
+            names = {
+              "Nimble Elusion",
+              "Cryptic Clutch of Nimble Elusion",
+              "Vacant Vessel of Nimble Elusion",
+            },
+            notes = "+70% dodge | +10 hAGI",
+            slot = "Aug8",
+          },
+          Aug9 = {
+            ids = {
+              62555,
+              64049,
+            },
+            item = "Adept Guard",
+            names = {
+              "Adept Guard",
+              "Cryptic Clutch of Adept Guard",
+              "Vacant Vessel of Adept Guard",
+            },
+            notes = "+70% parry, +70% block | +10 hSTA",
+            slot = "Aug9",
+          },
+          Back = {
+            ids = {
+              71656,
+            },
+            item = "Shroud of the Surging Storm",
+            names = {
+              "Shroud of the Surging Storm",
+            },
+            slot = "Back",
+          },
+          Chest = {
+            ids = {
+              60520,
+            },
+            item = "Keeper's Ascendant Vest of Journeys",
+            names = {
+              "Keeper's Ascendant Vest of Journeys",
+            },
+            slot = "Chest",
+          },
+          Clicky = {
+            ids = {
+              56757,
+            },
+            item = "Icon of Potent Prowess",
+            names = {
+              "Icon of Potent Prowess",
+            },
+            slot = "Clicky",
+          },
+          Ear1 = {
+            ids = {
+              71584,
+            },
+            item = "Cloudkiller's Bauble",
+            names = {
+              "Cloudkiller's Bauble",
+            },
+            slot = "Ear1",
+          },
+          Ear2 = {
+            ids = {
+              71603,
+            },
+            item = "Grelian Earring of Uncertainty",
+            names = {
+              "Grelian Earring of Uncertainty",
+            },
+            slot = "Ear2",
+          },
+          Face = {
+            ids = {
+              71626,
+            },
+            item = "Mask of the Dawn Scorcher",
+            names = {
+              "Mask of the Dawn Scorcher",
+            },
+            slot = "Face",
+          },
+          Feet = {
+            ids = {
+              60525,
+            },
+            item = "Keeper's Ascendant Boots of Journeys",
+            names = {
+              "Keeper's Ascendant Boots of Journeys",
+            },
+            slot = "Feet",
+          },
+          Finger1 = {
+            ids = {
+              71634,
+            },
+            item = "Glimmering Fire Opal Band",
+            names = {
+              "Glimmering Fire Opal Band",
+            },
+            slot = "Finger1",
+          },
+          Finger2 = {
+            ids = {
+              71658,
+            },
+            item = "Stormeye Band",
+            names = {
+              "Stormeye Band",
+            },
+            slot = "Finger2",
+          },
+          Glyph1 = {
+            ids = {
+              80063,
+            },
+            item = "Mnemonic Glyph: Snarl of the Predator",
+            names = {
+              "Mnemonic Glyph: Snarl of the Predator",
+            },
+            slot = "Glyph1",
+          },
+          Glyph2 = {
+            ids = {
+              80064,
+            },
+            item = "Mnemonic Glyph: Guard of Thundercrest",
+            names = {
+              "Mnemonic Glyph: Guard of Thundercrest",
+            },
+            slot = "Glyph2",
+          },
+          Glyph3 = {
+            ids = {
+              80065,
+            },
+            item = "Mnemonic Glyph: Call of Storms",
+            names = {
+              "Mnemonic Glyph: Call of Storms",
+            },
+            slot = "Glyph3",
+          },
+          Glyph4 = {
+            ids = {
+              80066,
+            },
+            item = "Imbued Glyph: Jolting Thunderkicks",
+            names = {
+              "Imbued Glyph: Jolting Thunderkicks",
+            },
+            slot = "Glyph4",
+          },
+          Hands = {
+            ids = {
+              60523,
+            },
+            item = "Keeper's Ascendant Gloves of Journeys",
+            names = {
+              "Keeper's Ascendant Gloves of Journeys",
+            },
+            slot = "Hands",
+          },
+          Head = {
+            ids = {
+              60519,
+            },
+            item = "Keeper's Ascendant Cap of Journeys",
+            names = {
+              "Keeper's Ascendant Cap of Journeys",
+            },
+            slot = "Head",
+          },
+          Legs = {
+            ids = {
+              60524,
+            },
+            item = "Keeper's Ascendant Legguards of Journeys",
+            names = {
+              "Keeper's Ascendant Legguards of Journeys",
+            },
+            slot = "Legs",
+          },
+          Neck = {
+            ids = {
+              71651,
+            },
+            item = "Choker of One Hundred Diamonds",
+            names = {
+              "Choker of One Hundred Diamonds",
+            },
+            slot = "Neck",
+          },
+          Pack1 = {
+            ids = {
+              82813,
+            },
+            item = "Spell Pack: Snarl of the Predator",
+            names = {
+              "Spell Pack: Snarl of the Predator",
+            },
+            slot = "Pack1",
+            spell = "Snarl of the Predator",
+            spells = {
+              "Snarl of the Predator",
+            },
+          },
+          Pack2 = {
+            ids = {
+              82814,
+            },
+            item = "Spell Pack: Guard of Thundercrest",
+            names = {
+              "Spell Pack: Guard of Thundercrest",
+            },
+            slot = "Pack2",
+            spell = "Guard of Thundercrest",
+            spells = {
+              "Guard of Thundercrest",
+            },
+          },
+          Pack3 = {
+            ids = {
+              82815,
+            },
+            item = "Spell Pack: Call of Storms",
+            names = {
+              "Spell Pack: Call of Storms",
+            },
+            slot = "Pack3",
+            spell = "Call of Storms",
+            spells = {
+              "Call of Storms",
+            },
+          },
+          Pack4 = {
+            ids = {
+              82816,
+            },
+            item = "Tome Pack: Jolting Thunderkicks",
+            names = {
+              "Tome Pack: Jolting Thunderkicks",
+            },
+            slot = "Pack4",
+            spell = "Jolting Thunderkicks",
+            spells = {
+              "Jolting Thunderkicks",
+            },
+          },
+          Pack5 = {
+            ids = {
+              50150,
+            },
+            item = "Spell Pack: Flame and Frost",
+            names = {
+              "Spell Pack: Flame and Frost",
+            },
+            slot = "Pack5",
+            spell = "Flame and Frost",
+            spells = {
+              "Flame and Frost",
+            },
+          },
+          Ranged = {
+            ids = {
+              71627,
+            },
+            item = "Branch of the Twisting Tree",
+            names = {
+              "Branch of the Twisting Tree",
+            },
+            slot = "Ranged",
+          },
+          RangedAug = {
+            ids = {
+              55053,
+            },
+            item = "Fallen Leaf of the Twisting Tree",
+            names = {
+              "Fallen Leaf of the Twisting Tree",
+            },
+            slot = "RangedAug",
+          },
+          Shadow = {
+            ids = {
+              62533,
+            },
+            item = "Shadow of a Legendary Ranger Shield",
+            names = {
+              "Shadow of a Legendary Ranger Shield",
+            },
+            slot = "Shadow",
+          },
+          Shoulder = {
+            ids = {
+              71654,
+            },
+            item = "Lightning Singed Mantle",
+            names = {
+              "Lightning Singed Mantle",
+            },
+            slot = "Shoulder",
+          },
+          Waist = {
+            ids = {
+              71664,
+            },
+            item = "Belt of the Black Dragon",
+            names = {
+              "Belt of the Black Dragon",
+            },
+            slot = "Waist",
+          },
+          Wrist1 = {
+            ids = {
+              60522,
+            },
+            item = "Keeper's Ascendant Wristband of Journeys",
+            names = {
+              "Keeper's Ascendant Wristband of Journeys",
+            },
+            slot = "Wrist1",
+          },
+          Wrist2 = {
+            ids = {
+              60526,
+            },
+            item = "Keeper's Eternal Bracer of of Journeys",
+            names = {
+              "Keeper's Eternal Bracer of of Journeys",
+            },
+            slot = "Wrist2",
+          },
+        },
+        Rogue = {
+          Arms = {
+            ids = {
+              60443,
+            },
+            item = "Keeper's Ascendant Armguard of Shadows",
+            names = {
+              "Keeper's Ascendant Armguard of Shadows",
+            },
+            slot = "Arms",
+          },
+          Aug1 = {
+            ids = {
+              62551,
+              63017,
+            },
+            item = "Benevolent Extension",
+            names = {
+              "Benevolent Extension",
+              "Cryptic Clutch of Benevolent Extension",
+              "Vacant Vessel of Benevolent Extension",
+            },
+            notes = "+40% beneficial spell duration | +10 hWIS",
+            slot = "Aug1",
+          },
+          Aug2 = {
+            ids = {
+              62550,
+              63016,
+            },
+            item = "Malevolent Extension",
+            names = {
+              "Malevolent Extension",
+              "Cryptic Clutch of Malevolent Extension",
+              "Vacant Vessel of Malevolent Extension",
+            },
+            notes = "+40% detrimental spell duration | +10 hINT",
+            slot = "Aug2",
+          },
+          Aug3 = {
+            ids = {
+              62547,
+              62567,
+            },
+            item = "Noxious Demise",
+            names = {
+              "Noxious Demise",
+              "Cryptic Clutch of Noxious Demise",
+              "Vacant Vessel of Noxious Demise",
+            },
+            notes = "+10-60% poison spell damage | +5 hINT, +25 hPR",
+            slot = "Aug3",
+          },
+          Aug4 = {
+            ids = {
+              62556,
+              64050,
+            },
+            item = "Nimble Elusion",
+            names = {
+              "Nimble Elusion",
+              "Cryptic Clutch of Nimble Elusion",
+              "Vacant Vessel of Nimble Elusion",
+            },
+            notes = "+70% dodge | +10 hAGI",
+            slot = "Aug4",
+          },
+          Aug5 = {
+            ids = {
+              62555,
+              64049,
+            },
+            item = "Adept Guard",
+            names = {
+              "Adept Guard",
+              "Cryptic Clutch of Adept Guard",
+              "Vacant Vessel of Adept Guard",
+            },
+            notes = "+70% parry, +70% block | +10 hSTA",
+            slot = "Aug5",
+          },
+          Aug6 = {
+            ids = {
+              62554,
+              63020,
+            },
+            item = "Visceral Malice",
+            names = {
+              "Visceral Malice",
+              "Cryptic Clutch of Visceral Malice",
+              "Vacant Vessel of Visceral Malice",
+            },
+            notes = "+300% melee critical damage | +10 hSTR",
+            slot = "Aug6",
+          },
+          Aug7 = {
+            ids = {
+              62553,
+              63019,
+            },
+            item = "Wanton Assault",
+            names = {
+              "Wanton Assault",
+              "Cryptic Clutch of Wanton Assault",
+              "Vacant Vessel of Wanton Assault",
+            },
+            notes = "+21% double attack, +7% triple attack, +5% chance to hit | +10 hSTR",
+            slot = "Aug7",
+          },
+          Aug8 = {
+            ids = {
+              62558,
+              66533,
+            },
+            item = "Physical Prowess",
+            names = {
+              "Physical Prowess",
+              "Cryptic Clutch of Physical Prowess",
+              "Vacant Vessel of Physical Prowess",
+            },
+            notes = "No focus effect | +5 hSTR, +5 hSTA, +5 hAGI, +5 hDEX",
+            slot = "Aug8",
+          },
+          Back = {
+            ids = {
+              71665,
+            },
+            item = "Cloak of Deepshadow",
+            names = {
+              "Cloak of Deepshadow",
+            },
+            slot = "Back",
+          },
+          Chest = {
+            ids = {
+              60442,
+            },
+            item = "Keeper's Ascendant Tunic of Shadows",
+            names = {
+              "Keeper's Ascendant Tunic of Shadows",
+            },
+            slot = "Chest",
+          },
+          Clicky = {
+            ids = {
+              56757,
+            },
+            item = "Icon of Potent Prowess",
+            names = {
+              "Icon of Potent Prowess",
+            },
+            slot = "Clicky",
+          },
+          Ear1 = {
+            ids = {
+              71584,
+            },
+            item = "Cloudkiller's Bauble",
+            names = {
+              "Cloudkiller's Bauble",
+            },
+            slot = "Ear1",
+          },
+          Ear2 = {
+            ids = {
+              71668,
+            },
+            item = "Accursed Earhoop of Pain",
+            names = {
+              "Accursed Earhoop of Pain",
+            },
+            slot = "Ear2",
+          },
+          Face = {
+            ids = {
+              71626,
+            },
+            item = "Mask of the Dawn Scorcher",
+            names = {
+              "Mask of the Dawn Scorcher",
+            },
+            slot = "Face",
+          },
+          Feet = {
+            ids = {
+              60447,
+            },
+            item = "Keeper's Ascendant Boots of Shadows",
+            names = {
+              "Keeper's Ascendant Boots of Shadows",
+            },
+            slot = "Feet",
+          },
+          Finger1 = {
+            ids = {
+              71634,
+            },
+            item = "Glimmering Fire Opal Band",
+            names = {
+              "Glimmering Fire Opal Band",
+            },
+            slot = "Finger1",
+          },
+          Finger2 = {
+            ids = {
+              71588,
+            },
+            item = "Bloodstained Ring of Evisceration",
+            names = {
+              "Bloodstained Ring of Evisceration",
+            },
+            slot = "Finger2",
+          },
+          Glyph1 = {
+            ids = {
+              80075,
+            },
+            item = "Imbued Glyph: Ancient: Incursion",
+            names = {
+              "Imbued Glyph: Ancient: Incursion",
+            },
+            slot = "Glyph1",
+          },
+          Hands = {
+            ids = {
+              60445,
+            },
+            item = "Keeper's Ascendant Gloves of Shadows",
+            names = {
+              "Keeper's Ascendant Gloves of Shadows",
+            },
+            slot = "Hands",
+          },
+          Head = {
+            ids = {
+              59359,
+            },
+            item = "Keeper's Ascendant Hat of Shadows",
+            names = {
+              "Keeper's Ascendant Hat of Shadows",
+            },
+            slot = "Head",
+          },
+          Legs = {
+            ids = {
+              60446,
+            },
+            item = "Keeper's Ascendant Pants of Shadows",
+            names = {
+              "Keeper's Ascendant Pants of Shadows",
+            },
+            slot = "Legs",
+          },
+          Neck = {
+            ids = {
+              71612,
+            },
+            item = "Necklace of Sandstorms",
+            names = {
+              "Necklace of Sandstorms",
+            },
+            slot = "Neck",
+          },
+          Pack1 = {
+            ids = {
+              82656,
+            },
+            item = "Tome Pack: Ancient: Incursion",
+            names = {
+              "Tome Pack: Ancient: Incursion",
+            },
+            slot = "Pack1",
+            spell = "Ancient: Incursion",
+            spells = {
+              "Ancient: Incursion",
+            },
+          },
+          Ranged = {
+            ids = {
+              55052,
+            },
+            item = "Head of the Putrid Drake",
+            names = {
+              "Head of the Putrid Drake",
+            },
+            slot = "Ranged",
+          },
+          RangedAug = {
+            ids = {
+              71620,
+            },
+            item = "Preserved Eye of the Putrid Drake",
+            names = {
+              "Preserved Eye of the Putrid Drake",
+            },
+            slot = "RangedAug",
+          },
+          Shadow = {
+            ids = {
+              60550,
+            },
+            item = "Shadow of a Legendary Rogue Weapon",
+            names = {
+              "Shadow of a Legendary Rogue Weapon",
+            },
+            slot = "Shadow",
+          },
+          Shoulder = {
+            ids = {
+              71654,
+            },
+            item = "Lightning Singed Mantle",
+            names = {
+              "Lightning Singed Mantle",
+            },
+            slot = "Shoulder",
+          },
+          Waist = {
+            ids = {
+              71657,
+            },
+            item = "Thundercrash Girdle",
+            names = {
+              "Thundercrash Girdle",
+            },
+            slot = "Waist",
+          },
+          Wrist1 = {
+            ids = {
+              60444,
+            },
+            item = "Keeper's Ascendant Bracer of Shadows",
+            names = {
+              "Keeper's Ascendant Bracer of Shadows",
+            },
+            slot = "Wrist1",
+          },
+          Wrist2 = {
+            ids = {
+              60448,
+            },
+            item = "Keeper's Eternal Bracer of Shadows",
+            names = {
+              "Keeper's Eternal Bracer of Shadows",
+            },
+            slot = "Wrist2",
+          },
+        },
+        ["Shadow Knight"] = {
+          Arms = {
+            ids = {
+              54955,
+            },
+            item = "Keeper's Ascendant Armguards of the Hateful",
+            names = {
+              "Keeper's Ascendant Armguards of the Hateful",
+            },
+            slot = "Arms",
+          },
+          Aug1 = {
+            ids = {
+              62551,
+              63017,
+            },
+            item = "Benevolent Extension",
+            names = {
+              "Benevolent Extension",
+              "Cryptic Clutch of Benevolent Extension",
+              "Vacant Vessel of Benevolent Extension",
+            },
+            notes = "+40% beneficial spell duration | +10 hWIS",
+            slot = "Aug1",
+          },
+          Aug10 = {
+            ids = {
+              62553,
+              63019,
+            },
+            item = "Wanton Assault",
+            names = {
+              "Wanton Assault",
+              "Cryptic Clutch of Wanton Assault",
+              "Vacant Vessel of Wanton Assault",
+            },
+            notes = "+21% double attack, +7% triple attack, +5% chance to hit | +10 hSTR",
+            slot = "Aug10",
+          },
+          Aug11 = {
+            ids = {
+              62558,
+              66533,
+            },
+            item = "Physical Prowess",
+            names = {
+              "Physical Prowess",
+              "Cryptic Clutch of Physical Prowess",
+              "Vacant Vessel of Physical Prowess",
+            },
+            notes = "No focus effect | +5 hSTR, +5 hSTA, +5 hAGI, +5 hDEX",
+            slot = "Aug11",
+          },
+          Aug2 = {
+            ids = {
+              62550,
+              63016,
+            },
+            item = "Malevolent Extension",
+            names = {
+              "Malevolent Extension",
+              "Cryptic Clutch of Malevolent Extension",
+              "Vacant Vessel of Malevolent Extension",
+            },
+            notes = "+40% detrimental spell duration | +10 hINT",
+            slot = "Aug2",
+          },
+          Aug3 = {
+            ids = {
+              62547,
+              62567,
+            },
+            item = "Noxious Demise",
+            names = {
+              "Noxious Demise",
+              "Cryptic Clutch of Noxious Demise",
+              "Vacant Vessel of Noxious Demise",
+            },
+            notes = "+10-60% poison spell damage | +5 hINT, +25 hPR",
+            slot = "Aug3",
+          },
+          Aug4 = {
+            ids = {
+              62544,
+              62564,
+            },
+            item = "Arcane Demise",
+            names = {
+              "Arcane Demise",
+              "Cryptic Clutch of Arcane Demise",
+              "Vacant Vessel of Arcane Demise",
+            },
+            notes = "+10-60% magic spell damage | +5 hINT, +25 hMR",
+            slot = "Aug4",
+          },
+          Aug5 = {
+            ids = {
+              62548,
+              62568,
+            },
+            item = "Festering Demise",
+            names = {
+              "Festering Demise",
+              "Cryptic Clutch of Festering Demise",
+              "Vacant Vessel of Festering Demise",
+            },
+            notes = "+10-60% disease spell damage | +5 hINT, +25 hDR",
+            slot = "Aug5",
+          },
+          Aug6 = {
+            ids = {
+              62552,
+              63018,
+            },
+            item = "Expanded Reach",
+            names = {
+              "Expanded Reach",
+              "Cryptic Clutch of Expanded Reach",
+              "Vacant Vessel of Expanded Reach",
+            },
+            notes = "+50% spell range | +10 hWIS, +10 hINT",
+            slot = "Aug6",
+          },
+          Aug7 = {
+            ids = {
+              62556,
+              64050,
+            },
+            item = "Nimble Elusion",
+            names = {
+              "Nimble Elusion",
+              "Cryptic Clutch of Nimble Elusion",
+              "Vacant Vessel of Nimble Elusion",
+            },
+            notes = "+70% dodge | +10 hAGI",
+            slot = "Aug7",
+          },
+          Aug8 = {
+            ids = {
+              62555,
+              64049,
+            },
+            item = "Adept Guard",
+            names = {
+              "Adept Guard",
+              "Cryptic Clutch of Adept Guard",
+              "Vacant Vessel of Adept Guard",
+            },
+            notes = "+70% parry, +70% block | +10 hSTA",
+            slot = "Aug8",
+          },
+          Aug9 = {
+            ids = {
+              62554,
+              63020,
+            },
+            item = "Visceral Malice",
+            names = {
+              "Visceral Malice",
+              "Cryptic Clutch of Visceral Malice",
+              "Vacant Vessel of Visceral Malice",
+            },
+            notes = "+300% melee critical damage | +10 hSTR",
+            slot = "Aug9",
+          },
+          Back = {
+            ids = {
+              71596,
+            },
+            item = "Cape of Dragon Scales",
+            names = {
+              "Cape of Dragon Scales",
+            },
+            slot = "Back",
+          },
+          Chest = {
+            ids = {
+              54954,
+            },
+            item = "Keeper's Ascendant Chestguard of the Hateful",
+            names = {
+              "Keeper's Ascendant Chestguard of the Hateful",
+            },
+            slot = "Chest",
+          },
+          Clicky = {
+            ids = {
+              56755,
+            },
+            item = "Icon of Unwavering Defense",
+            names = {
+              "Icon of Unwavering Defense",
+            },
+            slot = "Clicky",
+          },
+          Ear1 = {
+            ids = {
+              71624,
+            },
+            item = "Weighted Loop of Eternal Battle",
+            names = {
+              "Weighted Loop of Eternal Battle",
+            },
+            slot = "Ear1",
+          },
+          Ear2 = {
+            ids = {
+              71593,
+            },
+            item = "Hoop of the Nest Defender",
+            names = {
+              "Hoop of the Nest Defender",
+            },
+            slot = "Ear2",
+          },
+          Face = {
+            ids = {
+              71667,
+            },
+            item = "Face of Unfeeling",
+            names = {
+              "Face of Unfeeling",
+            },
+            slot = "Face",
+          },
+          Feet = {
+            ids = {
+              54959,
+            },
+            item = "Keeper's Ascendant Boots of the Hateful",
+            names = {
+              "Keeper's Ascendant Boots of the Hateful",
+            },
+            slot = "Feet",
+          },
+          Finger1 = {
+            ids = {
+              71608,
+            },
+            item = "Ring of Unsung Legends",
+            names = {
+              "Ring of Unsung Legends",
+            },
+            slot = "Finger1",
+          },
+          Finger2 = {
+            ids = {
+              71562,
+            },
+            item = "Ring of Living Malachite",
+            names = {
+              "Ring of Living Malachite",
+            },
+            slot = "Finger2",
+          },
+          Glyph1 = {
+            ids = {
+              79535,
+            },
+            item = "Mnemonic Glyph: Cloak of the Corrupter",
+            names = {
+              "Mnemonic Glyph: Cloak of the Corrupter",
+            },
+            slot = "Glyph1",
+          },
+          Glyph2 = {
+            ids = {
+              79536,
+            },
+            item = "Mnemonic Glyph: Shroud of the Accursed",
+            names = {
+              "Mnemonic Glyph: Shroud of the Accursed",
+            },
+            slot = "Glyph2",
+          },
+          Glyph3 = {
+            ids = {
+              79537,
+            },
+            item = "Imbued Glyph: Theft of Misery",
+            names = {
+              "Imbued Glyph: Theft of Misery",
+            },
+            slot = "Glyph3",
+          },
+          Hands = {
+            ids = {
+              54957,
+            },
+            item = "Keeper's Ascendant Gloves of the Hateful",
+            names = {
+              "Keeper's Ascendant Gloves of the Hateful",
+            },
+            slot = "Hands",
+          },
+          Head = {
+            ids = {
+              54953,
+            },
+            item = "Keeper's Ascendant Helm of the Hateful",
+            names = {
+              "Keeper's Ascendant Helm of the Hateful",
+            },
+            slot = "Head",
+          },
+          Legs = {
+            ids = {
+              54958,
+            },
+            item = "Keeper's Ascendant Legguards of the Hateful",
+            names = {
+              "Keeper's Ascendant Legguards of the Hateful",
+            },
+            slot = "Legs",
+          },
+          Neck = {
+            ids = {
+              71597,
+            },
+            item = "Necklace of Grimspirit Beads",
+            names = {
+              "Necklace of Grimspirit Beads",
+            },
+            slot = "Neck",
+          },
+          Pack1 = {
+            ids = {
+              82807,
+            },
+            item = "Spell Pack: Cloak of the Corrupter",
+            names = {
+              "Spell Pack: Cloak of the Corrupter",
+            },
+            slot = "Pack1",
+            spell = "Cloak of the Corrupter",
+            spells = {
+              "Cloak of the Corrupter",
+            },
+          },
+          Pack2 = {
+            ids = {
+              82808,
+            },
+            item = "Spell Pack: Shroud of the Accursed",
+            names = {
+              "Spell Pack: Shroud of the Accursed",
+            },
+            slot = "Pack2",
+            spell = "Shroud of the Accursed",
+            spells = {
+              "Shroud of the Accursed",
+            },
+          },
+          Pack3 = {
+            ids = {
+              82809,
+            },
+            item = "Spell Pack: Theft of Misery",
+            names = {
+              "Spell Pack: Theft of Misery",
+            },
+            slot = "Pack3",
+            spell = "Theft of Misery",
+            spells = {
+              "Theft of Misery",
+            },
+          },
+          Ranged = {
+            ids = {
+              71627,
+            },
+            item = "Branch of the Twisting Tree",
+            names = {
+              "Branch of the Twisting Tree",
+            },
+            slot = "Ranged",
+          },
+          RangedAug = {
+            ids = {
+              55053,
+            },
+            item = "Fallen Leaf of the Twisting Tree",
+            names = {
+              "Fallen Leaf of the Twisting Tree",
+            },
+            slot = "RangedAug",
+          },
+          Shadow = {
+            ids = {
+              60544,
+            },
+            item = "Shadow of a Legendary Shadowknight Shield",
+            names = {
+              "Shadow of a Legendary Shadowknight Shield",
+            },
+            slot = "Shadow",
+          },
+          Shoulder = {
+            ids = {
+              71590,
+            },
+            item = "Dark-Touched Mantle",
+            names = {
+              "Dark-Touched Mantle",
+            },
+            slot = "Shoulder",
+          },
+          Waist = {
+            ids = {
+              71664,
+            },
+            item = "Belt of the Black Dragon",
+            names = {
+              "Belt of the Black Dragon",
+            },
+            slot = "Waist",
+          },
+          Wrist1 = {
+            ids = {
+              54956,
+            },
+            item = "Keeper's Ascendant Wristguard of the Hateful",
+            names = {
+              "Keeper's Ascendant Wristguard of the Hateful",
+            },
+            slot = "Wrist1",
+          },
+          Wrist2 = {
+            ids = {
+              55051,
+            },
+            item = "Keeper's Eternal Bracer of the Hateful",
+            names = {
+              "Keeper's Eternal Bracer of the Hateful",
+            },
+            slot = "Wrist2",
+          },
+        },
+        Shaman = {
+          Arms = {
+            ids = {
+              57154,
+            },
+            item = "Keeper's Ascendant Armguards of the Ancestors",
+            names = {
+              "Keeper's Ascendant Armguards of the Ancestors",
+            },
+            slot = "Arms",
+          },
+          Aug1 = {
+            ids = {
+              62541,
+              62561,
+            },
+            item = "Benevolent Efficiency",
+            names = {
+              "Benevolent Efficiency",
+              "Cryptic Clutch of Benevolent Efficiency",
+              "Vacant Vessel of Benevolent Efficiency",
+            },
+            notes = "-11-33% beneficial spell mana cost | +10 hWIS",
+            slot = "Aug1",
+          },
+          Aug10 = {
+            ids = {
+              62549,
+              62569,
+            },
+            item = "Merciful Mending",
+            names = {
+              "Merciful Mending",
+              "Cryptic Clutch of Merciful Mending",
+              "Vacant Vessel of Merciful Mending",
+            },
+            notes = "+10-60% healing | +10 hWIS",
+            slot = "Aug10",
+          },
+          Aug11 = {
+            ids = {
+              62556,
+              64050,
+            },
+            item = "Nimble Elusion",
+            names = {
+              "Nimble Elusion",
+              "Cryptic Clutch of Nimble Elusion",
+              "Vacant Vessel of Nimble Elusion",
+            },
+            notes = "+70% dodge | +10 hAGI",
+            slot = "Aug11",
+          },
+          Aug12 = {
+            ids = {
+              62559,
+              66720,
+            },
+            item = "Mental Prowess",
+            names = {
+              "Mental Prowess",
+              "Cryptic Clutch of Mental Prowess",
+              "Vacant Vessel of Mental Prowess",
+            },
+            notes = "No focus effect | +10 hINT, +10 hWIS, +10 heroic resists",
+            slot = "Aug12",
+          },
+          Aug2 = {
+            ids = {
+              62551,
+              63017,
+            },
+            item = "Benevolent Extension",
+            names = {
+              "Benevolent Extension",
+              "Cryptic Clutch of Benevolent Extension",
+              "Vacant Vessel of Benevolent Extension",
+            },
+            notes = "+40% beneficial spell duration | +10 hWIS",
+            slot = "Aug2",
+          },
+          Aug3 = {
+            ids = {
+              62543,
+              62563,
+            },
+            item = "Benevolent Alacrity",
+            names = {
+              "Benevolent Alacrity",
+              "Cryptic Clutch of Benevolent Alacrity",
+              "Vacant Vessel of Benevolent Alacrity",
+            },
+            notes = "-40% beneficial spell cast time | +10 hWIS",
+            slot = "Aug3",
+          },
+          Aug4 = {
+            ids = {
+              62540,
+              62560,
+            },
+            item = "Malevolent Efficiency",
+            names = {
+              "Malevolent Efficiency",
+              "Cryptic Clutch of Malevolent Efficiency",
+              "Vacant Vessel of Malevolent Efficiency",
+            },
+            notes = "-11-33% detrimental spell mana cost | +10 hINT",
+            slot = "Aug4",
+          },
+          Aug5 = {
+            ids = {
+              62550,
+              63016,
+            },
+            item = "Malevolent Extension",
+            names = {
+              "Malevolent Extension",
+              "Cryptic Clutch of Malevolent Extension",
+              "Vacant Vessel of Malevolent Extension",
+            },
+            notes = "+40% detrimental spell duration | +10 hINT",
+            slot = "Aug5",
+          },
+          Aug6 = {
+            ids = {
+              62542,
+              62562,
+            },
+            item = "Malevolent Alacrity",
+            names = {
+              "Malevolent Alacrity",
+              "Cryptic Clutch of Malevolent Alacrity",
+              "Vacant Vessel of Malevolent Alacrity",
+            },
+            notes = "-40% detrimental spell cast time | +10 hINT",
+            slot = "Aug6",
+          },
+          Aug7 = {
+            ids = {
+              62547,
+              62567,
+            },
+            item = "Noxious Demise",
+            names = {
+              "Noxious Demise",
+              "Cryptic Clutch of Noxious Demise",
+              "Vacant Vessel of Noxious Demise",
+            },
+            notes = "+10-60% poison spell damage | +5 hINT, +25 hPR",
+            slot = "Aug7",
+          },
+          Aug8 = {
+            ids = {
+              62548,
+              62568,
+            },
+            item = "Festering Demise",
+            names = {
+              "Festering Demise",
+              "Cryptic Clutch of Festering Demise",
+              "Vacant Vessel of Festering Demise",
+            },
+            notes = "+10-60% disease spell damage | +5 hINT, +25 hDR",
+            slot = "Aug8",
+          },
+          Aug9 = {
+            ids = {
+              62552,
+              63018,
+            },
+            item = "Expanded Reach",
+            names = {
+              "Expanded Reach",
+              "Cryptic Clutch of Expanded Reach",
+              "Vacant Vessel of Expanded Reach",
+            },
+            notes = "+50% spell range | +10 hWIS, +10 hINT",
+            slot = "Aug9",
+          },
+          Back = {
+            ids = {
+              71613,
+            },
+            item = "Cape of Serenity",
+            names = {
+              "Cape of Serenity",
+            },
+            slot = "Back",
+          },
+          Chest = {
+            ids = {
+              57153,
+            },
+            item = "Keeper's Ascendant Tunic of the Ancestors",
+            names = {
+              "Keeper's Ascendant Tunic of the Ancestors",
+            },
+            slot = "Chest",
+          },
+          Clicky = {
+            ids = {
+              56756,
+            },
+            item = "Icon of Scribe's Endurance",
+            names = {
+              "Icon of Scribe's Endurance",
+            },
+            slot = "Clicky",
+          },
+          Ear1 = {
+            ids = {
+              71589,
+            },
+            item = "Earring of Contemplation",
+            names = {
+              "Earring of Contemplation",
+            },
+            slot = "Ear1",
+          },
+          Ear2 = {
+            ids = {
+              71642,
+            },
+            item = "Tear of Kessdona",
+            names = {
+              "Tear of Kessdona",
+            },
+            slot = "Ear2",
+          },
+          Face = {
+            ids = {
+              71594,
+            },
+            item = "Young Dragon Mask",
+            names = {
+              "Young Dragon Mask",
+            },
+            slot = "Face",
+          },
+          Feet = {
+            ids = {
+              57158,
+            },
+            item = "Keeper's Ascendant Boots of the Ancestors",
+            names = {
+              "Keeper's Ascendant Boots of the Ancestors",
+            },
+            slot = "Feet",
+          },
+          Finger1 = {
+            ids = {
+              71592,
+            },
+            item = "Dragon Nursery Ring",
+            names = {
+              "Dragon Nursery Ring",
+            },
+            slot = "Finger1",
+          },
+          Finger2 = {
+            ids = {
+              71652,
+            },
+            item = "Eye of Tirranun",
+            names = {
+              "Eye of Tirranun",
+            },
+            slot = "Finger2",
+          },
+          Glyph1 = {
+            ids = {
+              76568,
+            },
+            item = "Mnemonic Glyph: Stillmoon Focusing",
+            names = {
+              "Mnemonic Glyph: Stillmoon Focusing",
+            },
+            slot = "Glyph1",
+          },
+          Glyph2 = {
+            ids = {
+              76569,
+            },
+            item = "Mnemonic Glyph: Talisman of the Stillmoon",
+            names = {
+              "Mnemonic Glyph: Talisman of the Stillmoon",
+            },
+            slot = "Glyph2",
+          },
+          Glyph3 = {
+            ids = {
+              76570,
+            },
+            item = "Mnemonic Glyph: Blood of Volkara",
+            names = {
+              "Mnemonic Glyph: Blood of Volkara",
+            },
+            slot = "Glyph3",
+          },
+          Glyph4 = {
+            ids = {
+              76571,
+            },
+            item = "Mnemonic Glyph: Talisman of Coalescence",
+            names = {
+              "Mnemonic Glyph: Talisman of Coalescence",
+            },
+            slot = "Glyph4",
+          },
+          Glyph5 = {
+            ids = {
+              76572,
+            },
+            item = "Imbued Glyph: Talisman of the Cougar",
+            names = {
+              "Imbued Glyph: Talisman of the Cougar",
+            },
+            slot = "Glyph5",
+          },
+          Hands = {
+            ids = {
+              57156,
+            },
+            item = "Keeper's Ascendant Mitts of the Ancestors",
+            names = {
+              "Keeper's Ascendant Mitts of the Ancestors",
+            },
+            slot = "Hands",
+          },
+          Head = {
+            ids = {
+              57152,
+            },
+            item = "Keeper's Ascendant Cap of the Ancestors",
+            names = {
+              "Keeper's Ascendant Cap of the Ancestors",
+            },
+            slot = "Head",
+          },
+          Legs = {
+            ids = {
+              57157,
+            },
+            item = "Keeper's Ascendant Leggings of the Ancestors",
+            names = {
+              "Keeper's Ascendant Leggings of the Ancestors",
+            },
+            slot = "Legs",
+          },
+          Neck = {
+            ids = {
+              71655,
+            },
+            item = "Locket of Raining Tears",
+            names = {
+              "Locket of Raining Tears",
+            },
+            slot = "Neck",
+          },
+          Pack1 = {
+            ids = {
+              82662,
+            },
+            item = "Spell Pack: Stillmoon Focus",
+            names = {
+              "Spell Pack: Stillmoon Focus",
+            },
+            slot = "Pack1",
+            spell = "Stillmoon Focusing",
+            spells = {
+              "Stillmoon Focusing",
+              "Talisman of the Stillmoon",
+            },
+          },
+          Pack2 = {
+            ids = {
+              82663,
+            },
+            item = "Spell Pack: Blood of Volkara",
+            names = {
+              "Spell Pack: Blood of Volkara",
+            },
+            slot = "Pack2",
+            spell = "Blood of Volkara",
+            spells = {
+              "Blood of Volkara",
+            },
+          },
+          Pack3 = {
+            ids = {
+              82664,
+            },
+            item = "Spell Pack: Talisman of Coalescence",
+            names = {
+              "Spell Pack: Talisman of Coalescence",
+            },
+            slot = "Pack3",
+            spell = "Talisman of Coalescence",
+            spells = {
+              "Talisman of Coalescence",
+            },
+          },
+          Pack4 = {
+            ids = {
+              82665,
+            },
+            item = "Spell Pack: Talisman of the Cougar",
+            names = {
+              "Spell Pack: Talisman of the Cougar",
+            },
+            slot = "Pack4",
+            spell = "Talisman of the Cougar",
+            spells = {
+              "Talisman of the Cougar",
+            },
+          },
+          Pack5 = {
+            ids = {
+              50107,
+            },
+            item = "Spell Pack: Wild Companions",
+            names = {
+              "Spell Pack: Wild Companions",
+            },
+            slot = "Pack5",
+            spell = "Wild Companions",
+            spells = {
+              "Wild Companions",
+            },
+          },
+          Ranged = {
+            ids = {
+              60535,
+            },
+            item = "Crux of the First Brood",
+            names = {
+              "Crux of the First Brood",
+            },
+            slot = "Ranged",
+          },
+          RangedAug = {
+            ids = {
+              71578,
+            },
+            item = "Phial of the First Brood",
+            names = {
+              "Phial of the First Brood",
+            },
+            slot = "RangedAug",
+          },
+          Shadow = {
+            ids = {
+              60547,
+            },
+            item = "Shadow of a Legendary Shaman Shield",
+            names = {
+              "Shadow of a Legendary Shaman Shield",
+            },
+            slot = "Shadow",
+          },
+          Shoulder = {
+            ids = {
+              71666,
+            },
+            item = "Obsidian Pauldrons",
+            names = {
+              "Obsidian Pauldrons",
+            },
+            slot = "Shoulder",
+          },
+          Waist = {
+            ids = {
+              71621,
+            },
+            item = "Windwatcher Sash",
+            names = {
+              "Windwatcher Sash",
+            },
+            slot = "Waist",
+          },
+          Wrist1 = {
+            ids = {
+              57155,
+            },
+            item = "Keeper's Ascendant Wristband of the Ancestors",
+            names = {
+              "Keeper's Ascendant Wristband of the Ancestors",
+            },
+            slot = "Wrist1",
+          },
+          Wrist2 = {
+            ids = {
+              57159,
+            },
+            item = "Keeper's Eternal Bracer of the Ancestors",
+            names = {
+              "Keeper's Eternal Bracer of the Ancestors",
+            },
+            slot = "Wrist2",
+          },
+        },
+        Warrior = {
+          Arms = {
+            ids = {
+              54947,
+            },
+            item = "Keeper's Ascendant Sleeves of War",
+            names = {
+              "Keeper's Ascendant Sleeves of War",
+            },
+            slot = "Arms",
+          },
+          Aug1 = {
+            ids = {
+              62551,
+              63017,
+            },
+            item = "Benevolent Extension",
+            names = {
+              "Benevolent Extension",
+              "Cryptic Clutch of Benevolent Extension",
+              "Vacant Vessel of Benevolent Extension",
+            },
+            notes = "+40% beneficial spell duration | +10 hWIS",
+            slot = "Aug1",
+          },
+          Aug2 = {
+            ids = {
+              62545,
+              62565,
+            },
+            item = "Fiery Demise",
+            names = {
+              "Fiery Demise",
+              "Cryptic Clutch of Fiery Demise",
+              "Vacant Vessel of Fiery Demise",
+            },
+            notes = "+10-60% fire spell damage | +5 hINT, +25 hFR",
+            slot = "Aug2",
+          },
+          Aug3 = {
+            ids = {
+              62547,
+              62567,
+            },
+            item = "Noxious Demise",
+            names = {
+              "Noxious Demise",
+              "Cryptic Clutch of Noxious Demise",
+              "Vacant Vessel of Noxious Demise",
+            },
+            notes = "+10-60% poison spell damage | +5 hINT, +25 hPR",
+            slot = "Aug3",
+          },
+          Aug4 = {
+            ids = {
+              62556,
+              64050,
+            },
+            item = "Nimble Elusion",
+            names = {
+              "Nimble Elusion",
+              "Cryptic Clutch of Nimble Elusion",
+              "Vacant Vessel of Nimble Elusion",
+            },
+            notes = "+70% dodge | +10 hAGI",
+            slot = "Aug4",
+          },
+          Aug5 = {
+            ids = {
+              62555,
+              64049,
+            },
+            item = "Adept Guard",
+            names = {
+              "Adept Guard",
+              "Cryptic Clutch of Adept Guard",
+              "Vacant Vessel of Adept Guard",
+            },
+            notes = "+70% parry, +70% block | +10 hSTA",
+            slot = "Aug5",
+          },
+          Aug6 = {
+            ids = {
+              62554,
+              63020,
+            },
+            item = "Visceral Malice",
+            names = {
+              "Visceral Malice",
+              "Cryptic Clutch of Visceral Malice",
+              "Vacant Vessel of Visceral Malice",
+            },
+            notes = "+300% melee critical damage | +10 hSTR",
+            slot = "Aug6",
+          },
+          Aug7 = {
+            ids = {
+              62553,
+              63019,
+            },
+            item = "Wanton Assault",
+            names = {
+              "Wanton Assault",
+              "Cryptic Clutch of Wanton Assault",
+              "Vacant Vessel of Wanton Assault",
+            },
+            notes = "+21% double attack, +7% triple attack, +5% chance to hit | +10 hSTR",
+            slot = "Aug7",
+          },
+          Aug8 = {
+            ids = {
+              62558,
+              66533,
+            },
+            item = "Physical Prowess",
+            names = {
+              "Physical Prowess",
+              "Cryptic Clutch of Physical Prowess",
+              "Vacant Vessel of Physical Prowess",
+            },
+            notes = "No focus effect | +5 hSTR, +5 hSTA, +5 hAGI, +5 hDEX",
+            slot = "Aug8",
+          },
+          Back = {
+            ids = {
+              71596,
+            },
+            item = "Cape of Dragon Scales",
+            names = {
+              "Cape of Dragon Scales",
+            },
+            slot = "Back",
+          },
+          Chest = {
+            ids = {
+              54946,
+            },
+            item = "Keeper's Ascendant Chestguard of War",
+            names = {
+              "Keeper's Ascendant Chestguard of War",
+            },
+            slot = "Chest",
+          },
+          Clicky = {
+            ids = {
+              56755,
+            },
+            item = "Icon of Unwavering Defense",
+            names = {
+              "Icon of Unwavering Defense",
+            },
+            slot = "Clicky",
+          },
+          Ear1 = {
+            ids = {
+              71624,
+            },
+            item = "Weighted Loop of Eternal Battle",
+            names = {
+              "Weighted Loop of Eternal Battle",
+            },
+            slot = "Ear1",
+          },
+          Ear2 = {
+            ids = {
+              71593,
+            },
+            item = "Hoop of the Nest Defender",
+            names = {
+              "Hoop of the Nest Defender",
+            },
+            slot = "Ear2",
+          },
+          Face = {
+            ids = {
+              71667,
+            },
+            item = "Face of Unfeeling",
+            names = {
+              "Face of Unfeeling",
+            },
+            slot = "Face",
+          },
+          Feet = {
+            ids = {
+              54951,
+            },
+            item = "Keeper's Ascendant Boots of War",
+            names = {
+              "Keeper's Ascendant Boots of War",
+            },
+            slot = "Feet",
+          },
+          Finger1 = {
+            ids = {
+              71608,
+            },
+            item = "Ring of Unsung Legends",
+            names = {
+              "Ring of Unsung Legends",
+            },
+            slot = "Finger1",
+          },
+          Finger2 = {
+            ids = {
+              71562,
+            },
+            item = "Ring of Living Malachite",
+            names = {
+              "Ring of Living Malachite",
+            },
+            slot = "Finger2",
+          },
+          Glyph1 = {
+            ids = {
+              80073,
+            },
+            item = "Imbued Glyph: Malicious Onslaught Discipline",
+            names = {
+              "Imbued Glyph: Malicious Onslaught Discipline",
+            },
+            slot = "Glyph1",
+          },
+          Hands = {
+            ids = {
+              54949,
+            },
+            item = "Keeper's Ascendant Gloves of War",
+            names = {
+              "Keeper's Ascendant Gloves of War",
+            },
+            slot = "Hands",
+          },
+          Head = {
+            ids = {
+              54945,
+            },
+            item = "Keeper's Ascendant Helm of War",
+            names = {
+              "Keeper's Ascendant Helm of War",
+            },
+            slot = "Head",
+          },
+          Legs = {
+            ids = {
+              54950,
+            },
+            item = "Keeper's Ascendant Legguards of War",
+            names = {
+              "Keeper's Ascendant Legguards of War",
+            },
+            slot = "Legs",
+          },
+          Neck = {
+            ids = {
+              71597,
+            },
+            item = "Necklace of Grimspirit Beads",
+            names = {
+              "Necklace of Grimspirit Beads",
+            },
+            slot = "Neck",
+          },
+          Pack1 = {
+            ids = {
+              82654,
+            },
+            item = "Tome Pack: Malicious Onslaught Discipline",
+            names = {
+              "Tome Pack: Malicious Onslaught Discipline",
+            },
+            slot = "Pack1",
+            spell = "Malicious Onslaught Discipline",
+            spells = {
+              "Malicious Onslaught Discipline",
+            },
+          },
+          Ranged = {
+            ids = {
+              55052,
+            },
+            item = "Head of the Putrid Drake",
+            names = {
+              "Head of the Putrid Drake",
+            },
+            slot = "Ranged",
+          },
+          RangedAug = {
+            ids = {
+              71620,
+            },
+            item = "Preserved Eye of the Putrid Drake",
+            names = {
+              "Preserved Eye of the Putrid Drake",
+            },
+            slot = "RangedAug",
+          },
+          Shadow = {
+            ids = {
+              60538,
+            },
+            item = "Shadow of a Legendary Warrior Shield",
+            names = {
+              "Shadow of a Legendary Warrior Shield",
+            },
+            slot = "Shadow",
+          },
+          Shoulder = {
+            ids = {
+              71590,
+            },
+            item = "Dark-Touched Mantle",
+            names = {
+              "Dark-Touched Mantle",
+            },
+            slot = "Shoulder",
+          },
+          Waist = {
+            ids = {
+              71664,
+            },
+            item = "Belt of the Black Dragon",
+            names = {
+              "Belt of the Black Dragon",
+            },
+            slot = "Waist",
+          },
+          Wrist1 = {
+            ids = {
+              54948,
+            },
+            item = "Keeper's Ascendant Bracer of War",
+            names = {
+              "Keeper's Ascendant Bracer of War",
+            },
+            slot = "Wrist1",
+          },
+          Wrist2 = {
+            ids = {
+              54952,
+            },
+            item = "Keeper's Eternal Bracer of War",
+            names = {
+              "Keeper's Eternal Bracer of War",
+            },
+            slot = "Wrist2",
+          },
+        },
+        Wizard = {
+          Arms = {
+            ids = {
+              60467,
+            },
+            item = "Keeper's Ascendant Sleeves of the Arcanists",
+            names = {
+              "Keeper's Ascendant Sleeves of the Arcanists",
+            },
+            slot = "Arms",
+          },
+          Aug1 = {
+            ids = {
+              62551,
+              63017,
+            },
+            item = "Benevolent Extension",
+            names = {
+              "Benevolent Extension",
+              "Cryptic Clutch of Benevolent Extension",
+              "Vacant Vessel of Benevolent Extension",
+            },
+            notes = "+40% beneficial spell duration | +10 hWIS",
+            slot = "Aug1",
+          },
+          Aug2 = {
+            ids = {
+              62540,
+              62560,
+            },
+            item = "Malevolent Efficiency",
+            names = {
+              "Malevolent Efficiency",
+              "Cryptic Clutch of Malevolent Efficiency",
+              "Vacant Vessel of Malevolent Efficiency",
+            },
+            notes = "-11-33% detrimental spell mana cost | +10 hINT",
+            slot = "Aug2",
+          },
+          Aug3 = {
+            ids = {
+              62550,
+              63016,
+            },
+            item = "Malevolent Extension",
+            names = {
+              "Malevolent Extension",
+              "Cryptic Clutch of Malevolent Extension",
+              "Vacant Vessel of Malevolent Extension",
+            },
+            notes = "+40% detrimental spell duration | +10 hINT",
+            slot = "Aug3",
+          },
+          Aug4 = {
+            ids = {
+              62542,
+              62562,
+            },
+            item = "Malevolent Alacrity",
+            names = {
+              "Malevolent Alacrity",
+              "Cryptic Clutch of Malevolent Alacrity",
+              "Vacant Vessel of Malevolent Alacrity",
+            },
+            notes = "-40% detrimental spell cast time | +10 hINT",
+            slot = "Aug4",
+          },
+          Aug5 = {
+            ids = {
+              62545,
+              62565,
+            },
+            item = "Fiery Demise",
+            names = {
+              "Fiery Demise",
+              "Cryptic Clutch of Fiery Demise",
+              "Vacant Vessel of Fiery Demise",
+            },
+            notes = "+10-60% fire spell damage | +5 hINT, +25 hFR",
+            slot = "Aug5",
+          },
+          Aug6 = {
+            ids = {
+              62544,
+              62564,
+            },
+            item = "Arcane Demise",
+            names = {
+              "Arcane Demise",
+              "Cryptic Clutch of Arcane Demise",
+              "Vacant Vessel of Arcane Demise",
+            },
+            notes = "+10-60% magic spell damage | +5 hINT, +25 hMR",
+            slot = "Aug6",
+          },
+          Aug7 = {
+            ids = {
+              62552,
+              63018,
+            },
+            item = "Expanded Reach",
+            names = {
+              "Expanded Reach",
+              "Cryptic Clutch of Expanded Reach",
+              "Vacant Vessel of Expanded Reach",
+            },
+            notes = "+50% spell range | +10 hWIS, +10 hINT",
+            slot = "Aug7",
+          },
+          Aug8 = {
+            ids = {
+              62556,
+              64050,
+            },
+            item = "Nimble Elusion",
+            names = {
+              "Nimble Elusion",
+              "Cryptic Clutch of Nimble Elusion",
+              "Vacant Vessel of Nimble Elusion",
+            },
+            notes = "+70% dodge | +10 hAGI",
+            slot = "Aug8",
+          },
+          Aug9 = {
+            ids = {
+              62559,
+              66720,
+            },
+            item = "Mental Prowess",
+            names = {
+              "Mental Prowess",
+              "Cryptic Clutch of Mental Prowess",
+              "Vacant Vessel of Mental Prowess",
+            },
+            notes = "No focus effect | +10 hINT, +10 hWIS, +10 heroic resists",
+            slot = "Aug9",
+          },
+          Back = {
+            ids = {
+              71656,
+            },
+            item = "Shroud of the Surging Storm",
+            names = {
+              "Shroud of the Surging Storm",
+            },
+            slot = "Back",
+          },
+          Chest = {
+            ids = {
+              60466,
+            },
+            item = "Keeper's Ascendant Robe of the Arcanists",
+            names = {
+              "Keeper's Ascendant Robe of the Arcanists",
+            },
+            slot = "Chest",
+          },
+          Clicky = {
+            ids = {
+              56756,
+            },
+            item = "Icon of Scribe's Endurance",
+            names = {
+              "Icon of Scribe's Endurance",
+            },
+            slot = "Clicky",
+          },
+          Ear1 = {
+            ids = {
+              71574,
+            },
+            item = "Hoop of the Drakeborn",
+            names = {
+              "Hoop of the Drakeborn",
+            },
+            slot = "Ear1",
+          },
+          Ear2 = {
+            ids = {
+              71603,
+            },
+            item = "Grelian Earring of Uncertainty",
+            names = {
+              "Grelian Earring of Uncertainty",
+            },
+            slot = "Ear2",
+          },
+          Face = {
+            ids = {
+              71643,
+            },
+            item = "Entrancing Silk Veil",
+            names = {
+              "Entrancing Silk Veil",
+            },
+            slot = "Face",
+          },
+          Feet = {
+            ids = {
+              60471,
+            },
+            item = "Keeper's Ascendant Slippers of the Arcanists",
+            names = {
+              "Keeper's Ascendant Slippers of the Arcanists",
+            },
+            slot = "Feet",
+          },
+          Finger1 = {
+            ids = {
+              71625,
+            },
+            item = "Thought Sieve Ring",
+            names = {
+              "Thought Sieve Ring",
+            },
+            slot = "Finger1",
+          },
+          Finger2 = {
+            ids = {
+              71658,
+            },
+            item = "Stormeye Band",
+            names = {
+              "Stormeye Band",
+            },
+            slot = "Finger2",
+          },
+          Glyph1 = {
+            ids = {
+              79521,
+            },
+            item = "Mnemonic Glyph: Bolster of the Sorceror",
+            names = {
+              "Mnemonic Glyph: Bolster of the Sorceror",
+            },
+            slot = "Glyph1",
+          },
+          Glyph2 = {
+            ids = {
+              79522,
+            },
+            item = "Mnemonic Glyph: Supernal Skin",
+            names = {
+              "Mnemonic Glyph: Supernal Skin",
+            },
+            slot = "Glyph2",
+          },
+          Glyph3 = {
+            ids = {
+              79523,
+            },
+            item = "Imbued Glyph: Ethereal Weave",
+            names = {
+              "Imbued Glyph: Ethereal Weave",
+            },
+            slot = "Glyph3",
+          },
+          Hands = {
+            ids = {
+              60469,
+            },
+            item = "Keeper's Ascendant Gloves of the Arcanists",
+            names = {
+              "Keeper's Ascendant Gloves of the Arcanists",
+            },
+            slot = "Hands",
+          },
+          Head = {
+            ids = {
+              60465,
+            },
+            item = "Keeper's Ascendant Cap of the Arcanists",
+            names = {
+              "Keeper's Ascendant Cap of the Arcanists",
+            },
+            slot = "Head",
+          },
+          Legs = {
+            ids = {
+              60470,
+            },
+            item = "Keeper's Ascendant Pants of the Arcanists",
+            names = {
+              "Keeper's Ascendant Pants of the Arcanists",
+            },
+            slot = "Legs",
+          },
+          Neck = {
+            ids = {
+              71651,
+            },
+            item = "Choker of One Hundred Diamonds",
+            names = {
+              "Choker of One Hundred Diamonds",
+            },
+            slot = "Neck",
+          },
+          Pack1 = {
+            ids = {
+              82795,
+            },
+            item = "Spell Pack: Bolster of the Sorcerer",
+            names = {
+              "Spell Pack: Bolster of the Sorcerer",
+            },
+            slot = "Pack1",
+            spell = "Bolster of the Sorcerer",
+            spells = {
+              "Bolster of the Sorcerer",
+            },
+          },
+          Pack2 = {
+            ids = {
+              82796,
+            },
+            item = "Spell Pack: Supernal Skin",
+            names = {
+              "Spell Pack: Supernal Skin",
+            },
+            slot = "Pack2",
+            spell = "Supernal Skin",
+            spells = {
+              "Supernal Skin",
+            },
+          },
+          Pack3 = {
+            ids = {
+              82797,
+            },
+            item = "Spell Pack: Ethereal Weave",
+            names = {
+              "Spell Pack: Ethereal Weave",
+            },
+            slot = "Pack3",
+            spell = "Ethereal Weave",
+            spells = {
+              "Ethereal Weave",
+            },
+          },
+          Ranged = {
+            ids = {
+              60536,
+            },
+            item = "Spark of the Skies",
+            names = {
+              "Spark of the Skies",
+            },
+            slot = "Ranged",
+          },
+          RangedAug = {
+            ids = {
+              71659,
+            },
+            item = "Core of the Skies",
+            names = {
+              "Core of the Skies",
+            },
+            slot = "RangedAug",
+          },
+          Shadow = {
+            ids = {
+              60669,
+            },
+            item = "Shadow of a Legendary Wizard Staff",
+            names = {
+              "Shadow of a Legendary Wizard Staff",
+            },
+            slot = "Shadow",
+          },
+          Shoulder = {
+            ids = {
+              71635,
+            },
+            item = "Brimstone Spaulders",
+            names = {
+              "Brimstone Spaulders",
+            },
+            slot = "Shoulder",
+          },
+          Waist = {
+            ids = {
+              71650,
+            },
+            item = "Sash of Frigidity",
+            names = {
+              "Sash of Frigidity",
+            },
+            slot = "Waist",
+          },
+          Wrist1 = {
+            ids = {
+              60468,
+            },
+            item = "Keeper's Ascendant Wristband of the Arcanists",
+            names = {
+              "Keeper's Ascendant Wristband of the Arcanists",
+            },
+            slot = "Wrist1",
+          },
+          Wrist2 = {
+            ids = {
+              60472,
+            },
+            item = "Keeper's Eternal Bracer of the Arcanists",
+            names = {
+              "Keeper's Eternal Bracer of the Arcanists",
+            },
+            slot = "Wrist2",
+          },
+        },
+      },
+      group = "Raid Best In Slot",
+      id = "don",
+      name = "Dragons of Norrath",
+      show_base = {
+      },
+      template = {
+        CharmExtreme = {
+          ids = {
+            55054,
+          },
+          item = "Lustrous Gem of Eternal Avarice",
+          names = {
+            "Lustrous Gem of Eternal Avarice",
+          },
+          slot = "CharmExtreme",
+        },
+        CharmSafe = {
+          ids = {
+            55055,
+          },
+          item = "Solemn Gem of Restrained Avarice",
+          names = {
+            "Solemn Gem of Restrained Avarice",
+          },
+          slot = "CharmSafe",
+        },
+        Duality = {
+          ids = {
+            66903,
+          },
+          item = "Duality of Desire",
+          names = {
+            "Duality of Desire",
+          },
+          slot = "Duality",
+        },
+        Materium1 = {
+          ids = {
+            62535,
+          },
+          item = "Primary Materium of Legends",
+          names = {
+            "Primary Materium of Legends",
+          },
+          slot = "Materium1",
+        },
+        Materium2 = {
+          ids = {
+            62536,
+          },
+          item = "Secondary Materium of Legends",
+          names = {
+            "Secondary Materium of Legends",
+          },
+          slot = "Materium2",
+        },
+        Materium3 = {
+          ids = {
+            62537,
+          },
+          item = "Tertiary Materium of Legends",
+          names = {
+            "Tertiary Materium of Legends",
+          },
+          slot = "Materium3",
+        },
+        Misc1 = {
+          ids = {
+            66731,
+          },
+          item = "Dark Reign Elite Satchel",
+          names = {
+            "Dark Reign Elite Satchel",
+          },
+          slot = "Misc1",
+        },
+        Misc2 = {
+          ids = {
+            66732,
+          },
+          item = "Dark Reign Initiate Satchel",
+          names = {
+            "Dark Reign Initiate Satchel",
+          },
+          slot = "Misc2",
+        },
+        Misc3 = {
+          ids = {
+            66733,
+          },
+          item = "Ancient Draconic Lockbox I",
+          names = {
+            "Ancient Draconic Lockbox I",
+          },
+          slot = "Misc3",
+        },
+        Misc4 = {
+          ids = {
+            66904,
+          },
+          item = "Scales of the Lava Dragon",
+          names = {
+            "Scales of the Lava Dragon",
+          },
+          slot = "Misc4",
+        },
+        Misc5 = {
+          ids = {
+            43224,
+          },
+          item = "Draconium Surveyor's Waystone",
+          names = {
+            "Draconium Surveyor's Waystone",
+          },
+          slot = "Misc5",
         },
       },
       visible = {

@@ -145,12 +145,17 @@ function M.draw()
     if not (st.lean and st.lean()) then
         Engine.request_all(false)
     end
-    draw_mode_picker()
-    if (Settings.augsViewMode or "single") == "single" then
+    local use_pill = Settings.showCharactersPill == true
+    if not use_pill then
+        draw_mode_picker()
+        if (Settings.augsViewMode or "single") == "single" then
+            ImGui.SameLine()
+            draw_character_picker()
+        end
         ImGui.SameLine()
-        draw_character_picker()
+    elseif (Settings.augsViewMode or "single") ~= "single" then
+        Settings.augsViewMode = "single"
     end
-    ImGui.SameLine()
     if toggle_button(Settings.hideOrnament and "Show T20/30" or "Hide T20/30", not Settings.hideOrnament) then
         Settings.hideOrnament = not Settings.hideOrnament
         SaveSettings()

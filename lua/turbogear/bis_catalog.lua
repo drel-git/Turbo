@@ -283,6 +283,54 @@ local function strict_first_id_for_bag_list(out)
     return out
 end
 
+-- DoN Shadow section: owning the finished class Shadow counts as having used
+-- Primary/Secondary/Tertiary Materium of Legends (mark those rows green).
+local function expand_don_shadow_chain(list, class_bucket, out)
+    local slot = tostring(out.slot or "")
+    if slot ~= "Materium1" and slot ~= "Materium2" and slot ~= "Materium3" then
+        return out
+    end
+    local shadow = (class_bucket and class_bucket.Shadow)
+        or (list and list.template and list.template.Shadow)
+    if not shadow then return out end
+    local e = norm_entry_cached(shadow)
+    local id_seen, name_seen = seed_id_seen(out), seed_name_seen(out)
+    add_ids(out, e.ids, id_seen)
+    add_names(out, e.names, name_seen)
+    add_names(out, { e.item }, name_seen)
+    return out
+end
+
+-- DoN Misc4: Scales of the Lava Dragon OR the finished class Draconic epic.
+local DON_SCALES_EPICS = {
+    Bard = { id = 55906, name = "Draconic Blade of Vesagran" },
+    Beastlord = { id = 55912, name = "Spiritcaller Totem of the Dragons" },
+    Berserker = { id = 55905, name = "Draconic Taelosian Blood Axe" },
+    Cleric = { id = 55082, name = "Aegis of Draconic Divinity" },
+    Druid = { id = 55729, name = "Staff of Draconic Brambles" },
+    Enchanter = { id = 55909, name = "Staff of Draconic Eloquence" },
+    Magician = { id = 55908, name = "Focus of Draconic Elements" },
+    Monk = { id = 55730, name = "Draconic Fistwraps of Immortality" },
+    Necromancer = { id = 55910, name = "Draconic Deathwhisper" },
+    Paladin = { id = 55081, name = "Nightbane, Sword of the Dragons" },
+    Ranger = { id = 40863, name = "Aurora, the Draconic Bow" },
+    Rogue = { id = 55904, name = "Nightshade, Blade of Draconic Entropy" },
+    ["Shadow Knight"] = { id = 55080, name = "Innoruuk's Draconic Blessing" },
+    Shaman = { id = 55728, name = "Draconic Spiritstaff of the Heyokah" },
+    Warrior = { id = 55079, name = "Kreljnok's Sword of Draconic Power" },
+    Wizard = { id = 55907, name = "Staff of Draconic Power" },
+}
+
+local function expand_don_scales_chain(out, class_name)
+    if tostring(out.slot or "") ~= "Misc4" then return out end
+    local epic = DON_SCALES_EPICS[class_key(class_name)]
+    if not epic then return out end
+    local id_seen, name_seen = seed_id_seen(out), seed_name_seen(out)
+    add_ids(out, { epic.id }, id_seen)
+    add_names(out, { epic.name }, name_seen)
+    return out
+end
+
 function M.groups()
     return catalog.groups or {}
 end
@@ -318,6 +366,7 @@ local UI_LIST_BUTTONS = {
     { id = "dsk", label = "DSK", group = "Raid Best In Slot" },
     { id = "sebilis", label = "Sebilis", group = "Raid Best In Slot" },
     { id = "veksar", label = "Veksar", group = "Raid Best In Slot" },
+    { id = "don", label = "Dragons of Norrath", group = "Raid Best In Slot" },
     { id = "llhcitems", label = "Lower HC", group = "Other Checklists" },
     { id = "hcitems", label = "Higher HC", group = "Other Checklists" },
     { id = "focusitems", label = "Focus BIS", group = "Other Checklists" },
@@ -443,9 +492,15 @@ function M.resolve_entry(list_id, class_name, slot)
     out.slot = slot
     out.group = out.group ~= "" and out.group or ""
     out.source = entry.source
+    out.spell = entry.spell
+    out.spells = entry.spells
+    out.notes = entry.notes
     expand_fungal_chain(list, class_bucket or list.template or list.visible, out)
     if list_id == "jonas" then
         expand_jonas_hand_chain(list, class_bucket, out)
+    elseif list_id == "don" then
+        expand_don_shadow_chain(list, class_bucket, out)
+        expand_don_scales_chain(out, class_name)
     elseif list_id == "bagitems" then
         strict_first_id_for_bag_list(out)
     end

@@ -8,8 +8,8 @@
                          \_/  \___/\_| \_\____/  \___/
 ---------------------------------------------------------------------------------->
                   https://www.github.com/drel-git/TurboLoot
-             Turbo v3.9.87 debug  -  suite hub / setup / toggle / pick group looter
-             @version lua/Turbo/init.lua 3.9.87
+             Turbo v3.9.88 debug  -  suite hub / setup / toggle / pick group looter
+             @version lua/Turbo/init.lua 3.9.88
 ---------------------------------------------------------------------------------->
     GUI mode:  /lua run Turbo  [optional: full | mini — layout + save]
     CLI modes:
@@ -1794,6 +1794,125 @@ TG.setHuntingTarget = function(itemName, sourceLabel)
     TG.statusMessage = string.format('Added Hunting target%s: %s',
         sourceLabel and sourceLabel ~= '' and (' from ' .. sourceLabel) or '', target)
     return true
+end
+
+--- Review right-click go loot: same best-effort pipeline as TurboGear linked-needs Go.
+--- Gates: corpse id required; for local Me, abort on zone mismatch. Does not prove
+--- the item is still on the corpse (TurboLoot GO reports not_found / empty).
+--- characterOverride: optional group member name (any toon, not just designated looter).
+TG.goLootReviewCorpse = function(row, statusSink, characterOverride)
+    local setStatus = function(msg)
+        msg = tostring(msg or '')
+        if type(statusSink) == 'function' then
+            statusSink(msg)
+        else
+            TG.statusMessage = msg
+        end
+    end
+    local corpseId = tonumber(row and row.corpseId) or 0
+    if corpseId <= 0 then
+        setStatus('Go loot: no corpse ID on this skip row')
+        return false
+    end
+    local itemName = tostring(row and row.name or ''):match('^%s*(.-)%s*$') or ''
+    if itemName == '' then
+        setStatus('Go loot: no item name on this skip row')
+        return false
+    end
+    local itemId = tonumber(row and row.itemId) or 0
+    local me = tostring(mq.TLO.Me.Name() or '')
+    local src = tostring(row and row.source or '')
+    local character = me
+    local override = tostring(characterOverride or ''):match('^%s*(.-)%s*$') or ''
+    if override ~= '' then
+        character = override
+    elseif src ~= '' and src ~= 'cli' and src:lower() ~= me:lower() then
+        character = src
+    end
+
+    if character:lower() == me:lower() then
+        local zone = tostring(row and row.zone or '')
+        local myZone = ''
+        pcall(function() myZone = tostring(mq.TLO.Zone.ShortName() or '') end)
+        if zone ~= '' and myZone ~= '' and zone:lower() ~= myZone:lower() then
+            setStatus(string.format('Go loot: corpse was in %s; you are in %s', zone, myZone))
+            return false
+        end
+    end
+
+    -- Match TurboGear linked-needs routing: /tgearbg is only bound on the bg
+    -- responder; the UI binds /tgear and runs the same goloot dispatcher.
+    local bgRunning = TG.luaScriptRunningAny
+        and TG.luaScriptRunningAny({ 'turbogear_bg', 'TurboGear_bg' })
+    local uiRunning = TG.luaScriptRunningAny
+        and TG.luaScriptRunningAny({ 'turbogear', 'TurboGear' })
+    if bgRunning then
+        mq.cmdf('/squelch /tgearbg goloot %s %d %d %s', character, corpseId, itemId, itemName)
+        setStatus(string.format('Go loot: %s -> %s (corpse %d)', character, itemName, corpseId))
+        return true
+    end
+    if uiRunning then
+        mq.cmdf('/squelch /tgear goloot %s %d %d %s', character, corpseId, itemId, itemName)
+        setStatus(string.format('Go loot: %s -> %s (corpse %d)', character, itemName, corpseId))
+        return true
+    end
+
+    if character:lower() == me:lower() then
+        mq.cmdf('/mac TurboLoot go %d %s', corpseId, itemName)
+        setStatus(string.format('Go loot (TurboLoot): %s (corpse %d)', itemName, corpseId))
+        return true
+    end
+
+    setStatus('Go loot needs TurboGear running to send another character')
+    return false
+end
+
+--- Candidates for Review Go loot picker: skip Src first, then Me, then group.
+--- Not limited to designated looters. Returns { { name, label }, ... }.
+TG.reviewGoLootCandidates = function(row)
+    local me = tostring(mq.TLO.Me.Name() or '')
+    local src = tostring(row and row.source or '')
+    local default = me
+    if src ~= '' and src ~= 'cli' then default = src end
+    local out, seen = {}, {}
+    local add = function(name, tag)
+        name = tostring(name or ''):match('^%s*(.-)%s*$') or ''
+        if name == '' or name == 'NOBODY' then return end
+        local key = name:lower()
+        if seen[key] then return end
+        seen[key] = true
+        local label = name
+        if tag and tag ~= '' then label = name .. ' ' .. tag end
+        out[#out + 1] = { name = name, label = label }
+    end
+    if default:lower() == me:lower() then
+        add(me, '(you)')
+    else
+        add(default, '(src)')
+        add(me, '(you)')
+    end
+    for _, name in ipairs(TG.members or {}) do
+        add(name)
+    end
+    return out
+end
+
+--- Draw Go loot submenu (group picker). Used by Full + quick Review context menus.
+TG.renderReviewGoLootMenu = function(row, menuId, statusSink)
+    if not row then return end
+    local valid = tostring(row.corpseId or '') ~= '' and tostring(row.corpseId or '') ~= '0'
+    if not valid then
+        Ui.menuItem('Go loot##' .. menuId, nil, false, {95, 210, 145, 255})
+        return
+    end
+    if ImGui.BeginMenu('Go loot##' .. menuId) then
+        for _, cand in ipairs(TG.reviewGoLootCandidates(row)) do
+            Ui.menuItem(cand.label .. '##' .. menuId .. '_' .. cand.name, function()
+                TG.goLootReviewCorpse(row, statusSink, cand.name)
+            end, true, {95, 210, 145, 255})
+        end
+        ImGui.EndMenu()
+    end
 end
 
 TG.clearHuntingTarget = function()
@@ -6205,6 +6324,23 @@ local function bindTurboRuntimeCommands()
     if not okWares then
         printf('\at[Turbo]\ax \ayCould not bind /turbowares: %s\ax', tostring(errWares))
     end
+    -- Review auto-clear after successful Go loot (local echo + TurboGear relay).
+    local okReviewGo, errReviewGo = pcall(function()
+        mq.bind('/turboreviewgoloot', function(...)
+            local args = { ... }
+            local note = tostring(args[1] or ''):lower()
+            if note ~= 'looted' and note ~= 'ok' and note ~= 'success' then return end
+            -- /turboreviewgoloot looted <corpseId> <item name...>
+            local start = 2
+            if tonumber(args[2]) then start = 3 end
+            local itemName = table.concat(args, ' ', start):match('^%s*(.-)%s*$') or ''
+            TG.dismissReviewAfterGoLoot(itemName)
+        end)
+    end)
+    TG.reviewGoLootBindActive = okReviewGo
+    if not okReviewGo then
+        printf('\at[Turbo]\ax \ayCould not bind /turboreviewgoloot: %s\ax', tostring(errReviewGo))
+    end
     registerSkipListener()
 end
 
@@ -6264,6 +6400,14 @@ local function unbindTurboRuntimeCommands()
     if TG.waresBindActive then
         pcall(function() mq.unbind('/turbowares') end)
         TG.waresBindActive = false
+    end
+    if TG.reviewGoLootBindActive then
+        pcall(function() mq.unbind('/turboreviewgoloot') end)
+        TG.reviewGoLootBindActive = false
+    end
+    if TG.goLootReviewEventActive then
+        pcall(function() mq.unevent('TurboReviewGoLootEcho') end)
+        TG.goLootReviewEventActive = false
     end
     unregisterSkipListener()
 end
@@ -6722,8 +6866,9 @@ TG.skipQueue = (function()
 end)()
 TG.markStartup('skip queue')
 
---- Apply a skip-review rule to a named item (not from cursor).
-local function applySkipRule(itemName, rule)
+TG.skipTracker = skipTracker
+-- Define on TG (not chunk locals): this file is at LuaJIT's 200-local main limit.
+TG.applySkipRule = function(itemName, rule)
     if TG.requireSharedControl and not TG.requireSharedControl('Review rule edit') then return end
     if not skipTracker then return end
     local ok = skipTracker.apply_rule(itemName, rule)
@@ -6734,8 +6879,7 @@ local function applySkipRule(itemName, rule)
     end
 end
 
---- Undo the last skip-review rule application.
-local function undoSkipRule()
+TG.undoSkipRule = function()
     if TG.requireSharedControl and not TG.requireSharedControl('Review undo') then return end
     if not skipTracker then return end
     local ok, err = skipTracker.undo_last()
@@ -6746,13 +6890,60 @@ local function undoSkipRule()
     end
 end
 
-TG.skipTracker = skipTracker
-TG.applySkipRule = applySkipRule
-TG.undoSkipRule = undoSkipRule
 TG.undoCursorRule = undoCursorRule
 TG.relootNow = relootNow
 TG.TurboKeyRGB = TurboKeyRGB
 TG.Theme = Theme
+
+--- Drop a Review skip row after a successful Go loot (TurboLoot [GOLOOT] looted
+--- or TurboGear /turboreviewgoloot). Failed go-loot leaves the row so the user
+--- can retry or Nav. Safe no-op when the item is not on the pending list.
+TG.dismissReviewAfterGoLoot = function(itemName, statusSink)
+    itemName = tostring(itemName or ''):match('^%s*(.-)%s*$') or ''
+    if itemName == '' then return false end
+    local tracker = TG.skipTracker or skipTracker
+    if not (tracker and tracker.dismiss) then return false end
+    local ok = tracker.dismiss(itemName)
+    if ok then
+        TG.skipDisplayRows = nil
+        TG.skipSelectedKey = nil
+        TG.skipSelectionSet = nil
+        TG.quickReviewSelectedKey = nil
+        local msg = itemName .. ' cleared from Review (go loot)'
+        if type(statusSink) == 'function' then
+            statusSink(msg)
+        else
+            TG.statusMessage = msg
+        end
+    end
+    return ok == true
+end
+
+-- Stored on TG (not chunk locals): this file is at LuaJIT's 200-local main limit.
+TG.parseGolootLootedItem = function(line)
+    line = tostring(line or '')
+    local lower = line:lower()
+    local tag_at = lower:find('%[goloot%]', 1, false)
+    if not tag_at then return nil end
+    local after = line:sub(tag_at + 8):match('^%s*(.-)%s*$') or ''
+    local status, rest = after:match('^(%S+)%s*(.*)$')
+    if not status or status:lower() ~= 'looted' then return nil end
+    rest = tostring(rest or ''):gsub('%(%s*ID%s*:%s*%d+%s*%)', ''):match('^%s*(.-)%s*$') or ''
+    if rest == '' then return nil end
+    return rest
+end
+
+TG.onGoLootReviewEcho = function(line)
+    local item = TG.parseGolootLootedItem(line)
+    if item then TG.dismissReviewAfterGoLoot(item) end
+end
+
+if not TG.goLootReviewEventActive then
+    pcall(function()
+        mq.event('TurboReviewGoLootEcho', '#*#[GOLOOT] looted #*#', TG.onGoLootReviewEcho)
+    end)
+    TG.goLootReviewEventActive = true
+end
 
 TG.repairSkipReviewData = function(g)
     g = g or TG
@@ -6797,7 +6988,7 @@ end
 --- Resolve the turboloot INI filename assigned to a character name.
 --- Reads the E3 var TurboLootIni for that character via MQ2Mono.
 --- Falls back to the active local INI if the character is unknown.
-local function resolveIniForChar(charName)
+TG.resolveIniForChar = function(charName)
     if not charName or charName == '' then
         return getTurbolootIniPath and
             (getTurbolootIniPath() or ''):match('[^\\/]+$') or 'turboloot.ini'
@@ -6895,10 +7086,10 @@ rebuildSkipDisplayRows = function()
         local rec = pending[i]
         local reasonCode, reasonDisplay = skipTracker.primary_reason(rec)
         local src = skipTracker.get_source(rec)
-        local iniFile = TG.skipIniTargetOverride or resolveIniForChar(src)
+        local iniFile = TG.skipIniTargetOverride or TG.resolveIniForChar(src)
         -- 3.8.33: resolve full path alongside the filename. apply_rule needs
         -- a full path to write the INI; UI display still uses the filename.
-        -- resolveIniForChar returns bare filename (e.g. "turboloot.ini") — we
+        -- TG.resolveIniForChar returns bare filename (e.g. "turboloot.ini") — we
         -- complete it via resolveTurbolootIniPathForProfile which probes
         -- Config\ and Macros\ under MacroQuest's base dir.
         local iniPath = nil
@@ -6956,7 +7147,7 @@ TG.clearActionablePendingSkips = function()
         if rec.name and rec.name ~= '' then
             local reasonCode = skipTracker.primary_reason(rec)
             local recSrc = skipTracker.get_source(rec)
-            local iniFile = resolveIniForChar(recSrc)
+            local iniFile = TG.resolveIniForChar(recSrc)
             local iniPath = resolveTurbolootIniPathForProfile and resolveTurbolootIniPathForProfile(iniFile) or nil
             local itemRule = nil
             if iniPath and iniPath ~= '' then
@@ -6977,9 +7168,9 @@ TG.clearActionablePendingSkips = function()
 end
 
 --- EQBC / echo event names (must be defined before registerSkipListener).
-local SKIP_EVENT_NAME = 'TurboSkipBroadcast'
+TG.SKIP_EVENT_NAME = 'TurboSkipBroadcast'
 --- Multiple patterns: MQ Next chat lines vary (color codes, channel); e3bc often does not surface to Lua mq.event without a local /echo.
-local SKIP_EVENT_PATTERNS = {
+TG.SKIP_EVENT_PATTERNS = {
     '#*#__TL_SKIP__|#*#',
     '#*#__TL_SKIP__|*',
     '*__TL_SKIP__|*',
@@ -6995,7 +7186,7 @@ TG.skipAnnouncePatterns = {
 }
 
 --- Current E3 GrpLootMode (single / multi / all), lowercased; default single.
-local function queryGrpLootMode()
+TG.queryGrpLootMode = function()
     local q = mq.TLO.MQ2Mono and mq.TLO.MQ2Mono.Query and mq.TLO.MQ2Mono.Query('e3,GrpLootMode')
     if not q then return 'single' end
     local v = q()
@@ -7004,7 +7195,7 @@ local function queryGrpLootMode()
 end
 
 --- MQ Next often does not pass argv to `lua run Turbo/skip_log append ...`; load module like TurboLoot.mac /lua parse (require + loadfile paths).
-local function onSkipBroadcast(line)
+TG.onSkipBroadcast = function(line)
     if not line:find('__TL_SKIP__|', 1, true) then return end
     TG.skipDisplayRows = nil
 end
@@ -7016,9 +7207,9 @@ end
 --- Register the EQBC __TL_SKIP__ event listener (called from bindTurboRuntimeCommands).
 registerSkipListener = function()
     if TG.skipEventActive then return end
-    for i, pat in ipairs(SKIP_EVENT_PATTERNS) do
+    for i, pat in ipairs(TG.SKIP_EVENT_PATTERNS) do
         pcall(function()
-            mq.event(SKIP_EVENT_NAME .. tostring(i), pat, onSkipBroadcast)
+            mq.event(TG.SKIP_EVENT_NAME .. tostring(i), pat, TG.onSkipBroadcast)
         end)
     end
     for i, pat in ipairs(TG.skipAnnouncePatterns) do
@@ -7031,9 +7222,9 @@ end
 
 unregisterSkipListener = function()
     if not TG.skipEventActive then return end
-    for i = 1, #SKIP_EVENT_PATTERNS do
+    for i = 1, #TG.SKIP_EVENT_PATTERNS do
         pcall(function()
-            mq.unevent(SKIP_EVENT_NAME .. tostring(i))
+            mq.unevent(TG.SKIP_EVENT_NAME .. tostring(i))
         end)
     end
     for i = 1, #TG.skipAnnouncePatterns do
@@ -8425,7 +8616,7 @@ local function renderSkipReview(g, skipTracker, tip, thinSep, undoSkipRule, Turb
                             ImGui.TextColored(0.52, 0.58, 0.70, 1.0, 'Corpse ID: ' .. row.corpseId)
                         end
                         ImGui.TextColored(0.45, 0.48, 0.52, 1.0,
-                            'Click row: primary item  |  Checkboxes: multi-select  |  Double-click: inspect  |  Right-click: actions')
+                            'Click row: primary item  |  Checkboxes: multi-select  |  Double-click: inspect  |  Right-click: Nav / Go loot / rules')
                         ImGui.EndTooltip()
                     end
                     if ImGui.IsItemHovered() and ImGui.IsMouseDoubleClicked and ImGui.IsMouseDoubleClicked(0) then
@@ -8448,6 +8639,9 @@ local function renderSkipReview(g, skipTracker, tip, thinSep, undoSkipRule, Turb
                         Ui.menuItem('Nav to corpse##review_nav_corpse_' .. row.key, function()
                             navToReviewCorpse(row)
                         end, validCorpseId, {95, 210, 145, 255})
+                        TG.renderReviewGoLootMenu(row, 'review_goloots_' .. row.key, function(msg)
+                            g.statusMessage = msg
+                        end)
                         Ui.menuItem('Add to hunting list##review_hunt_' .. row.key, function()
                             TG.setHuntingTarget(row.name, 'Review')
                         end, true, {95, 210, 145, 255})
@@ -8461,7 +8655,7 @@ local function renderSkipReview(g, skipTracker, tip, thinSep, undoSkipRule, Turb
                         end, true, {230, 120, 110, 255})
                         if ImGui.BeginMenu('Apply rule##review_apply_' .. row.key) then
                             for _, lab in ipairs({ 'KEEP', 'SELL', 'BANK', 'TRIBUTE', 'DESTROY', 'IGNORE', 'ANNOUNCE' }) do
-                                if ImGui.MenuItem(lab) then applySkipRule(row.name, lab) end
+                                if ImGui.MenuItem(lab) then TG.applySkipRule(row.name, lab) end
                             end
                             ImGui.EndMenu()
                         end
@@ -9358,7 +9552,7 @@ local function renderSkipReview(g, skipTracker, tip, thinSep, undoSkipRule, Turb
                 if recName and recName ~= '' then
                     local reasonCode = skipTracker.primary_reason(rec)
                     local recSrc = skipTracker.get_source(rec)
-                    local iniFile = resolveIniForChar(recSrc)
+                    local iniFile = TG.resolveIniForChar(recSrc)
                     local iniPath = nil
                     if resolveTurbolootIniPathForProfile then
                         iniPath = resolveTurbolootIniPathForProfile(iniFile)
@@ -9383,7 +9577,7 @@ local function renderSkipReview(g, skipTracker, tip, thinSep, undoSkipRule, Turb
                 if rec.name and rec.name ~= '' then
                     local reasonCode = skipTracker.primary_reason(rec)
                     local recSrc = skipTracker.get_source(rec)
-                    local iniFile = resolveIniForChar(recSrc)
+                    local iniFile = TG.resolveIniForChar(recSrc)
                     local iniPath = resolveTurbolootIniPathForProfile and resolveTurbolootIniPathForProfile(iniFile) or nil
                     local itemRule = TG.readReviewItemRule(iniPath, rec.name)
                     if not TG.isExpectedReviewSkip(reasonCode, itemRule) then
@@ -11547,6 +11741,9 @@ function TG.renderWindow()
                                 Ui.menuItem('Nav to corpse##quick_review_nav_corpse_' .. row.key, function()
                                     quickNavReviewCorpse(row)
                                 end, validCorpseId, {95, 210, 145, 255})
+                                TG.renderReviewGoLootMenu(row, 'quick_review_goloots_' .. row.key, function(msg)
+                                    g.statusMessage = msg
+                                end)
                                 Ui.menuItem('Add to hunting list##quick_review_hunt_' .. row.key, function()
                                     TG.setHuntingTarget(row.name, 'Review')
                                 end, true, {95, 210, 145, 255})
@@ -12399,6 +12596,8 @@ if nowMS() - TG.startupT0 >= 1000 then
 end
 
 while TG.windowOpen do
+    -- Do not mq.doevents() here: it can interrupt TurboLoot GO while a mac is
+    -- running. Review dismiss uses /turboreviewgoloot (bind) instead.
     require('Turbo.wares').processPendingActions(TG)
     -- Patcher shutdown hook: TurboPatcher drops turbo_patch.lock in the shared
     -- config dir before replacing files. TurboGear stops the rest of the suite;

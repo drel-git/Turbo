@@ -63,6 +63,11 @@ local function finish(ok, note)
     report(j, ok, note)
     if ok == true then
         pcall(function() require('inventory_watch').note_change(true, false) end)
+        -- Turbo Review: drop the skip row once TurboLoot confirmed looted.
+        pcall(function()
+            mq.cmd(string.format('/squelch /turboreviewgoloot looted %d %s',
+                tonumber(j.corpse_id) or 0, tostring(j.item_name or '')))
+        end)
     end
 end
 

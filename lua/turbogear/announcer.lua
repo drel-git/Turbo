@@ -202,6 +202,8 @@ end
 
 local is_player_link_chat_line = rules.is_player_link_chat_line
 local is_self_loot_line = rules.is_self_loot_line
+local is_guild_link_chat_line = rules.is_guild_link_chat_line
+local is_ooc_link_chat_line = rules.is_ooc_link_chat_line
 local is_other_player_chat_line = rules.is_other_player_chat_line
 
 local function link_name(item)
@@ -1277,6 +1279,14 @@ function M.on_go_loot_result(msg)
     -- (async actor request; disk flush happens when the reply lands).
     -- Only "looted" — not the interim "going" ack.
     local looted = note == "looted"
+    -- Turbo Review (viewer box): clear skip row after remote/local go-loot success.
+    if looted then
+        local corpse_id = tonumber(msg.corpse_id) or 0
+        pcall(function()
+            mq.cmd(string.format('/squelch /turboreviewgoloot looted %d %s',
+                corpse_id, item_name))
+        end)
+    end
     if looted and who ~= "" and who:lower() ~= me_name():lower() then
         local server = tostring(mq.TLO.MacroQuest.Server() or "?")
         local char_key = server .. "_" .. who
@@ -1898,6 +1908,14 @@ local function try_process_chat(line, allow_queue, opts)
     end
     if should_skip_line(line) then
         runtime.last_chat_note = "skip filter"
+        return false
+    end
+    if is_guild_link_chat_line(line) and SharedSettings.bisAnnounceListenGuild ~= true then
+        runtime.last_chat_note = "guild listen off"
+        return false
+    end
+    if is_ooc_link_chat_line(line) and SharedSettings.bisAnnounceListenOoc ~= true then
+        runtime.last_chat_note = "ooc listen off"
         return false
     end
     dprint("chat: %s", line:sub(1, 120))

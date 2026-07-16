@@ -1076,8 +1076,9 @@ function M.draw_worn_summary(source_key, opts)
     local worn_focus = M.collect_focus_entries(snap)
     local worn_totals = M.total_stats(snap)
 
-    col_text(Theme.section or Theme.header, string.format("Worn totals: %s", label))
-    col_text(Theme.dim, string.format("%d equipped items | %d focus/worn effects", item_count, #worn_focus))
+    col_text(Theme.header or Theme.neutral, string.format("Worn totals: %s", label))
+    col_text(Theme.owner or Theme.neutral or Theme.dim,
+        string.format("%d equipped items | %d focus/worn effects", item_count, #worn_focus))
     if not snapshot_stats_ok(snap) then
         if tostring(snap.depth or "") ~= "full" and #(snap.equipped or {}) > 0 then
             col_text(Theme.amber, "Cached inventory only - stat totals need a full Sync while this character is online.")

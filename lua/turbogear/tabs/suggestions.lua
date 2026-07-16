@@ -17,6 +17,7 @@ local item_actions = require('item_actions')
 local item_index = require('item_index')
 local Engine = require('engine').Engine
 local Store = require('store').Store
+local characters = require('characters')
 
 local M = {}
 M._state = require('state')
@@ -31,6 +32,7 @@ local overview_key, overview_slots, overview_meta = nil, {}, nil
 local aug_overview_key, aug_overview_rows, aug_overview_meta = nil, {}, nil
 local aug_detail_key, aug_detail_rows, aug_detail_meta = nil, {}, nil
 local aug_plan_key, aug_plan_rows, aug_plan_meta = nil, {}, nil
+local last_empty_socket_count = 0
 local selected_detail_key, selected_detail_row = nil, nil
 local whatif_status = ""
 local invalidate_caches
@@ -39,19 +41,24 @@ local aug_plan_reject_serial = 0
 local target_refresh_requests = {}
 local local_source_refresh_last = 0
 local cache_reload_last = 0
-local TARGET_REFRESH_GAP_S = 2.0
-local TARGET_AUTOSTART_GAP_S = 300.0
-local TARGET_REPAIR_AFTER_S = 2
-local TARGET_REPAIR_GAP_S = 90.0
-local TARGET_HEARTBEAT_FRESH_S = 30
-local ACTIONABLE_TARGET_MAX_AGE_S = 300
+-- Folded into tables to stay under Lua's 200-local main-chunk limit.
+local TARGET = {
+    REFRESH_GAP_S = 2.0,
+    AUTOSTART_GAP_S = 300.0,
+    REPAIR_AFTER_S = 2,
+    REPAIR_GAP_S = 90.0,
+    HEARTBEAT_FRESH_S = 30,
+    ACTIONABLE_MAX_AGE_S = 300,
+}
 M.CACHE_WATCH_S = 10.0
 M.CACHE_WATCH_INTERVAL_S = 0.25
 M.last_cache_reload_reason = ""
 
-local SUGGEST_UPGRADE_ROW = { 0.10, 0.17, 0.13, 0.70 }
-local SUGGEST_NO_UPGRADE = { 0.78, 0.61, 0.28, 1.0 }
-local SUGGEST_RESULT_VALUE = { 0.82, 0.86, 0.92, 1.0 }
+local SUGGEST_COLORS = {
+    UPGRADE_ROW = { 0.10, 0.17, 0.13, 0.70 },
+    NO_UPGRADE = { 0.78, 0.61, 0.28, 1.0 },
+    RESULT_VALUE = { 0.82, 0.86, 0.92, 1.0 },
+}
 
 local SOURCE_SCOPES = {
     { key = "all", label = "All Known" },
@@ -359,8 +366,8 @@ local function maybe_refresh_selected_target(snap)
         requested = 0,
         waiting_since = 0,
         ok = false,
-        last_autostart = -TARGET_AUTOSTART_GAP_S,
-        last_repair = -TARGET_REPAIR_GAP_S,
+        last_autostart = -TARGET.AUTOSTART_GAP_S,
+        last_repair = -TARGET.REPAIR_GAP_S,
         cache_watch_until = 0,
         request_id = "",
     }
@@ -370,7 +377,7 @@ local function maybe_refresh_selected_target(snap)
         target_refresh_requests[key] = rec
         return rec
     end
-    if (now - (rec.last or 0)) >= TARGET_REFRESH_GAP_S then
+    if (now - (rec.last or 0)) >= TARGET.REFRESH_GAP_S then
         rec.last = now
         rec.requested = os.time()
         if key == "__self__" then
@@ -381,19 +388,19 @@ local function maybe_refresh_selected_target(snap)
                 local cmd = name ~= "" and cfg.soft_start_bg_command_for(name) or ""
                 local actor_seen = tonumber(snap.actorSeenAt) or 0
                 local actor_age = actor_seen > 0 and math.max(0, os.time() - actor_seen) or 999999
-                local peer_fresh = tostring(snap.status or "") == "online" and actor_age <= TARGET_HEARTBEAT_FRESH_S
+                local peer_fresh = tostring(snap.status or "") == "online" and actor_age <= TARGET.HEARTBEAT_FRESH_S
                 if peer_fresh then
                     rec.waiting_since = 0
                 elseif (rec.waiting_since or 0) <= 0 then
                     rec.waiting_since = os.time()
                 end
-                if cmd ~= "" and not peer_fresh and (now - (rec.last_autostart or 0)) >= TARGET_AUTOSTART_GAP_S then
+                if cmd ~= "" and not peer_fresh and (now - (rec.last_autostart or 0)) >= TARGET.AUTOSTART_GAP_S then
                     mq.cmd(cmd)
                     rec.last_autostart = now
                 end
                 local waited_for_actor = (rec.waiting_since or 0) > 0 and math.max(0, os.time() - rec.waiting_since) or 0
-                if name ~= "" and not peer_fresh and waited_for_actor >= TARGET_REPAIR_AFTER_S
-                    and (now - (rec.last_repair or 0)) >= TARGET_REPAIR_GAP_S
+                if name ~= "" and not peer_fresh and waited_for_actor >= TARGET.REPAIR_AFTER_S
+                    and (now - (rec.last_repair or 0)) >= TARGET.REPAIR_GAP_S
                 then
                     local repair_cmd = cfg.repair_bg_command_for and cfg.repair_bg_command_for(name) or ""
                     if repair_cmd ~= "" then
@@ -422,7 +429,7 @@ local function maybe_refresh_local_source()
     local age = snapshot_inventory_age(snap) or 999999
     if snap.depth == "full" and age <= 120 then return end
     local now = os.clock()
-    if (now - (local_source_refresh_last or 0)) < TARGET_REFRESH_GAP_S then return end
+    if (now - (local_source_refresh_last or 0)) < TARGET.REFRESH_GAP_S then return end
     local_source_refresh_last = now
     if Engine.publish(true, "full", { skipLockouts = true, skipLiveStats = true }) and invalidate_caches then invalidate_caches() end
 end
@@ -438,7 +445,7 @@ local function draw_target_freshness_warning(snap)
     local target_name = tostring(snap.name or "target")
     local actor_seen = tonumber(snap.actorSeenAt) or 0
     local actor_age = actor_seen > 0 and math.max(0, os.time() - actor_seen) or 999999
-    local actor_hint = actor_age > TARGET_HEARTBEAT_FRESH_S and " TurboGear bg is not answering yet; starting or repairing it automatically." or ""
+    local actor_hint = actor_age > TARGET.HEARTBEAT_FRESH_S and " TurboGear bg is not answering yet; starting or repairing it automatically." or ""
     local function draw_request_diag()
         if not refresh then return end
         local parts = {}
@@ -477,7 +484,7 @@ local function selected_target_inventory_ready(snap)
     if selected_target_key() == "__self__" then return true end
     if type(snap) ~= "table" then return false end
     local age = snapshot_inventory_age(snap) or 999999
-    return snap.depth == "full" and age <= ACTIONABLE_TARGET_MAX_AGE_S
+    return snap.depth == "full" and age <= TARGET.ACTIONABLE_MAX_AGE_S
 end
 
 local function draw_target_inventory_wait(snap)
@@ -625,7 +632,7 @@ end
 local function format_delta(delta)
     if delta == nil then return "-", Theme.placeholder or Theme.dim end
     local n = math.floor(delta)
-    if n > 0 then return "+" .. tostring(n), SUGGEST_RESULT_VALUE end
+    if n > 0 then return "+" .. tostring(n), SUGGEST_COLORS.RESULT_VALUE end
     if n < 0 then return tostring(n), Theme.brick or Theme.missing or Theme.amber end
     return "=", Theme.dim
 end
@@ -633,7 +640,7 @@ end
 local function delta_result_color(delta)
     if delta == nil then return Theme.placeholder or Theme.dim end
     local n = math.floor(delta)
-    if n > 0 then return SUGGEST_RESULT_VALUE end
+    if n > 0 then return SUGGEST_COLORS.RESULT_VALUE end
     if n < 0 then return Theme.brick or Theme.missing or Theme.amber end
     return Theme.header or Theme.cyan or Theme.dim
 end
@@ -670,9 +677,9 @@ local function draw_result_inline(delta)
     if n > 0 then
         col_text(Theme.green or Theme.valueTop, "Upgrade")
         ImGui.SameLine(0, 4)
-        col_text(SUGGEST_RESULT_VALUE, value_text)
+        col_text(SUGGEST_COLORS.RESULT_VALUE, value_text)
     else
-        col_text(SUGGEST_NO_UPGRADE, "No upgrade")
+        col_text(SUGGEST_COLORS.NO_UPGRADE, "No upgrade")
         ImGui.SameLine(0, 4)
         col_text(n < 0 and value_color or Theme.dim, best_available_text(delta))
     end
@@ -747,7 +754,7 @@ local function draw_detail_result_cell(wrapped)
     if n > 0 then
         col_text(Theme.green or Theme.valueTop, "Upgrade:")
         ImGui.SameLine(0, 4)
-        col_text(SUGGEST_RESULT_VALUE, stat .. " " .. value_text)
+        col_text(SUGGEST_COLORS.RESULT_VALUE, stat .. " " .. value_text)
     elseif n == 0 then
         col_text(Theme.dim, "Sidegrade:")
         ImGui.SameLine(0, 4)
@@ -794,7 +801,7 @@ local function draw_candidate_result(wrapped, pick_kind)
     local n = math.floor(delta)
     if n > 0 then
         col_text(Theme.green or Theme.valueTop, "Upgrade:"); ImGui.SameLine()
-        col_text(SUGGEST_RESULT_VALUE, string.format("%s %s", stat, value_text))
+        col_text(SUGGEST_COLORS.RESULT_VALUE, string.format("%s %s", stat, value_text))
         local stat_line = M.format_item_primary_stat(wrapped.row)
         if stat_line ~= "" then col_text(Theme.dim, "Base: " .. stat_line) end
         draw_secondary_also_line(wrapped, true)
@@ -887,7 +894,7 @@ local function candidate_classification(wrapped, current)
     local n = wrapped.delta ~= nil and math.floor(wrapped.delta) or nil
     if n and n > 0 then return "upgrade", "Upgrade", Theme.valueTop or Theme.green end
     if n and n == 0 then return "sidegrade", "Sidegrade", Theme.dim end
-    return "best", "Best known only", SUGGEST_NO_UPGRADE
+    return "best", "Best known only", SUGGEST_COLORS.NO_UPGRADE
 end
 
 local function transfer_lines(action)
@@ -1203,6 +1210,10 @@ invalidate_caches = function()
     aug_detail_key = nil
     aug_plan_key = nil
 end
+
+characters.set_on_changed(function()
+    invalidate_caches()
+end, "suggestions")
 
 function M.open_for(target_key, slot_id, opts)
     ensure_defaults()
@@ -1526,19 +1537,24 @@ local function draw_view_mode_picker()
     local equip_active = cur == "overview" or cur == "detail"
     local aug_active = cur == "aug_overview" or cur == "aug_detail"
     local aug_plan_active = cur == "aug_plan"
-    if nav_button("Character##suggest_mode_overview", equip_active, true, 0, 22.0) and not equip_active then
+    local empty_n = tonumber(last_empty_socket_count) or 0
+    local empty_label = empty_n > 0
+        and string.format("Empty sockets (%d)##suggest_mode_aug", empty_n)
+        or "Empty sockets##suggest_mode_aug"
+
+    if nav_button("Gear upgrades##suggest_mode_overview", equip_active, true, 0, 22.0) and not equip_active then
         Settings.suggestViewMode = "overview"
         SaveSettings()
         invalidate_caches()
     end
     ImGui.SameLine()
-    if nav_button("Augs##suggest_mode_aug", aug_active, true, 0, 22.0) and not aug_active then
+    if nav_button(empty_label, aug_active, true, 0, 22.0) and not aug_active then
         Settings.suggestViewMode = "aug_overview"
         SaveSettings()
         invalidate_caches()
     end
     ImGui.SameLine()
-    if nav_button("Aug Plan##suggest_mode_aug_plan", aug_plan_active, true, 0, 22.0) and not aug_plan_active then
+    if nav_button("Socket plan##suggest_mode_aug_plan", aug_plan_active, true, 0, 22.0) and not aug_plan_active then
         Settings.suggestViewMode = "aug_plan"
         SaveSettings()
         invalidate_caches()
@@ -1634,7 +1650,7 @@ end
 local function highlight_upgrade_row(slot_rec)
     if not (slot_rec.upgradeCount and slot_rec.upgradeCount > 0) then return end
     if ImGui.TableSetBgColor and ImGuiTableBgTarget and ImGuiTableBgTarget.RowBg0 and theme.color_u32 then
-        pcall(ImGui.TableSetBgColor, ImGuiTableBgTarget.RowBg0, theme.color_u32(SUGGEST_UPGRADE_ROW))
+        pcall(ImGui.TableSetBgColor, ImGuiTableBgTarget.RowBg0, theme.color_u32(SUGGEST_COLORS.UPGRADE_ROW))
     end
 end
 
@@ -2015,6 +2031,7 @@ local function visible_aug_overview()
         aug_overview_rows = rows
         aug_overview_meta = meta
         aug_overview_key = key
+        last_empty_socket_count = tonumber(meta and meta.totalEmptySockets) or 0
         return aug_overview_rows, aug_overview_meta
     end)
 end
@@ -2323,7 +2340,7 @@ end
 local function highlight_aug_row(sock_rec)
     if not (sock_rec.totalCount and sock_rec.totalCount > 0) then return end
     if ImGui.TableSetBgColor and ImGuiTableBgTarget and ImGuiTableBgTarget.RowBg0 and theme.color_u32 then
-        pcall(ImGui.TableSetBgColor, ImGuiTableBgTarget.RowBg0, theme.color_u32(SUGGEST_UPGRADE_ROW))
+        pcall(ImGui.TableSetBgColor, ImGuiTableBgTarget.RowBg0, theme.color_u32(SUGGEST_COLORS.UPGRADE_ROW))
     end
 end
 
@@ -2503,12 +2520,11 @@ local function collect_top_plan_actions(rows, meta)
             if #out >= 5 then return out end
         end
     end
-    if #out > 0 then return out end
-    for _, pair in ipairs(rows or {}) do
-        out[#out + 1] = pair
-        if #out >= 5 then break end
-    end
     return out
+end
+
+local function plan_has_visible_actions(rows, meta)
+    return #collect_top_plan_actions(rows, meta) > 0
 end
 
 local function plan_action_counts(rows, meta)
@@ -2543,7 +2559,8 @@ end
 local function draw_aug_plan_steps(rows, meta)
     if not rows or #rows == 0 then return end
     local top_rows = collect_top_plan_actions(rows, meta)
-    local counts = plan_action_counts(rows, meta)
+    if #top_rows == 0 then return end
+    local counts = plan_action_counts(top_rows, meta)
     col_text(Theme.section or Theme.header, "Top Actions")
     col_text(Theme.dim, string.format("%d actions | %d replacement%s | %d fill%s | %d give | %d bank | %d owned | %d offline",
         counts.total,
@@ -2637,7 +2654,7 @@ local function draw_aug_plan(rows, meta)
                 shown = shown + 1
                 ImGui.TableNextRow()
                 if ImGui.TableSetBgColor and ImGuiTableBgTarget and ImGuiTableBgTarget.RowBg0 and theme.color_u32 then
-                    pcall(ImGui.TableSetBgColor, ImGuiTableBgTarget.RowBg0, theme.color_u32(SUGGEST_UPGRADE_ROW))
+                    pcall(ImGui.TableSetBgColor, ImGuiTableBgTarget.RowBg0, theme.color_u32(SUGGEST_COLORS.UPGRADE_ROW))
                 end
                 ImGui.TableSetColumnIndex(0)
                 col_text(Theme.slot, sock.slotLabel or "?")
@@ -2819,10 +2836,16 @@ function M.draw()
     ensure_defaults()
     local mode = Settings.suggestViewMode or "overview"
 
-    draw_target_picker()
-    ImGui.SameLine()
-    draw_scope_picker()
-    ImGui.SameLine()
+    -- Keep Empty sockets (N) badge fresh without requiring a visit to that view.
+    pcall(visible_aug_overview)
+
+    local use_pill = Settings.showCharactersPill == true
+    if not use_pill then
+        draw_target_picker()
+        ImGui.SameLine()
+        draw_scope_picker()
+        ImGui.SameLine()
+    end
     draw_view_mode_picker()
 
     ImGui.Separator()
@@ -2831,7 +2854,7 @@ function M.draw()
 
     if mode == "detail" then
         ImGui.Separator()
-        if themed_button("< Back to Character##suggest_back_overview", Theme.blue) then
+        if themed_button("< Back to Gear upgrades##suggest_back_overview", Theme.blue) then
             Settings.suggestViewMode = "overview"
             SaveSettings()
         end
@@ -2845,7 +2868,7 @@ function M.draw()
         end
     elseif mode == "aug_detail" then
         ImGui.Separator()
-        if themed_button("< Back to Augs##suggest_back_aug", Theme.blue) then
+        if themed_button("< Back to Empty sockets##suggest_back_aug", Theme.blue) then
             Settings.suggestViewMode = "aug_overview"
             SaveSettings()
         end
@@ -2855,15 +2878,6 @@ function M.draw()
         if next_aug_search ~= aug_search_text then
             aug_search_text = next_aug_search or ""
             aug_detail_key = nil
-        end
-    elseif mode == "aug_overview" then
-        ImGui.Separator()
-        ImGui.Text("Why not shown?")
-        ImGui.SameLine()
-        ImGui.SetNextItemWidth(220.0)
-        local next_aug_search = input_text_hint("##suggest_aug_why", "Aug name to diagnose", aug_search_text)
-        if next_aug_search ~= aug_search_text then
-            aug_search_text = next_aug_search or ""
         end
     end
 
@@ -2887,84 +2901,144 @@ function M.draw()
             (meta and meta.totalUpgrades or 0) == 1 and "" or "s",
             compare_stats_summary()))
         col_text(Theme.dim, "Green = better than worn on primary stat | Secondary stat deltas shown when multi-compare | Highlighted rows have upgrades")
-        ImGui.SetNextItemWidth(220.0)
-        local next_why = input_text_hint("##suggest_overview_why", "Why not shown? item name", overview_why_text)
-        if next_why ~= overview_why_text then overview_why_text = next_why or "" end
-        if (overview_why_text or ""):match("^%s*(.-)%s*$") ~= "" then
-            local explain = suggestions.explain({
-                targetKey = Settings.suggestTargetKey,
-                scope = Settings.suggestSourceScope,
-                locationFilter = Settings.suggestLocationFilter,
-                needle = overview_why_text,
-            })
-            for _, line in ipairs(explain) do
-                local hit = tostring(line):find("WOULD SHOW", 1, true) ~= nil
-                col_text(hit and (Theme.valueTop or Theme.green) or (Theme.amber or Theme.gold), line)
+        if theme.collapsing_section("Why not shown?", false) then
+            ImGui.SetNextItemWidth(220.0)
+            local next_why = input_text_hint("##suggest_overview_why", "Item name to diagnose", overview_why_text)
+            if next_why ~= overview_why_text then overview_why_text = next_why or "" end
+            if (overview_why_text or ""):match("^%s*(.-)%s*$") ~= "" then
+                local explain = suggestions.explain({
+                    targetKey = Settings.suggestTargetKey,
+                    scope = Settings.suggestSourceScope,
+                    locationFilter = Settings.suggestLocationFilter,
+                    needle = overview_why_text,
+                })
+                for _, line in ipairs(explain) do
+                    local hit = tostring(line):find("WOULD SHOW", 1, true) ~= nil
+                    col_text(hit and (Theme.valueTop or Theme.green) or (Theme.amber or Theme.gold), line)
+                end
+                col_text(Theme.dim, "(\"Would show\" checks slot/class/level/scope/location only; the Upgrades filter may still hide non-upgrades.)")
             end
-            col_text(Theme.dim, "(\"Would show\" checks slot/class/level/scope/location only; the Upgrades filter may still hide non-upgrades.)")
         end
         ImGui.Spacing()
         local ok, err = pcall(draw_overview, slots, meta)
         if not ok then col_text(Theme.amber, "Overview render issue: " .. tostring(err)) end
+
+        local empty_n = tonumber(last_empty_socket_count) or 0
+        ImGui.Spacing()
+        local empty_open = theme.collapsing_section(
+            empty_n > 0 and string.format("Empty sockets (%d)", empty_n) or "Empty sockets",
+            empty_n > 0)
+        if empty_open then
+            if empty_n <= 0 then
+                col_text(Theme.dim, "No empty aug sockets on this character.")
+            else
+                col_text(Theme.dim, "Open Empty sockets for Give Now / install candidates.")
+                if themed_button("Open Empty sockets##suggest_jump_empty", Theme.blue, 140, 0) then
+                    Settings.suggestViewMode = "aug_overview"
+                    SaveSettings()
+                    invalidate_caches()
+                end
+            end
+        end
+        ImGui.Spacing()
+        if theme.collapsing_section("Socket plan (advanced)", false) then
+            col_text(Theme.dim, "Reshuffle filled and empty sockets for net compare-stat gains.")
+            if themed_button("Open Socket plan##suggest_jump_plan", Theme.blue, 140, 0) then
+                Settings.suggestViewMode = "aug_plan"
+                SaveSettings()
+                invalidate_caches()
+            end
+        end
     elseif mode == "aug_plan" then
         local rows, meta = visible_aug_plan()
         draw_target_freshness_warning(views.source_snapshot(Settings.suggestTargetKey or "__self__"))
-        col_text(Theme.dim, string.format("%s (%s) | %d sockets (%d filled, %d empty) | %d positive match%s",
+        col_text(Theme.dim, string.format("%s (%s) | %d sockets (%d filled, %d empty)",
             meta and meta.targetName or "?",
             meta and meta.targetClass or "?",
             meta and meta.socketCount or 0,
             meta and meta.filledCount or 0,
-            meta and meta.emptyCount or 0,
-            meta and meta.candidatePairs or 0,
-            (meta and meta.candidatePairs or 0) == 1 and "" or "es"))
-        col_text(Theme.dim, "Aug Plan evaluates filled and empty sockets. Compare stats act as priority order; capped stats use live totals when available.")
-        if meta and (tonumber(meta.loreBlocked) or 0) > 0 then
-            col_text(Theme.amber or Theme.gold, tostring(meta.loreBlocked) .. " duplicate Lore candidate matches hidden.")
-        end
-        if meta and ((tonumber(meta.candidatePairs) or 0) == 0 or #rows == 0) then
-            local reason = M.aug_plan_empty_reason(meta)
-            if reason ~= "" then col_text(Theme.amber or Theme.gold, reason) end
-            local text = aug_plan_funnel_text(meta)
-            if text ~= "" then col_text(Theme.amber or Theme.gold, text) end
-            M.draw_blocked_aug_examples(meta)
-        end
+            meta and meta.emptyCount or 0))
+        col_text(Theme.dim, "Compare stats are priority order. Capped stats use live totals when available.")
         draw_plan_totals(meta)
-        ImGui.Spacing()
-        draw_aug_plan_steps(rows, meta)
-        ImGui.Spacing()
-        local ok, err = pcall(draw_aug_plan, rows, meta)
-        if not ok then col_text(Theme.amber, "Aug plan render issue: " .. tostring(err)) end
+        local has_actions = plan_has_visible_actions(rows, meta)
+        if not has_actions then
+            local reason = M.aug_plan_empty_reason(meta)
+            if reason ~= "" then
+                col_text(Theme.amber or Theme.gold, reason)
+            else
+                col_text(Theme.dim, "No positive socket moves under the current compare stats and filters.")
+            end
+            if theme.collapsing_section("Why no plan moves?", false) then
+                local text = aug_plan_funnel_text(meta)
+                if text ~= "" then col_text(Theme.dim, text) end
+                M.draw_blocked_aug_examples(meta)
+            end
+        else
+            if meta and (tonumber(meta.loreBlocked) or 0) > 0 then
+                col_text(Theme.amber or Theme.gold, tostring(meta.loreBlocked) .. " duplicate Lore candidate matches hidden.")
+            end
+            ImGui.Spacing()
+            draw_aug_plan_steps(rows, meta)
+            ImGui.Spacing()
+            local ok, err = pcall(draw_aug_plan, rows, meta)
+            if not ok then col_text(Theme.amber, "Aug plan render issue: " .. tostring(err)) end
+        end
+        if aug_plan_reject_serial > 0 then
+            ImGui.Spacing()
+            if themed_button("Reset skips##tg_aug_plan_reset_rejected", Theme.steel, 98, 0) then
+                clear_aug_plan_rejects()
+            end
+        end
     elseif mode == "aug_overview" then
         local rows, meta = visible_aug_overview()
         draw_target_freshness_warning(views.source_snapshot(Settings.suggestTargetKey or "__self__"))
-        col_text(Theme.dim, string.format("%s (%s) | %d empty aug socket%s | %d actionable | %d loose aug match%s",
-            meta and meta.targetName or "?",
-            meta and meta.targetClass or "?",
-            meta and meta.totalEmptySockets or 0,
-            (meta and meta.totalEmptySockets or 0) == 1 and "" or "s",
-            meta and meta.socketsWithCandidates or 0,
-            meta and meta.totalCandidates or 0,
-            (meta and meta.totalCandidates or 0) == 1 and "" or "es"))
-        col_text(Theme.dim, "Best loose augs for empty sockets. Give Now moves the aug; install remains manual.")
-        if (meta and (meta.totalCandidates or 0) == 0) then
-            local text = aug_summary_text(meta.looseSummary)
-            if text ~= "" then col_text(Theme.amber or Theme.gold, text) end
-        end
-        if (aug_search_text or ""):match("^%s*(.-)%s*$") ~= "" then
-            local explain = aug_suggestions.explain({
-                targetKey = Settings.suggestTargetKey,
-                scope = Settings.suggestSourceScope,
-                locationFilter = Settings.suggestLocationFilter,
-                needle = aug_search_text,
-            })
-            for _, line in ipairs(explain) do
-                local hit = tostring(line):find("WOULD SHOW", 1, true) ~= nil
-                col_text(hit and (Theme.valueTop or Theme.green) or (Theme.amber or Theme.gold), line)
+        local empty_n = tonumber(meta and meta.totalEmptySockets) or 0
+        if empty_n <= 0 then
+            col_text(Theme.dim, string.format("%s (%s) | no empty aug sockets",
+                meta and meta.targetName or "?",
+                meta and meta.targetClass or "?"))
+            col_text(Theme.placeholder or Theme.dim, "No empty aug sockets on this character.")
+            if theme.collapsing_section("Why empty?", false) then
+                local text = aug_summary_text(meta and meta.looseSummary)
+                if text ~= "" then col_text(Theme.dim, text) end
+                ImGui.SetNextItemWidth(220.0)
+                local next_aug_search = input_text_hint("##suggest_aug_why", "Aug name to diagnose", aug_search_text)
+                if next_aug_search ~= aug_search_text then
+                    aug_search_text = next_aug_search or ""
+                end
+                if (aug_search_text or ""):match("^%s*(.-)%s*$") ~= "" then
+                    local explain = aug_suggestions.explain({
+                        targetKey = Settings.suggestTargetKey,
+                        scope = Settings.suggestSourceScope,
+                        locationFilter = Settings.suggestLocationFilter,
+                        needle = aug_search_text,
+                    })
+                    for _, line in ipairs(explain) do
+                        local hit = tostring(line):find("WOULD SHOW", 1, true) ~= nil
+                        col_text(hit and (Theme.valueTop or Theme.green) or (Theme.amber or Theme.gold), line)
+                    end
+                end
             end
+        else
+            col_text(Theme.dim, string.format("%s (%s) | %d empty aug socket%s | %d actionable | %d loose aug match%s",
+                meta and meta.targetName or "?",
+                meta and meta.targetClass or "?",
+                empty_n,
+                empty_n == 1 and "" or "s",
+                meta and meta.socketsWithCandidates or 0,
+                meta and meta.totalCandidates or 0,
+                (meta and meta.totalCandidates or 0) == 1 and "" or "es"))
+            col_text(Theme.dim, "Best loose augs for empty sockets. Give Now moves the aug; install remains manual.")
+            if (meta and (meta.totalCandidates or 0) == 0) then
+                if theme.collapsing_section("Why no matches?", false) then
+                    local text = aug_summary_text(meta.looseSummary)
+                    if text ~= "" then col_text(Theme.dim, text) end
+                end
+            end
+            ImGui.Spacing()
+            local ok, err = pcall(draw_aug_overview, rows, meta)
+            if not ok then col_text(Theme.amber, "Aug overview render issue: " .. tostring(err)) end
         end
-        ImGui.Spacing()
-        local ok, err = pcall(draw_aug_overview, rows, meta)
-        if not ok then col_text(Theme.amber, "Aug overview render issue: " .. tostring(err)) end
         if aug_plan_reject_serial > 0 then
             ImGui.Spacing()
             if themed_button("Reset skips##tg_aug_overview_reset_rejected", Theme.steel, 98, 0) then
@@ -3002,7 +3076,7 @@ function M.draw()
         ImGui.Spacing()
         if #rows == 0 then
             col_text(Theme.placeholder or Theme.dim, upgrades_focus_on()
-                and "No upgrades in the network for this slot. Switch to Filter: All Slots or use Character view."
+                and "No upgrades in the network for this slot. Switch to Filter: All Slots or Gear upgrades."
                 or "No cached items match this slot and filters.")
         else
             local ok, err = pcall(draw_detail_rows, rows)

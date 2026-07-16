@@ -21,6 +21,7 @@ local my_key = require('store').my_key
 local snapshot_mod = require('snapshot')
 local diag = require('diagnostics')
 local roster_sets = require('roster_sets')
+local characters = require('characters')
 local anguish_ref = require('references.anguish')
 local announcer = require('announcer')
 local ok_dsk_type12_ref, dsk_type12_ref = pcall(require, 'references.dsk_type12_focus')
@@ -41,10 +42,7 @@ local draft_name, filter = "", ""
 local status_msg = ""
 local suggest_tab
 local draw_bis_color_legend
-local set_popup_open = false
-local set_popup_mode = "save"
-local set_draft_name = ""
-local set_draft_members = {}
+-- Character-set editor state lives in characters.lua (open_set_editor / draw_set_editor).
 
 local function open_find_candidates(view_key, slot_name)
     local slot_id = items.slot_id_for_label(slot_name)
@@ -196,6 +194,10 @@ local peek_snapshot
 local catalog_cell_text
 local select_catalog
 local select_user_list
+
+characters.set_on_changed(function()
+    roster_cache.key = nil
+end, "bis")
 
 local function ensure_density_defaults()
     if Settings.bisViewDensity == nil or Settings.bisViewDensity == "" then
@@ -1020,7 +1022,7 @@ end
 
 local function row_color(row)
     if row and row.status == "equipped" then return BIS_GREEN end
-    if row and row.status == "carried" then return BIS_BAG end
+    if row and (row.status == "carried" or row.status == "known") then return BIS_BAG end
     if show_elsewhere() and row and row.elsewhere then return BIS_ELSE end
     return BIS_MISS
 end
@@ -1153,15 +1155,12 @@ end
 
 local function cell_tooltip(row, snap, slot)
     if not row or row.empty or not row.entry then return nil end
-    local parts = {
-        row.entry.item or "?",
-        string.format("Status: %s", row_label(row)),
-    }
-    if row.entry.source and row.entry.source ~= "" then
-        parts[#parts + 1] = "Source: " .. row.entry.source
+    local parts = { row.entry.item or "?" }
+    local notes = row.entry.notes and tostring(row.entry.notes) or ""
+    if notes ~= "" then
+        notes = notes:gsub("\226\128\147", "-"):gsub("\226\128\148", "-"):gsub("–", "-"):gsub("—", "-")
+        parts[#parts + 1] = notes
     end
-    if slot and slot ~= "" then parts[#parts + 1] = "Slot: " .. slot end
-    if snap then parts[#parts + 1] = string.format("%s (%s)", snap.name or "?", snap.class or "?") end
     if row.match and row.status ~= "missing" then parts[#parts + 1] = row_location(row) end
     if show_elsewhere() and row.elsewhere then parts[#parts + 1] = "Available: " .. elsewhere_location(row) end
     return table.concat(parts, "\n")
@@ -1184,28 +1183,66 @@ local function draw_cell_tooltip(row, snap, slot)
         tip(cell_tooltip(row, snap, slot))
         return true
     end
+    -- Slim hover: name + optional notes + location/elsewhere.
+    -- Status/slot/group/owner are already visible in the grid.
     theme.colored_text(row.entry.item or "?", row_color(row))
-    tooltip_label("Status:", Theme.dim, row_label(row), row_color(row))
-    if slot and slot ~= "" then
-        tooltip_label("Slot:", Theme.dim, slot_display_label(slot), Theme.slot)
-    end
-    if row.entry.group and row.entry.group ~= "" then
-        tooltip_label("Group:", Theme.dim, row.entry.group, Theme.category or Theme.cyan)
-    end
-    if row.entry.source and row.entry.source ~= "" then
-        tooltip_label("Source:", Theme.dim, row.entry.source, Theme.category or Theme.cyan)
-    end
-    if snap then
-        local owner = string.format("%s (%s)", snap.name or "?", class_abbrev(snap.class))
-        tooltip_label("Owner:", Theme.dim, owner, class_color(snap.class))
+    do
+        local notes = row.entry.notes and tostring(row.entry.notes) or ""
+        if notes ~= "" then
+            -- MQ fonts often lack Unicode en/em dashes; keep ASCII '-' in notes.
+            notes = notes:gsub("\226\128\147", "-"):gsub("\226\128\148", "-"):gsub("–", "-"):gsub("—", "-")
+            local function note_color(text)
+                local lower = tostring(text or ""):lower()
+                -- Resist / damage type (spell foci)
+                if lower:find("fire", 1, true) or lower:find("hfr", 1, true) then return { 1.00, 0.35, 0.28, 1.00 } end
+                if lower:find("magic", 1, true) or lower:find("hmr", 1, true) then return { 1.00, 0.45, 0.85, 1.00 } end
+                if lower:find("cold", 1, true) or lower:find("hcr", 1, true) then return { 0.45, 0.70, 1.00, 1.00 } end
+                if lower:find("poison", 1, true) or lower:find("hpr", 1, true) then return { 0.45, 0.90, 0.40, 1.00 } end
+                if lower:find("disease", 1, true) or lower:find("hdr", 1, true) then return { 0.75, 0.55, 0.30, 1.00 } end
+                -- Heal / beneficial
+                if lower:find("heal", 1, true)
+                    or lower:find("beneficial", 1, true)
+                    or lower:find("merciful", 1, true)
+                    or lower:find("mending", 1, true) then
+                    return { 0.45, 0.95, 0.65, 1.00 }
+                end
+                -- Melee / physical offense
+                if lower:find("melee", 1, true)
+                    or lower:find("double attack", 1, true)
+                    or lower:find("triple attack", 1, true)
+                    or lower:find("critical damage", 1, true)
+                    or lower:find("archery", 1, true)
+                    or lower:find("throwing", 1, true)
+                    or lower:find("chance to hit", 1, true)
+                    or lower:find("hstr", 1, true)
+                    or lower:find("hdex", 1, true) then
+                    return { 1.00, 0.72, 0.28, 1.00 }
+                end
+                -- Defense / avoidance
+                if lower:find("dodge", 1, true)
+                    or lower:find("parry", 1, true)
+                    or lower:find("block", 1, true)
+                    or lower:find("elusion", 1, true)
+                    or lower:find("guard", 1, true)
+                    or lower:find("hsta", 1, true)
+                    or lower:find("hagi", 1, true) then
+                    return { 0.55, 0.78, 0.95, 1.00 }
+                end
+                return Theme.dim
+            end
+            for part in (notes .. "|"):gmatch("([^|]*)|") do
+                part = tostring(part):match("^%s*(.-)%s*$") or ""
+                if part ~= "" then
+                    theme.colored_text(part, note_color(part))
+                end
+            end
+        end
     end
     if row.match and row.status ~= "missing" then
         local loc_color = row.status == "carried" and theme.location_color(row.match.location, row.match.where) or row_color(row)
         tooltip_label("Location:", Theme.dim, row_location(row), loc_color)
     elseif show_elsewhere() and row.elsewhere then
         tooltip_label("Available:", Theme.dim, elsewhere_location(row), BIS_ELSE)
-    elseif row.status == "missing" then
-        tooltip_label("Need:", Theme.dim, "not found in worn, bags, or bank", BIS_MISS)
     end
     pcall(ImGui.EndTooltip)
     return true
@@ -1351,7 +1388,7 @@ local function decorate_elsewhere(row, snap)
 end
 
 local function scoped_source_keys()
-    return views.scoped_source_keys(Settings.bisRosterScope or "online")
+    return characters.source_keys("bis")
 end
 
 local function selected_chars()
@@ -1368,13 +1405,11 @@ local function source_member_key(key)
 end
 
 local function selected_roster_source_keys()
-    return roster_sets.active_source_keys(Settings.bisRosterScope or "online", {
-        view_key = SELECTED_VIEW_KEY,
-    })
+    return characters.active_keys("bis", { view_key = SELECTED_VIEW_KEY })
 end
 
 local function roster_source_keys_for_view(view_key)
-    return roster_sets.active_source_keys(Settings.bisRosterScope or "online", {
+    return characters.active_keys("bis", {
         view_key = view_key or Settings.bisViewKey or "__all__",
     })
 end
@@ -1392,12 +1427,7 @@ local function scope_label()
 end
 
 local function apply_bis_roster_scope(scope)
-    scope = tostring(scope or "online")
-    Settings.bisRosterScope = scope
-    if scope ~= "self" then cfg.apply_linked_roster_scope(scope, "bis") end
-    Settings.bisViewKey = scope == "self" and "__self__" or "__all__"
-    roster_cache.key = nil
-    SaveSettings()
+    characters.apply_scope("bis", scope)
 end
 
 local function draw_scope_picker()
@@ -1436,74 +1466,14 @@ local function checkbox_value(label, checked)
     return checked, false
 end
 
-local function copy_members(members)
-    local out = {}
-    for k, v in pairs(type(members) == "table" and members or {}) do out[k] = v end
-    return out
-end
-
 local function open_character_set_popup(mode)
-    set_popup_mode = tostring(mode or "save")
-    local current_id = roster_sets.set_id(Settings.bisRosterScope)
-    if set_popup_mode == "edit" and current_id then
-        local rec = roster_sets.get_set(current_id)
-        set_draft_name = tostring(rec and rec.name or current_id)
-        set_draft_members = copy_members(rec and rec.members or {})
-    else
-        set_draft_name = ""
-        set_draft_members = roster_sets.members_from_source_keys(
-            roster_source_keys_for_view(Settings.bisViewKey or "__all__"))
-    end
-    set_popup_open = true
+    characters.open_set_editor("bis", mode)
 end
 
 local function draw_character_set_popup()
-    if not set_popup_open then return end
-
-    if ImGui.Separator then ImGui.Separator() end
-    col_text(Theme.header or Theme.item, set_popup_mode == "edit" and "Edit Team" or "Save Team")
-    ImGui.SameLine()
-    col_text(Theme.dim, "Name and select characters.")
-    ImGui.SetNextItemWidth(240.0)
-    set_draft_name = input_text_hint("##bis_set_name", "Team name...", set_draft_name)
-
-    local rows = roster_sets.known_character_rows()
-    if #rows == 0 then
-        col_text(Theme.dim, "No known characters yet.")
-    else
-        for _, row in ipairs(rows) do
-            local checked = set_draft_members[row.clean] ~= nil
-            local label = string.format("%s%s##bis_set_member_%s",
-                tostring(row.name or "?"),
-                row.status ~= "" and (" [" .. tostring(row.status) .. "]") or "",
-                tostring(row.clean or row.key))
-            local new_checked, changed = checkbox_value(label, checked)
-            if changed then
-                if new_checked then
-                    set_draft_members[row.clean] = row.name
-                else
-                    set_draft_members[row.clean] = nil
-                end
-            end
-        end
-    end
-
-    if themed_button("Save##bis_char_set_save", Theme.blue, 72, NAV_BTN_H) then
-        local scope, detail = roster_sets.save_set(set_draft_name, set_draft_members)
-        if scope then
-            apply_bis_roster_scope(scope)
-            status_msg = string.format("Saved character set (%s characters).", tostring(detail or "?"))
-            set_popup_open = false
-            return
-        else
-            status_msg = tostring(detail or "Could not save character set.")
-        end
-    end
-    ImGui.SameLine()
-    if themed_button("Cancel##bis_char_set_cancel", Theme.steel, 76, NAV_BTN_H) then
-        set_popup_open = false
-        return
-    end
+    characters.draw_set_editor("bis")
+    local msg = characters.take_status()
+    if msg then status_msg = msg end
 end
 
 local function draw_view_picker()
@@ -1528,17 +1498,7 @@ local function draw_view_picker()
                     or (cur == SELECTED_VIEW_KEY and clean ~= "" and selected[clean] ~= nil)
                 local new_checked, box_changed = checkbox_value((snap.name or name or views.source_label(key)) .. "##bisview_check_" .. tostring(key), checked)
                 if box_changed then
-                    if cur == "__all__" then
-                        selected = roster_sets.members_from_source_keys(scoped_source_keys())
-                    elseif cur ~= SELECTED_VIEW_KEY then
-                        selected = {}
-                        local cur_clean, cur_name = source_member_key(cur)
-                        if cur_clean ~= "" then selected[cur_clean] = cur_name end
-                    end
-                    if clean ~= "" then
-                        if new_checked then selected[clean] = name else selected[clean] = nil end
-                    end
-                    Settings.bisViewSelectedChars = selected
+                    characters.apply_column_toggle("bis", key, new_checked)
                     cur = SELECTED_VIEW_KEY
                     changed = true
                 elseif ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.IsMouseDoubleClicked and ImGui.IsMouseDoubleClicked(0) then
@@ -1550,11 +1510,15 @@ local function draw_view_picker()
         ImGui.EndCombo()
     end
     if changed or Settings.bisViewKey ~= cur then
-        Settings.bisViewKey = cur
-        roster_cache.key = nil
-        SaveSettings()
+        if cur == SELECTED_VIEW_KEY then
+            Settings.bisViewKey = cur
+            roster_cache.key = nil
+            SaveSettings()
+        else
+            characters.set_view_key("bis", cur)
+        end
     end
-    return cur
+    return Settings.bisViewKey or cur
 end
 
 local function dsk_type12_filter()
@@ -2354,52 +2318,55 @@ end
 local function draw_bis_toolbar(catalog_id)
     local view_key = Settings.bisViewKey or "__all__"
     local toolbar = {}
+    local use_pill = Settings.showCharactersPill == true
 
-    toolbar[#toolbar + 1] = {
-        width = 188,
-        height = COMBO_ROW_H,
-        draw = function()
-            view_key = draw_view_picker()
-        end,
-    }
-
-    toolbar[#toolbar + 1] = {
-        width = 148,
-        height = COMBO_ROW_H,
-        draw = function()
-            draw_scope_picker()
-        end,
-    }
-
-    toolbar[#toolbar + 1] = {
-        width = button_text_width("Save Team"),
-        draw = function()
-            if themed_button("Save Team##bis_save_char_set", Theme.blue, 0, NAV_BTN_H) then
-                open_character_set_popup("save")
-            end
-        end,
-    }
-
-    if roster_sets.is_set_scope(Settings.bisRosterScope) then
+    if not use_pill then
         toolbar[#toolbar + 1] = {
-            width = button_text_width("Edit Team"),
+            width = 188,
+            height = COMBO_ROW_H,
             draw = function()
-                if themed_button("Edit Team##bis_edit_char_set", Theme.steel, 0, NAV_BTN_H) then
-                    open_character_set_popup("edit")
+                view_key = draw_view_picker()
+            end,
+        }
+
+        toolbar[#toolbar + 1] = {
+            width = 148,
+            height = COMBO_ROW_H,
+            draw = function()
+                draw_scope_picker()
+            end,
+        }
+
+        toolbar[#toolbar + 1] = {
+            width = button_text_width("Save Team"),
+            draw = function()
+                if themed_button("Save Team##bis_save_char_set", Theme.blue, 0, NAV_BTN_H) then
+                    open_character_set_popup("save")
                 end
             end,
         }
-        toolbar[#toolbar + 1] = {
-            width = button_text_width("Delete Team"),
-            draw = function()
-                if themed_button("Delete Team##bis_delete_char_set", Theme.red or Theme.steel, 0, NAV_BTN_H) then
-                    if roster_sets.delete_set(Settings.bisRosterScope) then
-                        apply_bis_roster_scope("online")
-                        status_msg = "Deleted character set."
+
+        if roster_sets.is_set_scope(Settings.bisRosterScope) then
+            toolbar[#toolbar + 1] = {
+                width = button_text_width("Edit Team"),
+                draw = function()
+                    if themed_button("Edit Team##bis_edit_char_set", Theme.steel, 0, NAV_BTN_H) then
+                        open_character_set_popup("edit")
                     end
-                end
-            end,
-        }
+                end,
+            }
+            toolbar[#toolbar + 1] = {
+                width = button_text_width("Delete Team"),
+                draw = function()
+                    if themed_button("Delete Team##bis_delete_char_set", Theme.red or Theme.steel, 0, NAV_BTN_H) then
+                        if roster_sets.delete_set(Settings.bisRosterScope) then
+                            apply_bis_roster_scope("online")
+                            status_msg = "Deleted character set."
+                        end
+                    end
+                end,
+            }
+        end
     end
 
     toolbar[#toolbar + 1] = {
@@ -2519,7 +2486,9 @@ local function draw_bis_toolbar(catalog_id)
     if not draw_fixed_control_row(toolbar) then
         draw_wrapped_controls(toolbar)
     end
-    draw_character_set_popup()
+    if Settings.showCharactersPill ~= true then
+        draw_character_set_popup()
+    end
     return view_key
 end
 
@@ -2548,8 +2517,8 @@ local function draw_bis_body()
     draw_anguish_reference_panel(catalog_id)
     draw_linked_items_panel()
     ImGui.Separator()
-    if view_key ~= "__all__" then
-        col_text(Theme.dim, "Single-character checklist - set Viewing to All Characters for the multi-column roster.")
+    if view_key ~= "__all__" and view_key ~= SELECTED_VIEW_KEY then
+        col_text(Theme.dim, "Single-character checklist - open Characters and choose All Characters for the multi-column roster.")
     end
 
     local density = density_mode()

@@ -150,6 +150,19 @@ end
 function M.normalize_entry(e)
     if type(e) ~= "table" then e = { item = tostring(e or "") } end
     local item = trim(e.item or e.name or "")
+    local spells = nil
+    if type(e.spells) == "table" then
+        spells = {}
+        for _, s in ipairs(e.spells) do
+            s = trim(s)
+            if s ~= "" then spells[#spells + 1] = s end
+        end
+        if #spells == 0 then spells = nil end
+    end
+    local spell = trim(e.spell or "")
+    if spell == "" and spells then spell = spells[1] end
+    if spell == "" then spell = nil end
+    if not spells and spell then spells = { spell } end
     return {
         item = item,
         names = normalize_names(e.names, item),
@@ -158,6 +171,8 @@ function M.normalize_entry(e)
         group = trim(e.group or ""),
         socket = tonumber(e.socket) and math.floor(tonumber(e.socket)) or nil,
         notes = e.notes,
+        spell = spell,
+        spells = spells,
     }
 end
 
@@ -540,6 +555,59 @@ local function normalize_entry_ro(e)
     return hit
 end
 
+local function entry_spell_list(entry)
+    if type(entry) ~= "table" then return nil end
+    if type(entry.spells) == "table" and #entry.spells > 0 then return entry.spells end
+    local spell = trim(entry.spell or "")
+    if spell ~= "" then return { spell } end
+    return nil
+end
+
+local function snap_knows_spell(snap, spell_name)
+    spell_name = trim(spell_name)
+    if spell_name == "" then return false end
+    local spells = snap and snap.spells
+    if type(spells) ~= "table" then return false end
+    local want = norm(spell_name)
+    local row = spells[want]
+    if type(row) == "table" and ((row.book == true) or (tonumber(row.book) or 0) > 0) then
+        return true
+    end
+    for key, rec in pairs(spells) do
+        if type(rec) == "table" then
+            local n = norm(rec.name or key)
+            if n == want and ((rec.book == true) or (tonumber(rec.book) or 0) > 0) then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+local function entry_spells_known_in_snap(entry, snap)
+    local list = entry_spell_list(entry)
+    if not list then return false end
+    for _, spell in ipairs(list) do
+        if not snap_knows_spell(snap, spell) then return false end
+    end
+    return true
+end
+
+local function live_spells_known(entry)
+    local list = entry_spell_list(entry)
+    if not list then return false end
+    for _, spell in ipairs(list) do
+        local known = false
+        pcall(function()
+            if (mq.TLO.Me.Book(spell)() or 0) > 0 or (mq.TLO.Me.CombatAbility(spell)() or 0) > 0 then
+                known = true
+            end
+        end)
+        if not known then return false end
+    end
+    return true
+end
+
 local function match_entry(entry, snap)
     entry = normalize_entry_ro(entry)
     local idx = snapshot_index(snap)
@@ -550,6 +618,11 @@ local function match_entry(entry, snap)
     for _, name in ipairs(entry.names or { entry.item }) do
         local rec = idx.by_name[norm_item_name(name)]
         if rec then return rec.item, rec.status, entry end
+    end
+    -- Spell-aware packs: own the pack item OR know every listed spell/disc.
+    -- Glyphs and normal gear omit spell metadata and stay item-only.
+    if entry_spells_known_in_snap(entry, snap) then
+        return entry.item, "known", entry
     end
     return nil, "missing", entry
 end
@@ -586,6 +659,9 @@ function M.evaluate_entry(entry, snap, opts)
         if (opts and opts.live_fallback) or self_snap then
             if live_own_cached(entry) then
                 return { entry = entry, have = true, match = nil, status = "carried" }
+            end
+            if live_spells_known(entry) then
+                return { entry = entry, have = true, match = entry.item, status = "known" }
             end
         end
     end
@@ -644,7 +720,7 @@ function M.counts(rows)
     for _, row in ipairs(rows or {}) do
         if not row.header and not row.empty then
             if row.status == "equipped" then equipped = equipped + 1
-            elseif row.status == "carried" then carried = carried + 1
+            elseif row.status == "carried" or row.status == "known" then carried = carried + 1
             else missing = missing + 1 end
         end
     end

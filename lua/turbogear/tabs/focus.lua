@@ -12,11 +12,16 @@ local views = require('views')
 local item_actions = require('item_actions')
 local Engine = require('engine').Engine
 local Store = require('store').Store
+local characters = require('characters')
 
 local M = {}
 
 local search_text = ""
 local filtered_key, filtered_entries = nil, {}
+
+characters.set_on_changed(function()
+    filtered_key = nil
+end, "focus")
 
 local SOURCE_SCOPES = {
     { key = "all",    label = "All Known" },
@@ -450,8 +455,15 @@ local function visible_entries()
 end
 
 local function draw_controls()
-    draw_scope_picker()
-    ImGui.SameLine()
+    local use_pill = Settings.showCharactersPill == true
+    if use_pill then
+        if Settings.focusSourceScope ~= "character" then
+            Settings.focusSourceScope = "character"
+        end
+    else
+        draw_scope_picker()
+        ImGui.SameLine()
+    end
     if theme.themed_button("Refresh##focus_refresh", Theme.blue) then
         if Settings.focusSourceScope == "loadout" then
             pcall(function() require('loadout').invalidate() end)
