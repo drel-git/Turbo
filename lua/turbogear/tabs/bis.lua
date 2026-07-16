@@ -1296,7 +1296,12 @@ end
 
 local function norm_bis_item(name)
     name = tostring(name or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
-    name = name:gsub("%s*%(%s*[^%)]-%s*%)%s*$", "")
+    name = name:gsub("`", "'"):gsub("\226\128\152", "'"):gsub("\226\128\153", "'")
+    -- Keep Adventurer's Tattered Sack (Reinforced/Bound/...) distinct for
+    -- elsewhere / roster matching (same rule as bis.norm_item_name).
+    if not name:find("tattered sack", 1, true) then
+        name = name:gsub("%s*%(%s*[^%)]-%s*%)%s*$", "")
+    end
     name = name:gsub("%s*%[%s*[^%]]-%s*%]%s*$", "")
     name = name:gsub("%s+", " ")
     local stripped = name:gsub("%s*%d%d%d+$", "")

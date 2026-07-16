@@ -191,6 +191,71 @@ local function expand_fungal_chain(list, class_bucket, out)
     return out
 end
 
+-- Adventurer's Tattered Sack progression (Bags BiS). Owning a higher rank
+-- clears lower sack rows; upgrade trash clears once the corresponding rank
+-- (or higher) is owned. Frame stays needed until Celestial.
+local TATTERED_SACK_RANKS = {
+    {
+        rank = 1,
+        id = 151053,
+        name = "Adventurer's Tattered Sack",
+        slot = "Adventurer's Tattered Sack (Base) (T1 Named)",
+    },
+    {
+        rank = 2,
+        id = 151054,
+        name = "Adventurer's Tattered Sack (Reinforced)",
+        slot = "Adventurer's Tattered Sack (Reinforced) (UP1)",
+    },
+    {
+        rank = 3,
+        id = 151055,
+        name = "Adventurer's Tattered Sack (Bound)",
+        slot = "Adventurer's Tattered Sack (Bound) (UP2)",
+    },
+    {
+        rank = 4,
+        id = 151056,
+        name = "Adventurer's Tattered Sack (Arcwoven)",
+        slot = "Adventurer's Tattered Sack (Arcwoven) (UP3)",
+    },
+    {
+        rank = 5,
+        id = 151057,
+        name = "Adventurer's Tattered Sack (Celestial)",
+        slot = "Adventurer's Tattered Sack (Celestial)",
+    },
+}
+
+local TATTERED_SACK_MATERIALS = {
+    ["Reinforced Stitching Frame (T2 Trash)"] = { id = 151058, min_rank = 5 },
+    ["Treated Expedition Straps (T3 Trash)"] = { min_rank = 3 },
+    ["Arcwoven Binding Thread (T4 Trash)"] = { min_rank = 4 },
+    ["Master Tailor's Celestial Lining (T5 Trash)"] = { min_rank = 5 },
+}
+
+local TATTERED_SACK_SLOT_RANK = {}
+for _, row in ipairs(TATTERED_SACK_RANKS) do
+    TATTERED_SACK_SLOT_RANK[row.slot] = row.rank
+end
+
+local function expand_tattered_sack_chain(out)
+    local slot = tostring(out.slot or "")
+    local id_seen, name_seen = seed_id_seen(out), seed_name_seen(out)
+    local rank = TATTERED_SACK_SLOT_RANK[slot]
+    local mat = TATTERED_SACK_MATERIALS[slot]
+    local min_rank = rank or (mat and mat.min_rank) or nil
+    if not min_rank then return out end
+    if mat and mat.id then add_ids(out, { mat.id }, id_seen) end
+    for _, row in ipairs(TATTERED_SACK_RANKS) do
+        if row.rank >= min_rank then
+            add_ids(out, { row.id }, id_seen)
+            add_names(out, { row.name }, name_seen)
+        end
+    end
+    return out
+end
+
 local JONAS_PREFIX = "Jonas Dagmire's "
 
 local function add_jonas_aliases_for_name(out, name, name_seen)
@@ -494,6 +559,8 @@ function M.resolve_entry(list_id, class_name, slot)
     elseif list_id == "don" then
         expand_don_shadow_chain(list, class_bucket, out)
         expand_don_scales_chain(out, class_name)
+    elseif list_id == "bagitems" then
+        expand_tattered_sack_chain(out)
     end
     return out
 end

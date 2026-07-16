@@ -17,7 +17,17 @@ local function trim(s)
 end
 
 local function norm(s)
-    return trim(s):lower()
+    s = trim(s):lower()
+    -- EQ / Lucy often use backtick or curly quotes in names like Adventurer's.
+    s = s:gsub("`", "'"):gsub("\226\128\152", "'"):gsub("\226\128\153", "'")
+    return s
+end
+
+-- Rank suffixes on Adventurer's Tattered Sack must stay distinct. Stripping
+-- trailing "(Reinforced)" / "(Celestial)" collapsed every rank to the base
+-- name, so ID chains and material clear-when-owned could not work reliably.
+local function keep_tattered_sack_rank_paren(s)
+    return s:find("tattered sack", 1, true) ~= nil
 end
 
 -- norm_item_name runs 3-4 regex gsubs per call and is invoked per alias name
@@ -28,7 +38,9 @@ local norm_name_cache = {}
 
 local function norm_item_name_uncached(s)
     s = norm(s)
-    s = s:gsub("%s*%(%s*[^%)]-%s*%)%s*$", "")
+    if not keep_tattered_sack_rank_paren(s) then
+        s = s:gsub("%s*%(%s*[^%)]-%s*%)%s*$", "")
+    end
     s = s:gsub("%s*%[%s*[^%]]-%s*%]%s*$", "")
     s = s:gsub("%s+", " ")
     local stripped = s:gsub("%s*%d%d%d+$", "")

@@ -1,3 +1,10 @@
+1.2.21
+- Bags BiS: fix Adventurer's Tattered Sack linked ownership. Rank suffixes in
+  parentheses are no longer stripped during name match (that collapsed every
+  rank to the base name). Runtime expander adds higher-rank IDs/names like
+  fungal; Frame/materials clear from the matching sack rank (Frame at Celestial).
+  Also normalizes backtick/curly apostrophes in item names.
+
 1.2.20
 - Bags BiS: Adventurer's Tattered Sack ranks (151053-151057) chain like fungal /
   Jonas - owning a higher sack clears lower ranks. Reinforced Stitching Frame
