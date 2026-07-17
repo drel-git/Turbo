@@ -28,14 +28,36 @@ local function apostrophe_variants(name)
     return out
 end
 
+-- MQ Lua TLOs sometimes return a raw number, sometimes a callable userdata.
+-- Calling () on a number throws; that was swallowed by pcall and looked "unknown".
+local function tlo_number(v)
+    if v == nil then return 0 end
+    local tv = type(v)
+    if tv == 'number' then return v end
+    if tv == 'string' then return tonumber(v) or 0 end
+    local ok, r = pcall(function() return v() end)
+    if ok then
+        if type(r) == 'number' then return r end
+        if type(r) == 'string' then return tonumber(r) or 0 end
+        if r then return 1 end
+    end
+    return tonumber(v) or 0
+end
+
+local function tlo_truthy(v)
+    if v == nil or v == false then return false end
+    if type(v) == 'number' then return v > 0 end
+    if type(v) == 'string' then return v ~= '' end
+    local ok, r = pcall(function() return v() end)
+    if ok then return r and true or false end
+    return true
+end
+
 local function probe_one(name)
-    local book = tonumber(mq.TLO.Me.Book(name)()) or 0
-    if book > 0 then return true end
-    local ca = tonumber(mq.TLO.Me.CombatAbility(name)()) or 0
-    if ca > 0 then return true end
+    if tlo_number(mq.TLO.Me.Book(name)) > 0 then return true end
+    if tlo_number(mq.TLO.Me.CombatAbility(name)) > 0 then return true end
     -- Ranked scribed form (spells/songs); nil when not known.
-    local sp = mq.TLO.Me.Spell(name)
-    if sp and sp() then return true end
+    if tlo_truthy(mq.TLO.Me.Spell(name)) then return true end
     return false
 end
 

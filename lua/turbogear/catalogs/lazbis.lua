@@ -12428,14 +12428,19 @@ return {
           },
           Pack3 = {
             ids = {
+              71777,
               82809,
             },
             item = "Spell Pack: Theft of Misery",
             names = {
               "Spell Pack: Theft of Misery",
+              "Spell: Theft of Misery",
             },
             slot = "Pack3",
             spell = "Theft of Misery",
+            spell_ids = {
+              15073,
+            },
             spells = {
               "Theft of Misery",
             },

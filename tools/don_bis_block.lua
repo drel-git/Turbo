@@ -1608,7 +1608,11 @@
 			},
 			['Pack3'] = {
 				item = 'Spell Pack: Theft of Misery/82809',
+				-- Pack opens to Spell: Theft of Misery (71777); scribed spell id 15073.
+				names = {'Spell Pack: Theft of Misery', 'Spell: Theft of Misery'},
+				ids = {82809, 71777},
 				spells = {'Theft of Misery'},
+				spell_ids = {15073},
 			},
 			['Pack4'] = {
 				item = 'Spell: Blood of the Harbinger/80788',

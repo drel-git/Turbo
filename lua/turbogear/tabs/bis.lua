@@ -1125,7 +1125,7 @@ end
 local function status_glyph(row)
     if not row or row.empty then return "-" end
     if row.status == "equipped" then return "W" end
-    if row.status == "carried" then return "B" end
+    if row.status == "carried" or row.status == "known" then return "B" end
     if show_elsewhere() and row.elsewhere then return "E" end
     return "X"
 end
@@ -1133,14 +1133,19 @@ end
 local function row_label(row)
     if row and row.status == "equipped" then return "Equipped" end
     if row and row.status == "carried" then return "Carried" end
+    if row and row.status == "known" then return "Known" end
     if show_elsewhere() and row and row.elsewhere then return "Elsewhere" end
     return "Need"
 end
 
 local function row_location(row)
     local m = row.match
-    if not m then return "-" end
+    if not m then
+        if row and row.status == "known" then return "Spell book / discs" end
+        return "-"
+    end
     if row.status == "equipped" then return m.slotname or m.where or "Equipped" end
+    if row.status == "known" then return "Spell book / discs" end
     return (m.location or "") .. " - " .. (m.where or "")
 end
 
@@ -2097,7 +2102,7 @@ local function process_roster_build_job(cache_key)
                     if row and not row.header and not row.empty then
                         local c = job.counts[key]
                         if row.status == "equipped" then c[1] = (c[1] or 0) + 1
-                        elseif row.status == "carried" then c[2] = (c[2] or 0) + 1
+                        elseif row.status == "carried" or row.status == "known" then c[2] = (c[2] or 0) + 1
                         else c[3] = (c[3] or 0) + 1 end
                     end
                     if row and row.status == "missing" then any_missing = true end

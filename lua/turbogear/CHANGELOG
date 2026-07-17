@@ -1,3 +1,10 @@
+1.2.25
+- Spell known probe: Me.Book / CombatAbility may return a raw number in MQ Lua;
+  calling () on that threw inside pcall and always looked unknown. Theft of
+  Misery (Book slot 2) now shows Known after /tgear spellsync. Roster counts
+  and labels treat status "known" as owned. SHD Pack3 also matches scroll
+  71777 and spells_new id 15073.
+
 1.2.21
 - Bags BiS: fix Adventurer's Tattered Sack linked ownership. Rank suffixes in
   parentheses are no longer stripped during name match (that collapsed every

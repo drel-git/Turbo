@@ -645,14 +645,7 @@ end
 local function spell_known_live(name)
     local mod = ensure_spell_known()
     if mod and mod.live then return mod.live(name) == true end
-    local known = false
-    pcall(function()
-        if (tonumber(mq.TLO.Me.Book(name)()) or 0) > 0
-            or (tonumber(mq.TLO.Me.CombatAbility(name)()) or 0) > 0 then
-            known = true
-        end
-    end)
-    return known
+    return false
 end
 
 local function spell_known_live_id(spell_id)

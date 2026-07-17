@@ -34,14 +34,7 @@ local function probe_book(spellName)
     if SpellKnown and SpellKnown.live then
         return SpellKnown.live(spellName) == true
     end
-    local inBook = false
-    pcall(function()
-        if (tonumber(mq.TLO.Me.Book(spellName)()) or 0) > 0
-            or (tonumber(mq.TLO.Me.CombatAbility(spellName)()) or 0) > 0 then
-            inBook = true
-        end
-    end)
-    return inBook
+    return false
 end
 
 local function merge_don_pack_spells(className, out, spell_ids_out)

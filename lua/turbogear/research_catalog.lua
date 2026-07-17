@@ -385,11 +385,6 @@ function M.spell_inventory_info(displayName, iniRaw, spellBook, allowLive)
                 inBook = true
                 break
             end
-            if (tonumber(mq.TLO.Me.Book(variant)()) or 0) > 0
-                or (tonumber(mq.TLO.Me.CombatAbility(variant)()) or 0) > 0 then
-                inBook = true
-                break
-            end
         end
     end)
     local scroll = 0
