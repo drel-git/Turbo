@@ -406,33 +406,67 @@ function M.status(g)
     }
 end
 
+local function banner_child_flags()
+    local f = 0
+    if not ImGuiWindowFlags then return f end
+    if ImGuiWindowFlags.NoScrollbar then
+        f = bit32.bor(f, ImGuiWindowFlags.NoScrollbar)
+    end
+    if ImGuiWindowFlags.NoScrollWithMouse then
+        f = bit32.bor(f, ImGuiWindowFlags.NoScrollWithMouse)
+    end
+    return f
+end
+
+local function banner_button(label, variant, width, height)
+    local okUi, Ui = pcall(require, 'Turbo.ui.components')
+    if okUi and Ui and Ui.buttonVariant then
+        return Ui.buttonVariant(label, variant, width, height)
+    end
+    return ImGui.Button(label, width or 0, height or 0)
+end
+
 --- Draw a compact update banner. Returns true if drawn.
+--- Uses ASCII-only copy (MQ fonts often lack Unicode arrows).
 function M.draw_banner(g, opts)
     opts = opts or {}
     if not g or g.turboUpdateAvailable ~= true then return false end
     local localV = state.localVersion or M.read_local_changelog_version() or '?'
     local remoteV = state.remoteVersion or g.remoteTurboVersion or '?'
-    local msg = string.format('Update available: v%s → v%s', localV, remoteV)
+    local frameH = (ImGui.GetFrameHeight and ImGui.GetFrameHeight()) or 22
+    local barH = math.max(36, frameH + 14)
 
-    ImGui.Separator()
-    ImGui.TextColored(1.0, 0.82, 0.28, 1.0, msg)
-    ImGui.SameLine()
-    if ImGui.SmallButton('Update##turbo_update_go') then
-        if type(opts.onUpdate) == 'function' then opts.onUpdate() end
-    end
-    if ImGui.IsItemHovered() and ImGui.SetTooltip then
-        ImGui.SetTooltip('Launch TurboPatcher to install the update.')
-    end
-    ImGui.SameLine()
-    if ImGui.SmallButton('Dismiss##turbo_update_dismiss') then
-        M.dismiss(g)
-        if type(opts.onDismiss) == 'function' then opts.onDismiss() end
-    end
-    if ImGui.IsItemHovered() and ImGui.SetTooltip then
-        ImGui.SetTooltip('Hide until the next Turbo version.')
-    end
-    ImGui.Separator()
     ImGui.Dummy(0, 2)
+    ImGui.PushStyleColor(ImGuiCol.ChildBg, 0.14, 0.11, 0.05, 0.96)
+    ImGui.PushStyleColor(ImGuiCol.Border, 0.90, 0.68, 0.22, 0.95)
+    ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, 10, 6)
+    if ImGui.BeginChild('##turbo_update_banner', 0, barH, true, banner_child_flags()) then
+        pcall(function()
+            if ImGui.AlignTextToFramePadding then ImGui.AlignTextToFramePadding() end
+        end)
+        ImGui.TextColored(1.0, 0.84, 0.36, 1.0, 'Turbo update')
+        ImGui.SameLine(0, 10)
+        ImGui.TextColored(0.78, 0.72, 0.58, 1.0, string.format('v%s  ->  v%s', localV, remoteV))
+        ImGui.SameLine(0, 14)
+        if banner_button('Update Now##turbo_update_go', 'amberButton', 96, frameH) then
+            if type(opts.onUpdate) == 'function' then opts.onUpdate() end
+        end
+        if ImGui.IsItemHovered() and ImGui.SetTooltip then
+            ImGui.SetTooltip('Open TurboPatcher and apply this suite update.')
+        end
+        ImGui.SameLine(0, 6)
+        if banner_button('Later##turbo_update_dismiss', 'secondaryButton', 56, frameH) then
+            M.dismiss(g)
+            if type(opts.onDismiss) == 'function' then opts.onDismiss() end
+        end
+        if ImGui.IsItemHovered() and ImGui.SetTooltip then
+            ImGui.SetTooltip('Hide until the next Turbo version.')
+        end
+    end
+    ImGui.EndChild()
+    ImGui.PopStyleVar(1)
+    ImGui.PopStyleColor(2)
+    ImGui.Dummy(0, 4)
     return true
 end
 

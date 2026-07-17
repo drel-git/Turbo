@@ -1,3 +1,7 @@
+1.2.31
+- Update banner: ASCII-only version line (no broken "?" arrow glyph), amber bar,
+  Update Now / Later buttons; mini shows Update vX + dismiss.
+
 1.2.30
 - In-game Update launches TurboPatcher with --update so the suite patch starts
   automatically (no hunting for a clipped button). Requires Patcher 1.2.1+.

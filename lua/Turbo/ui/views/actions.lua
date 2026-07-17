@@ -825,7 +825,7 @@ function M.render(state, actions)
         end
         if g.turboUpdateAvailable == true then
             ImGui.TextColored(1.0, 0.76, 0.29, 1.0, string.format(
-                'Update available → v%s (banner above, or Turbo Patcher)',
+                'Update ready: v%s (banner above, or Turbo Patcher)',
                 tostring(g.remoteTurboVersion or '?')))
         elseif g.remoteTurboVersion and g.remoteTurboVersion ~= '' then
             ImGui.TextColored(0.55, 0.60, 0.68, 1.0, string.format(

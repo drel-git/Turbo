@@ -103,7 +103,11 @@ function M.render(state, actions, ui)
         end
 
         if g.turboUpdateAvailable == true then
-            if miniButton('Update##mini_turbo_update', 'amberButton', 64) then
+            local remoteV = tostring(g.remoteTurboVersion or '')
+            local updateLabel = (remoteV ~= '' and remoteV ~= 'nil')
+                and ('Update v' .. remoteV .. '##mini_turbo_update')
+                or 'Update##mini_turbo_update'
+            if miniButton(updateLabel, 'amberButton', 0) then
                 if type(g.openTurboPatcherExternal) == 'function' then
                     g.openTurboPatcherExternal({ update = true })
                 elseif actions.openTurboPatcher then
@@ -111,8 +115,14 @@ function M.render(state, actions, ui)
                 end
             end
             actions.tip(string.format(
-                'Turbo update available (v%s). Opens TurboPatcher and applies the update.',
-                tostring(g.remoteTurboVersion or '?')))
+                'Turbo update ready (v%s). Opens TurboPatcher and applies the update.',
+                remoteV ~= '' and remoteV or 'newer'))
+            sp4()
+            if miniButton('x##mini_turbo_update_dismiss', 'secondaryButton', 22) then
+                local okUC, UC = pcall(require, 'Turbo.update_check')
+                if okUC and UC and UC.dismiss then UC.dismiss(g) end
+            end
+            actions.tip('Hide this update notice until the next Turbo version.')
             sp6()
         end
 
