@@ -175,10 +175,18 @@ end
 
 local function reclaim_alt_currency()
     if not has_reclaim_currency() then return 0 end
-    mq.cmd('/e3p on')
+    if mq.TLO.Lua.Script('rgmercs').Status.Equal('RUNNING')() then
+        mq.cmd('/rgl pause')
+    else
+        mq.cmd('/e3p on')
+    end
     mq.delay(100)
     if not ensure_inventory_window() then
-        mq.cmd('/e3p off')
+        if mq.TLO.Lua.Script('rgmercs').Status.Equal('RUNNING')() then
+            mq.cmd('/rgl unpause')
+        else
+            mq.cmd('/e3p off')
+        end
         return 0
     end
 
@@ -200,7 +208,11 @@ local function reclaim_alt_currency()
             end
         end
     end
-    mq.cmd('/e3p off')
+    if mq.TLO.Lua.Script('rgmercs').Status.Equal('RUNNING')() then
+        mq.cmd('/rgl unpause')
+    else
+        mq.cmd('/e3p off')
+    end
     return clicks
 end
 

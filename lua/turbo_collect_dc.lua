@@ -135,10 +135,18 @@ end
 
 local function reclaim_dc()
     if item_count('Diamond Coin') <= 0 then return 0 end
-    mq.cmd('/e3p on')
+    if mq.TLO.Lua.Script('rgmercs').Status.Equal('RUNNING')() then
+        mq.cmd('/rgl pause')
+    else
+        mq.cmd('/e3p on')
+    end
     mq.delay(100)
     if not ensure_inventory_window() then
-        mq.cmd('/e3p off')
+        if mq.TLO.Lua.Script('rgmercs').Status.Equal('RUNNING')() then
+            mq.cmd('/rgl unpause')
+        else
+            mq.cmd('/e3p off')
+        end
         return 0
     end
 
@@ -148,7 +156,11 @@ local function reclaim_dc()
     local id = alt_currency_list_id()
     if id <= 0 then
         out('\aySkipped reclaim:\ax could not find Diamond Coins in the alt-currency list.')
-        mq.cmd('/e3p off')
+        if mq.TLO.Lua.Script('rgmercs').Status.Equal('RUNNING')() then
+            mq.cmd('/rgl unpause')
+        else
+            mq.cmd('/e3p off')
+        end
         return 0
     end
 
@@ -161,7 +173,11 @@ local function reclaim_dc()
         mq.cmd('/nomodkey /notify InventoryWindow IW_AltCurr_Reclaimbutton leftmouseup')
     end
     mq.delay(800, function() return item_count('Diamond Coin') < before_inv end)
-    mq.cmd('/e3p off')
+    if mq.TLO.Lua.Script('rgmercs').Status.Equal('RUNNING')() then
+        mq.cmd('/rgl unpause')
+    else
+        mq.cmd('/e3p off')
+    end
     return math.max(0, before_inv - item_count('Diamond Coin'))
 end
 
