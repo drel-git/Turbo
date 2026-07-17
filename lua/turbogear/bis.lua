@@ -605,19 +605,39 @@ local function entry_spells_known_in_snap(entry, snap)
     return true
 end
 
+local SpellKnown = nil
+local function spell_known_live(name)
+    if not SpellKnown then
+        local ok, mod = pcall(require, 'spell_known')
+        SpellKnown = ok and mod or nil
+    end
+    if SpellKnown and SpellKnown.live then
+        return SpellKnown.live(name) == true
+    end
+    local known = false
+    pcall(function()
+        if (tonumber(mq.TLO.Me.Book(name)()) or 0) > 0
+            or (tonumber(mq.TLO.Me.CombatAbility(name)()) or 0) > 0 then
+            known = true
+        end
+    end)
+    return known
+end
+
 local function live_spells_known(entry)
     local list = entry_spell_list(entry)
     if not list then return false end
     for _, spell in ipairs(list) do
-        local known = false
-        pcall(function()
-            if (mq.TLO.Me.Book(spell)() or 0) > 0 or (mq.TLO.Me.CombatAbility(spell)() or 0) > 0 then
-                known = true
-            end
-        end)
-        if not known then return false end
+        if not spell_known_live(spell) then return false end
     end
     return true
+end
+
+local function is_local_eval_snap(snap)
+    if type(snap) ~= "table" then return false end
+    local my = trim(mq.TLO.Me.CleanName() or ""):lower()
+    if my == "" then return false end
+    return trim(snap.name or ""):lower() == my
 end
 
 local function match_entry(entry, snap)
@@ -667,8 +687,7 @@ function M.evaluate_entry(entry, snap, opts)
     -- made that a multi-second stall on the game thread. Announce paths still
     -- live-confirm individual hits at announce time.
     if match == nil and status == "missing" and not (opts and opts.skip_live) then
-        local self_snap = snap and snap.name and snap.name == (mq.TLO.Me.CleanName() or "")
-        if (opts and opts.live_fallback) or self_snap then
+        if (opts and opts.live_fallback) or is_local_eval_snap(snap) then
             if live_own_cached(entry) then
                 return { entry = entry, have = true, match = nil, status = "carried" }
             end

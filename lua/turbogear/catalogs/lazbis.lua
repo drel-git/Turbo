@@ -5371,7 +5371,9 @@ return {
         {
           name = "Clickies",
           slots = {
-            "Clicky",
+            "Clicky1",
+            "Clicky2",
+            "Clicky3",
           },
         },
         {
@@ -5566,7 +5568,17 @@ return {
             },
             slot = "Chest",
           },
-          Clicky = {
+          Clicky1 = {
+            ids = {
+              56758,
+            },
+            item = "Icon of Ancient Boon",
+            names = {
+              "Icon of Ancient Boon",
+            },
+            slot = "Clicky1",
+          },
+          Clicky2 = {
             ids = {
               56757,
             },
@@ -5574,7 +5586,17 @@ return {
             names = {
               "Icon of Potent Prowess",
             },
-            slot = "Clicky",
+            slot = "Clicky2",
+          },
+          Clicky3 = {
+            ids = {
+              57142,
+            },
+            item = "Icon of Ancient Prowess",
+            names = {
+              "Icon of Ancient Prowess",
+            },
+            slot = "Clicky3",
           },
           Ear1 = {
             ids = {
@@ -6088,7 +6110,17 @@ return {
             },
             slot = "Chest",
           },
-          Clicky = {
+          Clicky1 = {
+            ids = {
+              56758,
+            },
+            item = "Icon of Ancient Boon",
+            names = {
+              "Icon of Ancient Boon",
+            },
+            slot = "Clicky1",
+          },
+          Clicky2 = {
             ids = {
               56757,
             },
@@ -6096,7 +6128,17 @@ return {
             names = {
               "Icon of Potent Prowess",
             },
-            slot = "Clicky",
+            slot = "Clicky2",
+          },
+          Clicky3 = {
+            ids = {
+              57142,
+            },
+            item = "Icon of Ancient Prowess",
+            names = {
+              "Icon of Ancient Prowess",
+            },
+            slot = "Clicky3",
           },
           Ear1 = {
             ids = {
@@ -6592,7 +6634,17 @@ return {
             },
             slot = "Chest",
           },
-          Clicky = {
+          Clicky1 = {
+            ids = {
+              56758,
+            },
+            item = "Icon of Ancient Boon",
+            names = {
+              "Icon of Ancient Boon",
+            },
+            slot = "Clicky1",
+          },
+          Clicky2 = {
             ids = {
               56757,
             },
@@ -6600,7 +6652,17 @@ return {
             names = {
               "Icon of Potent Prowess",
             },
-            slot = "Clicky",
+            slot = "Clicky2",
+          },
+          Clicky3 = {
+            ids = {
+              57142,
+            },
+            item = "Icon of Ancient Prowess",
+            names = {
+              "Icon of Ancient Prowess",
+            },
+            slot = "Clicky3",
           },
           Ear1 = {
             ids = {
@@ -7108,7 +7170,17 @@ return {
             },
             slot = "Chest",
           },
-          Clicky = {
+          Clicky1 = {
+            ids = {
+              56758,
+            },
+            item = "Icon of Ancient Boon",
+            names = {
+              "Icon of Ancient Boon",
+            },
+            slot = "Clicky1",
+          },
+          Clicky2 = {
             ids = {
               56756,
             },
@@ -7116,7 +7188,17 @@ return {
             names = {
               "Icon of Scribe's Endurance",
             },
-            slot = "Clicky",
+            slot = "Clicky2",
+          },
+          Clicky3 = {
+            ids = {
+              57143,
+            },
+            item = "Icon of the Ancient Scribe",
+            names = {
+              "Icon of the Ancient Scribe",
+            },
+            slot = "Clicky3",
           },
           Ear1 = {
             ids = {
@@ -7666,7 +7748,17 @@ return {
             },
             slot = "Chest",
           },
-          Clicky = {
+          Clicky1 = {
+            ids = {
+              56758,
+            },
+            item = "Icon of Ancient Boon",
+            names = {
+              "Icon of Ancient Boon",
+            },
+            slot = "Clicky1",
+          },
+          Clicky2 = {
             ids = {
               56756,
             },
@@ -7674,7 +7766,17 @@ return {
             names = {
               "Icon of Scribe's Endurance",
             },
-            slot = "Clicky",
+            slot = "Clicky2",
+          },
+          Clicky3 = {
+            ids = {
+              57143,
+            },
+            item = "Icon of the Ancient Scribe",
+            names = {
+              "Icon of the Ancient Scribe",
+            },
+            slot = "Clicky3",
           },
           Ear1 = {
             ids = {
@@ -8196,7 +8298,17 @@ return {
             },
             slot = "Chest",
           },
-          Clicky = {
+          Clicky1 = {
+            ids = {
+              56758,
+            },
+            item = "Icon of Ancient Boon",
+            names = {
+              "Icon of Ancient Boon",
+            },
+            slot = "Clicky1",
+          },
+          Clicky2 = {
             ids = {
               56756,
             },
@@ -8204,7 +8316,17 @@ return {
             names = {
               "Icon of Scribe's Endurance",
             },
-            slot = "Clicky",
+            slot = "Clicky2",
+          },
+          Clicky3 = {
+            ids = {
+              57143,
+            },
+            item = "Icon of the Ancient Scribe",
+            names = {
+              "Icon of the Ancient Scribe",
+            },
+            slot = "Clicky3",
           },
           Ear1 = {
             ids = {
@@ -8722,7 +8844,17 @@ return {
             },
             slot = "Chest",
           },
-          Clicky = {
+          Clicky1 = {
+            ids = {
+              56758,
+            },
+            item = "Icon of Ancient Boon",
+            names = {
+              "Icon of Ancient Boon",
+            },
+            slot = "Clicky1",
+          },
+          Clicky2 = {
             ids = {
               56756,
             },
@@ -8730,7 +8862,17 @@ return {
             names = {
               "Icon of Scribe's Endurance",
             },
-            slot = "Clicky",
+            slot = "Clicky2",
+          },
+          Clicky3 = {
+            ids = {
+              57143,
+            },
+            item = "Icon of the Ancient Scribe",
+            names = {
+              "Icon of the Ancient Scribe",
+            },
+            slot = "Clicky3",
           },
           Ear1 = {
             ids = {
@@ -9188,7 +9330,17 @@ return {
             },
             slot = "Chest",
           },
-          Clicky = {
+          Clicky1 = {
+            ids = {
+              56758,
+            },
+            item = "Icon of Ancient Boon",
+            names = {
+              "Icon of Ancient Boon",
+            },
+            slot = "Clicky1",
+          },
+          Clicky2 = {
             ids = {
               56757,
             },
@@ -9196,7 +9348,17 @@ return {
             names = {
               "Icon of Potent Prowess",
             },
-            slot = "Clicky",
+            slot = "Clicky2",
+          },
+          Clicky3 = {
+            ids = {
+              57142,
+            },
+            item = "Icon of Ancient Prowess",
+            names = {
+              "Icon of Ancient Prowess",
+            },
+            slot = "Clicky3",
           },
           Ear1 = {
             ids = {
@@ -9718,7 +9880,17 @@ return {
             },
             slot = "Chest",
           },
-          Clicky = {
+          Clicky1 = {
+            ids = {
+              56758,
+            },
+            item = "Icon of Ancient Boon",
+            names = {
+              "Icon of Ancient Boon",
+            },
+            slot = "Clicky1",
+          },
+          Clicky2 = {
             ids = {
               56756,
             },
@@ -9726,7 +9898,17 @@ return {
             names = {
               "Icon of Scribe's Endurance",
             },
-            slot = "Clicky",
+            slot = "Clicky2",
+          },
+          Clicky3 = {
+            ids = {
+              57143,
+            },
+            item = "Icon of the Ancient Scribe",
+            names = {
+              "Icon of the Ancient Scribe",
+            },
+            slot = "Clicky3",
           },
           Ear1 = {
             ids = {
@@ -10226,7 +10408,17 @@ return {
             },
             slot = "Chest",
           },
-          Clicky = {
+          Clicky1 = {
+            ids = {
+              56758,
+            },
+            item = "Icon of Ancient Boon",
+            names = {
+              "Icon of Ancient Boon",
+            },
+            slot = "Clicky1",
+          },
+          Clicky2 = {
             ids = {
               56755,
             },
@@ -10234,7 +10426,17 @@ return {
             names = {
               "Icon of Unwavering Defense",
             },
-            slot = "Clicky",
+            slot = "Clicky2",
+          },
+          Clicky3 = {
+            ids = {
+              57141,
+            },
+            item = "Icon of Ancient Defense",
+            names = {
+              "Icon of Ancient Defense",
+            },
+            slot = "Clicky3",
           },
           Ear1 = {
             ids = {
@@ -10762,7 +10964,17 @@ return {
             },
             slot = "Chest",
           },
-          Clicky = {
+          Clicky1 = {
+            ids = {
+              56758,
+            },
+            item = "Icon of Ancient Boon",
+            names = {
+              "Icon of Ancient Boon",
+            },
+            slot = "Clicky1",
+          },
+          Clicky2 = {
             ids = {
               56757,
             },
@@ -10770,7 +10982,17 @@ return {
             names = {
               "Icon of Potent Prowess",
             },
-            slot = "Clicky",
+            slot = "Clicky2",
+          },
+          Clicky3 = {
+            ids = {
+              57142,
+            },
+            item = "Icon of Ancient Prowess",
+            names = {
+              "Icon of Ancient Prowess",
+            },
+            slot = "Clicky3",
           },
           Ear1 = {
             ids = {
@@ -11252,7 +11474,17 @@ return {
             },
             slot = "Chest",
           },
-          Clicky = {
+          Clicky1 = {
+            ids = {
+              56758,
+            },
+            item = "Icon of Ancient Boon",
+            names = {
+              "Icon of Ancient Boon",
+            },
+            slot = "Clicky1",
+          },
+          Clicky2 = {
             ids = {
               56757,
             },
@@ -11260,7 +11492,17 @@ return {
             names = {
               "Icon of Potent Prowess",
             },
-            slot = "Clicky",
+            slot = "Clicky2",
+          },
+          Clicky3 = {
+            ids = {
+              57142,
+            },
+            item = "Icon of Ancient Prowess",
+            names = {
+              "Icon of Ancient Prowess",
+            },
+            slot = "Clicky3",
           },
           Ear1 = {
             ids = {
@@ -11768,7 +12010,17 @@ return {
             },
             slot = "Chest",
           },
-          Clicky = {
+          Clicky1 = {
+            ids = {
+              56758,
+            },
+            item = "Icon of Ancient Boon",
+            names = {
+              "Icon of Ancient Boon",
+            },
+            slot = "Clicky1",
+          },
+          Clicky2 = {
             ids = {
               56755,
             },
@@ -11776,7 +12028,17 @@ return {
             names = {
               "Icon of Unwavering Defense",
             },
-            slot = "Clicky",
+            slot = "Clicky2",
+          },
+          Clicky3 = {
+            ids = {
+              57141,
+            },
+            item = "Icon of Ancient Defense",
+            names = {
+              "Icon of Ancient Defense",
+            },
+            slot = "Clicky3",
           },
           Ear1 = {
             ids = {
@@ -12304,7 +12566,17 @@ return {
             },
             slot = "Chest",
           },
-          Clicky = {
+          Clicky1 = {
+            ids = {
+              56758,
+            },
+            item = "Icon of Ancient Boon",
+            names = {
+              "Icon of Ancient Boon",
+            },
+            slot = "Clicky1",
+          },
+          Clicky2 = {
             ids = {
               56756,
             },
@@ -12312,7 +12584,17 @@ return {
             names = {
               "Icon of Scribe's Endurance",
             },
-            slot = "Clicky",
+            slot = "Clicky2",
+          },
+          Clicky3 = {
+            ids = {
+              57143,
+            },
+            item = "Icon of the Ancient Scribe",
+            names = {
+              "Icon of the Ancient Scribe",
+            },
+            slot = "Clicky3",
           },
           Ear1 = {
             ids = {
@@ -12805,7 +13087,17 @@ return {
             },
             slot = "Chest",
           },
-          Clicky = {
+          Clicky1 = {
+            ids = {
+              56758,
+            },
+            item = "Icon of Ancient Boon",
+            names = {
+              "Icon of Ancient Boon",
+            },
+            slot = "Clicky1",
+          },
+          Clicky2 = {
             ids = {
               56755,
             },
@@ -12813,7 +13105,17 @@ return {
             names = {
               "Icon of Unwavering Defense",
             },
-            slot = "Clicky",
+            slot = "Clicky2",
+          },
+          Clicky3 = {
+            ids = {
+              57141,
+            },
+            item = "Icon of Ancient Defense",
+            names = {
+              "Icon of Ancient Defense",
+            },
+            slot = "Clicky3",
           },
           Ear1 = {
             ids = {
@@ -13279,7 +13581,17 @@ return {
             },
             slot = "Chest",
           },
-          Clicky = {
+          Clicky1 = {
+            ids = {
+              56758,
+            },
+            item = "Icon of Ancient Boon",
+            names = {
+              "Icon of Ancient Boon",
+            },
+            slot = "Clicky1",
+          },
+          Clicky2 = {
             ids = {
               56756,
             },
@@ -13287,7 +13599,17 @@ return {
             names = {
               "Icon of Scribe's Endurance",
             },
-            slot = "Clicky",
+            slot = "Clicky2",
+          },
+          Clicky3 = {
+            ids = {
+              57143,
+            },
+            item = "Icon of the Ancient Scribe",
+            names = {
+              "Icon of the Ancient Scribe",
+            },
+            slot = "Clicky3",
           },
           Ear1 = {
             ids = {

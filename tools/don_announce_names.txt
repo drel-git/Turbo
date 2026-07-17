@@ -47,9 +47,13 @@ Grelian Earring of Uncertainty
 Head of the Putrid Drake
 Hoop of the Drakeborn
 Hoop of the Nest Defender
+Icon of Ancient Boon
+Icon of Ancient Defense
+Icon of Ancient Prowess
 Icon of Potent Prowess
 Icon of Scribe's Endurance
 Icon of Unwavering Defense
+Icon of the Ancient Scribe
 Imbued Glyph: Aegis of Vie
 Imbued Glyph: Ancient: Annihilator's Volley
 Imbued Glyph: Ancient: Arachnid Fang

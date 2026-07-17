@@ -341,6 +341,22 @@ local function expand_jonas_hand_chain(list, class_bucket, out)
     return out
 end
 
+-- DoN Clickies: Boon (Clicky1) + specialty Icon (Clicky2) + combined Ancient*
+-- final (Clicky3). Owning the final clears the component rows.
+local function expand_don_clicky_chain(list, class_bucket, out)
+    local slot = tostring(out.slot or "")
+    if slot ~= "Clicky1" and slot ~= "Clicky2" then return out end
+    local final = (class_bucket and class_bucket.Clicky3)
+        or (list and list.template and list.template.Clicky3)
+    if not final then return out end
+    local e = norm_entry_cached(final)
+    local id_seen, name_seen = seed_id_seen(out), seed_name_seen(out)
+    add_ids(out, e.ids, id_seen)
+    add_names(out, e.names, name_seen)
+    add_names(out, { e.item }, name_seen)
+    return out
+end
+
 -- DoN Shadow section: owning the finished class Shadow counts as having used
 -- Primary/Secondary/Tertiary Materium of Legends (mark those rows green).
 local function expand_don_shadow_chain(list, class_bucket, out)
@@ -557,6 +573,7 @@ function M.resolve_entry(list_id, class_name, slot)
     if list_id == "jonas" then
         expand_jonas_hand_chain(list, class_bucket, out)
     elseif list_id == "don" then
+        expand_don_clicky_chain(list, class_bucket, out)
         expand_don_shadow_chain(list, class_bucket, out)
         expand_don_scales_chain(out, class_name)
     elseif list_id == "bagitems" then

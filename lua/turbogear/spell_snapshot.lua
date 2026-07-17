@@ -19,13 +19,25 @@ local function class_key(className)
 end
 
 local function spell_norm(name)
-    return trim(name):lower()
+    name = trim(name):lower()
+    -- Match bis.lua / announce norms so snap keys align with ownership checks.
+    name = name:gsub("`", "'"):gsub("\226\128\152", "'"):gsub("\226\128\153", "'")
+    return name
 end
 
+local SpellKnown = nil
 local function probe_book(spellName)
+    if not SpellKnown then
+        local ok, mod = pcall(require, 'spell_known')
+        SpellKnown = ok and mod or nil
+    end
+    if SpellKnown and SpellKnown.live then
+        return SpellKnown.live(spellName) == true
+    end
     local inBook = false
     pcall(function()
-        if (mq.TLO.Me.Book(spellName)() or 0) > 0 or (mq.TLO.Me.CombatAbility(spellName)() or 0) > 0 then
+        if (tonumber(mq.TLO.Me.Book(spellName)()) or 0) > 0
+            or (tonumber(mq.TLO.Me.CombatAbility(spellName)()) or 0) > 0 then
             inBook = true
         end
     end)

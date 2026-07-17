@@ -29,6 +29,14 @@ for _, catrow in ipairs(cat.lists.don.categories or {}) do
   if catrow.name == 'Spells' then spells_slots = catrow.slots break end
 end
 assert(spells_slots and #spells_slots >= 10, 'expected Pack1-Pack10 spell slots')
+local clicky_slots = nil
+for _, catrow in ipairs(cat.lists.don.categories or {}) do
+  if catrow.name == 'Clickies' then clicky_slots = catrow.slots break end
+end
+assert(clicky_slots and #clicky_slots == 3, 'expected Clicky1-3')
+assert(war.Clicky1 and war.Clicky1.item == 'Icon of Ancient Boon')
+assert(war.Clicky2 and war.Clicky2.item == 'Icon of Unwavering Defense')
+assert(war.Clicky3 and war.Clicky3.item == 'Icon of Ancient Defense')
 
 -- Load bis match helpers via a tiny inline reimplementation of known-check semantics
 local function snap_knows(snap, spell)
