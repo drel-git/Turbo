@@ -11029,9 +11029,7 @@ function TG.renderWindow()
                     onUpdate = function()
                         if TG.openTurboPatcherExternal then TG.openTurboPatcherExternal() end
                     end,
-                    onDismiss = function()
-                        if saveSettings then saveSettings() end
-                    end,
+                    onDismiss = function() end,
                 })
             end
         end)
@@ -12658,10 +12656,6 @@ while TG.windowOpen do
         pcall(function()
             local okUC, UC = pcall(require, 'Turbo.update_check')
             if okUC and UC and UC.tick then UC.tick(TG) end
-            if TG._updateCheckDirty and saveSettings then
-                TG._updateCheckDirty = false
-                saveSettings()
-            end
         end)
     end
     mq.delay(100)

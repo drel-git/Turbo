@@ -1,3 +1,9 @@
+1.2.29
+- Update check: no more os.execute fallback (that blocked the client and flashed
+  a console). Uses hidden CreateProcess + curl when available, defers first check
+  ~12s after Turbo starts, and stores check state in a tiny meta file instead of
+  rewriting full turbo_settings on every fetch.
+
 1.2.28
 - Update banner: recheck GitHub every 15m when up to date (was stuck 6h after a
   same-version check). More → Check now forces a fetch. Banner row simplified

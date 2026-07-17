@@ -813,12 +813,11 @@ function M.render(state, actions)
         if ImGui.SmallButton('Check now##tools_update_check_now') then
             local okUC, UC = pcall(require, 'Turbo.update_check')
             if okUC and UC and UC.force_check then
-                if UC.force_check(g) then
-                    g.statusMessage = 'Checking GitHub for a Turbo update...'
+                if UC.force_check(g, { immediate = true }) then
+                    g.statusMessage = 'Checking GitHub for a Turbo update (background)...'
                 else
                     g.statusMessage = 'Could not start update check (or checks are disabled).'
                 end
-                if actions.saveSettings then actions.saveSettings() end
             end
         end
         if ImGui.IsItemHovered() and ImGui.SetTooltip then
