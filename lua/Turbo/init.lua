@@ -158,6 +158,12 @@ local TG = {
     showReviewModeButtons = true,
     showQuickStartButton = true,
     quickStartDismissed = false,
+    --- Suite update check (remote CHANGELOG); default on. Throttled in Turbo.update_check.
+    checkForUpdates = true,
+    updateCheckAt = 0,
+    remoteTurboVersion = '',
+    updateBannerDismissedVersion = '',
+    turboUpdateAvailable = false,
     quickStartAutoShown = false,
     quickStartAutoReason = '',
     quickStartAutoLastCheck = 0,
@@ -1452,6 +1458,10 @@ saveSettings = function()
     f:write(string.format('  showQuickStartButton = %s,\n', tostring(TG.showQuickStartButton ~= false)))
     f:write(string.format('  quickStartDismissed = %s,\n', tostring(TG.quickStartDismissed == true)))
     f:write(string.format('  quickStartSeen = %s,\n', tostring(TG.quickStartSeen == true)))
+    f:write(string.format('  checkForUpdates = %s,\n', tostring(TG.checkForUpdates ~= false)))
+    f:write(string.format('  updateCheckAt = %d,\n', math.floor(tonumber(TG.updateCheckAt) or 0)))
+    f:write(string.format('  remoteTurboVersion = %q,\n', tostring(TG.remoteTurboVersion or '')))
+    f:write(string.format('  updateBannerDismissedVersion = %q,\n', tostring(TG.updateBannerDismissedVersion or '')))
     f:write(string.format('  showStopAllButton = %s,\n', tostring(TG.showStopAllButton ~= false)))
     f:write(string.format('  startupToolsEnabled = %s,\n', tostring(TG.startupToolsEnabled == true)))
     f:write('  startupToolSelections = {\n')
@@ -1544,6 +1554,12 @@ local function applySettingsTable(tbl)
     if tbl.showQuickStartButton ~= nil then TG.showQuickStartButton = tbl.showQuickStartButton ~= false end
     if tbl.quickStartDismissed ~= nil then TG.quickStartDismissed = tbl.quickStartDismissed == true end
     if tbl.quickStartSeen ~= nil then TG.quickStartSeen = tbl.quickStartSeen == true end
+    if tbl.checkForUpdates ~= nil then TG.checkForUpdates = tbl.checkForUpdates ~= false end
+    if tbl.updateCheckAt ~= nil then TG.updateCheckAt = math.floor(tonumber(tbl.updateCheckAt) or 0) end
+    if type(tbl.remoteTurboVersion) == 'string' then TG.remoteTurboVersion = tbl.remoteTurboVersion end
+    if type(tbl.updateBannerDismissedVersion) == 'string' then
+        TG.updateBannerDismissedVersion = tbl.updateBannerDismissedVersion
+    end
     if tbl.showStopAllButton ~= nil then TG.showStopAllButton = tbl.showStopAllButton ~= false end
     if tbl.startupToolsEnabled ~= nil then TG.startupToolsEnabled = tbl.startupToolsEnabled == true end
     if type(tbl.startupToolSelections) == 'table' then TG.startupToolSelections = tbl.startupToolSelections end
@@ -4452,8 +4468,18 @@ TG.openTurboPatcherExternal = function()
         end
     end
     if not exe then
-        TG.statusMessage = 'TurboPatcher.exe not found. Put it in your MacroQuest folder '
-            .. '(or a TurboPatcher subfolder there).'
+        local url = 'https://github.com/drel-git/TurboPatcher/releases/latest'
+        pcall(function()
+            local okUC, UC = pcall(require, 'Turbo.update_check')
+            if okUC and UC and UC.PATCHER_RELEASES_URL then url = UC.PATCHER_RELEASES_URL end
+        end)
+        if shellOpenUrl(url) then
+            TG.statusMessage = 'TurboPatcher.exe not found — opened download page. '
+                .. 'Save the exe into your MacroQuest folder (or a TurboPatcher subfolder).'
+        else
+            TG.statusMessage = 'TurboPatcher.exe not found. Put it in your MacroQuest folder '
+                .. '(or a TurboPatcher subfolder), or open: ' .. url
+        end
         return
     end
     if shellOpenFile(exe) then
@@ -5858,6 +5884,7 @@ local function printHelp()
     printf('\aw      GUI layout (saved to turbo_settings.lua); also saves looter, Turbo on, combat loot, ALL mode, radius, shared profile\ax')
     printf('\aw    \ay/lua run Turbo patcher\ax — launch TurboPatcher.exe (aliases: patch, update)\ax')
     printf('\aw    \ay/turbopatcher\ax — same, while Turbo is already running\ax')
+    printf('\aw      \aoMissing exe opens the download page. Hub banner when a newer suite is on GitHub.\ax')
     printf('\aw    \ay/lua run Turbo doctor\ax — install scan + profile report (versions, files, INIs)\ax')
     printf('\aw    \ay%s\ax — same install report when the Turbo UI is already open\ax', TURBO_DOCTOR_BIND)
     printf('\aw    \ay/turbosnapshot\ax — active turboloot.ini settings, grouped + with descriptions\ax')
@@ -10701,6 +10728,7 @@ function TG.renderWindow()
                     g.skipReviewOpen = g.reviewWindowOpen
                 end
             end,
+            openTurboPatcher = TG.openTurboPatcherExternal,
             setMiniLootMode = function(mode)
                 if TG.requireSharedControl('Loot mode') then
                     collectGroupMembers()
@@ -10994,6 +11022,19 @@ function TG.renderWindow()
         renderTopBar(g, viewState)
         if TG.turboChromeDragSetBandToCursor then TG.turboChromeDragSetBandToCursor(nil, 'main') end
         if TG.turboChromeDragHandle then TG.turboChromeDragHandle('Drag empty Turbo header space to move the window.', false, 'main') end
+        pcall(function()
+            local okUC, UC = pcall(require, 'Turbo.update_check')
+            if okUC and UC and UC.draw_banner then
+                UC.draw_banner(g, {
+                    onUpdate = function()
+                        if TG.openTurboPatcherExternal then TG.openTurboPatcherExternal() end
+                    end,
+                    onDismiss = function()
+                        if saveSettings then saveSettings() end
+                    end,
+                })
+            end
+        end)
         ImGui.Dummy(0, 2)
         renderTabBar(g, viewState)
         ImGui.Dummy(0, 4)
@@ -12187,6 +12228,7 @@ function TG.renderWindow()
                 openConfigFolder = o.openTurbolootConfigFolderExternal,
                 openMacrosFolder = o.openTurbolootMacrosFolderExternal,
                 openTurboMobsExportsFolder = o.openTurboMobsExportsFolderExternal,
+                saveSettings = o.saveSettings,
             })
         end -- actions/tools tab
 
@@ -12613,6 +12655,14 @@ while TG.windowOpen do
             pcall(function() mq.cmd('/squelch /endmacro') end)
             TG.windowOpen = false
         end
+        pcall(function()
+            local okUC, UC = pcall(require, 'Turbo.update_check')
+            if okUC and UC and UC.tick then UC.tick(TG) end
+            if TG._updateCheckDirty and saveSettings then
+                TG._updateCheckDirty = false
+                saveSettings()
+            end
+        end)
     end
     mq.delay(100)
 end

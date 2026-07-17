@@ -790,12 +790,30 @@ function M.render(state, actions)
             {
                 label = 'Turbo Patcher##tools_patcher',
                 intent = 'info',
-                tooltip = 'Launch TurboPatcher.exe to update the Turbo suite. Looks in your MacroQuest folder (and a TurboPatcher subfolder there). Running Turbo scripts stop themselves when an update starts.',
+                tooltip = 'Launch TurboPatcher.exe to update the Turbo suite. Looks in your MacroQuest folder (and a TurboPatcher subfolder there). Running Turbo scripts stop themselves when an update starts. If the exe is missing, opens the download page.',
                 onClick = function()
                     if actions.openTurboPatcher then actions.openTurboPatcher() end
                 end,
             },
         }, 1, 160, ACTION_BTN_H)
+        local checkOn = g.checkForUpdates ~= false
+        local newCheck = ImGui.Checkbox('Check for Turbo updates##tools_check_updates', checkOn)
+        if newCheck ~= checkOn then
+            g.checkForUpdates = newCheck == true
+            if actions.saveSettings then actions.saveSettings() end
+            if newCheck then
+                g.updateCheckAt = 0
+                g.turboUpdateAvailable = false
+            end
+        end
+        if ImGui.IsItemHovered() and ImGui.SetTooltip then
+            ImGui.SetTooltip('When on, Turbo occasionally checks GitHub for a newer suite version and shows a banner. Off = never check.')
+        end
+        if g.turboUpdateAvailable == true then
+            ImGui.TextColored(1.0, 0.76, 0.29, 1.0, string.format(
+                'Update available → v%s (use Turbo Patcher above)',
+                tostring(g.remoteTurboVersion or '?')))
+        end
     end
 
     if g.activeTab == 'tools' then

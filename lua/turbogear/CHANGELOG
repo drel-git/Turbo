@@ -1,3 +1,9 @@
+1.2.26
+- Turbo hub: optional update check (GitHub CHANGELOG, ~6h) with banner + Update
+  that launches TurboPatcher; missing exe opens the download page. More tab
+  checkbox to disable. Patcher 1.2.0: in-place self-update, config/turbo_install.json
+  stamp for accurate installed version, clearer reload reminder.
+
 1.2.25
 - Spell known probe: Me.Book / CombatAbility may return a raw number in MQ Lua;
   calling () on that threw inside pcall and always looked unknown. Theft of

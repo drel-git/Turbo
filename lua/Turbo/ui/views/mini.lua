@@ -102,6 +102,20 @@ function M.render(state, actions, ui)
             return ui.buttonVariant(label, variant, width or 0, 24)
         end
 
+        if g.turboUpdateAvailable == true then
+            if miniButton('Update##mini_turbo_update', 'amberButton', 64) then
+                if actions.openTurboPatcher then
+                    actions.openTurboPatcher()
+                elseif type(g.openTurboPatcherExternal) == 'function' then
+                    g.openTurboPatcherExternal()
+                end
+            end
+            actions.tip(string.format(
+                'Turbo update available (v%s). Opens TurboPatcher.',
+                tostring(g.remoteTurboVersion or '?')))
+            sp6()
+        end
+
         local canControl = true
         if type(actions.canSharedControlWrite) == 'function' then
             canControl = actions.canSharedControlWrite() == true
