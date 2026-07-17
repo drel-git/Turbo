@@ -1908,13 +1908,20 @@ Sub BeginLooting
             /if (${Defined[AllSkippedCorpseIds]} && ${AllSkippedCorpseIds.Length}) {
                 /declare _rest string local ${AllSkippedCorpseIds}
                 /declare _id string local
+                /declare _idN int local 0
                 /declare _p int local 0
+                /declare _plen int local 0
                 /while (${_rest.Length} > 1) {
                     /varset _rest ${_rest.Mid[2,500]}
                     /varset _p ${_rest.Find[|]}
                     /if (!${_p}) /break
-                    /varset _id ${_rest.Left[${Math.Calc[${_p}-1]}]}
-                    /if (${_id.Length} && ${Int[${_id}]}) /squelch /alert add ${AlertIndex} id ${_id}
+                    /varcalc _plen ${_p}-1
+                    /if (${_plen} > 0) {
+                        /varset _id ${_rest.Left[${_plen}]}
+                        | Coerce to int (junk/" becomes 0) — avoid nested ${Int[${_id}]} which can hard-error.
+                        /varset _idN ${_id}
+                        /if (${_idN} > 0) /squelch /alert add ${AlertIndex} id ${_idN}
+                    }
                     /varset _rest ${_rest.Mid[${_p},500]}
                 }
             }
@@ -2605,7 +2612,9 @@ Sub BeginLooting
         /if (${Corpse.Items} > 0) {
             /if (${showDebug} || ${logToFile}) /call LogDebug "Corpse ${Target.ID}: nothing looted, items remain (skipped/limits) - done"
             /if (${AllSkippedCorpseIds.Length} > 500) /varset AllSkippedCorpseIds ""
-            /if (!${AllSkippedCorpseIds.Find[|${Target.ID}|]}) /varset AllSkippedCorpseIds "${AllSkippedCorpseIds}|${Target.ID}|"
+            | No quotes around append RHS — Target.ID is numeric; quoted varsets can leave a literal "
+            | that later breaks final-sweep alert rebuild parsing.
+            /if (${Target.ID} && !${AllSkippedCorpseIds.Find[|${Target.ID}|]}) /varset AllSkippedCorpseIds ${AllSkippedCorpseIds}|${Target.ID}|
         }
     }
     /varset Skip FALSE
