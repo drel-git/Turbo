@@ -13,6 +13,14 @@
 ]]
 
 local mq = require('mq')
+do
+    local src = (debug.getinfo(1, 'S').source or ''):gsub('^@', '')
+    local dir = src:gsub('[/\\][^/\\]*$', '')
+    if dir ~= '' and dir ~= src then
+        package.path = dir .. '/?.lua;' .. dir .. '/?/init.lua;' .. package.path
+    end
+end
+local bot_pause = require('turbo_lib.bot_pause')
 
 local TAG = '\at[TurboDC]\ax'
 local DEFAULT_CHUNK = 7000
@@ -135,10 +143,10 @@ end
 
 local function reclaim_dc()
     if item_count('Diamond Coin') <= 0 then return 0 end
-    mq.cmd('/e3p on')
+    bot_pause.pause()
     mq.delay(100)
     if not ensure_inventory_window() then
-        mq.cmd('/e3p off')
+        bot_pause.resume()
         return 0
     end
 
@@ -148,7 +156,7 @@ local function reclaim_dc()
     local id = alt_currency_list_id()
     if id <= 0 then
         out('\aySkipped reclaim:\ax could not find Diamond Coins in the alt-currency list.')
-        mq.cmd('/e3p off')
+        bot_pause.resume()
         return 0
     end
 
@@ -161,7 +169,7 @@ local function reclaim_dc()
         mq.cmd('/nomodkey /notify InventoryWindow IW_AltCurr_Reclaimbutton leftmouseup')
     end
     mq.delay(800, function() return item_count('Diamond Coin') < before_inv end)
-    mq.cmd('/e3p off')
+    bot_pause.resume()
     return math.max(0, before_inv - item_count('Diamond Coin'))
 end
 

@@ -72,6 +72,19 @@ Sub SendDoneToOrchestrator
     }
 /return
 
+| Pause/resume the active combat bot on a REMOTE box. The target runs
+| turbo_bot_pause locally so RGMercs vs E3 is decided on that client
+| (not on the giver). Based on Hazado's RGMercs integration.
+Sub RemotePauseBot(string targetName)
+    /if (!${targetName.Length} || ${targetName.Equal[NULL]}) /return
+    /squelch /e3bct ${targetName} /squelch /lua run turbo_bot_pause pause
+/return
+
+Sub RemoteResumeBot(string targetName)
+    /if (!${targetName.Length} || ${targetName.Equal[NULL]}) /return
+    /squelch /e3bct ${targetName} /squelch /lua run turbo_bot_pause resume
+/return
+
 | =====================================================================
 | EVENT HANDLERS
 | =====================================================================
@@ -2032,7 +2045,7 @@ Sub HandOutToGroup(int countPerMember, string itemNameParam, string scopeParam)
     /varset handGiveCount ${Cursor.Stack}
     /if (${handGiveCount} <= 0) /varset handGiveCount 1
 
-    /squelch /e3bct ${recipName} /squelch /e3p on
+    /call RemotePauseBot "${recipName}"
 
     /face fast
     /delay 1
@@ -2043,7 +2056,7 @@ Sub HandOutToGroup(int countPerMember, string itemNameParam, string scopeParam)
         /autoinventory
         /delay 5 !${Cursor.ID}
         /if (${Cursor.ID}) /call ForceClearCursor
-        /squelch /e3bct ${recipName} /squelch /e3p off
+        /call RemoteResumeBot "${recipName}"
         /goto :nextHandRecip
     }
     /notify TargetWindow Target_HP leftmouseup
@@ -2055,7 +2068,7 @@ Sub HandOutToGroup(int countPerMember, string itemNameParam, string scopeParam)
             /autoinventory
             /delay 5 !${Cursor.ID}
             /if (${Cursor.ID}) /call ForceClearCursor
-            /squelch /e3bct ${recipName} /squelch /e3p off
+            /call RemoteResumeBot "${recipName}"
             /goto :nextHandRecip
         }
         /click left target
@@ -2067,7 +2080,7 @@ Sub HandOutToGroup(int countPerMember, string itemNameParam, string scopeParam)
         /autoinventory
         /delay 5 !${Cursor.ID}
         /if (${Cursor.ID}) /call ForceClearCursor
-        /squelch /e3bct ${recipName} /squelch /e3p off
+        /call RemoteResumeBot "${recipName}"
         /goto :nextHandRecip
     }
 
@@ -3064,9 +3077,9 @@ Sub GiveToTarget(string targetName)
                 /varset giveTallyQtyMap ${Macro.Return}
             }
 
-            | Pause target's E3 when first item goes in (prevents premature auto-accept)
+            | Pause target's combat bot when first item goes in (prevents premature auto-accept)
             /if (${itemsInBatch} == 1) {
-                /squelch /e3bct ${charName} /squelch /e3p on
+                /call RemotePauseBot "${charName}"
             }
 
             /echo ${tgTag} \ag[GIVE]\aw ${itemName} \atto ${charName} \aw(${itemsInBatch}/8 in batch)
@@ -3133,8 +3146,8 @@ Sub GiveToTarget(string targetName)
     /if (!${isBatch}) {
         /if (${wasFollowing}) /squelch /afollow unpause
     }
-    | Always restore target's E3 and follow
-    /squelch /e3bct ${charName} /squelch /e3p off
+    | Always restore target's combat bot and follow
+    /call RemoteResumeBot "${charName}"
     /squelch /e3bct ${charName} /squelch /afollow unpause
 /return
 
@@ -3260,8 +3273,8 @@ Sub ExecuteTrade(string tradeName)
         /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Trade completed successfully"
     }
 
-    | Unpause target's E3 now that trade is done
-    /squelch /e3bct ${tradeName} /squelch /e3p off
+    | Unpause target's combat bot now that trade is done
+    /call RemoteResumeBot "${tradeName}"
 
     | Brief pause to let game state settle before next batch
     /delay 1

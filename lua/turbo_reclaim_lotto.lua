@@ -6,6 +6,14 @@
 ]]
 
 local mq = require('mq')
+do
+    local src = (debug.getinfo(1, 'S').source or ''):gsub('^@', '')
+    local dir = src:gsub('[/\\][^/\\]*$', '')
+    if dir ~= '' and dir ~= src then
+        package.path = dir .. '/?.lua;' .. dir .. '/?/init.lua;' .. package.path
+    end
+end
+local bot_pause = require('turbo_lib.bot_pause')
 
 local TAG = '\at[TurboRL]\ax'
 local MAX_PASSES = 12
@@ -175,10 +183,10 @@ end
 
 local function reclaim_alt_currency()
     if not has_reclaim_currency() then return 0 end
-    mq.cmd('/e3p on')
+    bot_pause.pause()
     mq.delay(100)
     if not ensure_inventory_window() then
-        mq.cmd('/e3p off')
+        bot_pause.resume()
         return 0
     end
 
@@ -200,7 +208,7 @@ local function reclaim_alt_currency()
             end
         end
     end
-    mq.cmd('/e3p off')
+    bot_pause.resume()
     return clicks
 end
 

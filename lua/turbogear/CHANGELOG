@@ -1,3 +1,9 @@
+1.2.42
+- RGMercs pause support (based on Hazado's contribution): when rgmercs is
+  RUNNING, loot/give/reclaim use /rgl pause|unpause; otherwise /e3p on|off.
+  TurboGive pauses the remote box via /lua run turbo_bot_pause so each client
+  decides locally. Shared helpers in turbo_lib/bot_pause.lua + mac Subs.
+
 1.2.41
 - Zone lag fix: autoLaunch no longer treats post-zone group-roster churn as
   "everyone joined" (empty roster no longer wipes last_sig; staggered

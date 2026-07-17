@@ -213,7 +213,11 @@ Sub TurboReclaimAltCurr
 
 /if (${hasCurrency}==0) /return 0
 
-/e3p on
+/if (${Lua.Script[rgmercs].Status.Equal[RUNNING]}) {
+    /rgl pause
+} else {
+    /e3p on
+}
 /delay 1
 /if (!${Window[InventoryWindow]}) /invoke ${Window[InventoryWindow].DoOpen}
 /delay 3
@@ -233,6 +237,10 @@ Sub TurboReclaimAltCurr
 	/delay 2
 /next i
 
-/e3p off
+/if (${Lua.Script[rgmercs].Status.Equal[RUNNING]}) {
+    /rgl unpause
+} else {
+    /e3p off
+}
 
 /return ${reclaimCount}
