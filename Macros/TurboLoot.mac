@@ -1764,11 +1764,20 @@ Sub PreChecks
 | PAUSE E3 LOGIC
 | ---------------------------------------------------------------------
 Sub PauseE3Logic
-    /e3p on
+    /if (${Lua.Script[rgmercs].Status.Equal[RUNNING]}) {
+        /rgl pause
+    } else {
+        /e3p on
+    }
     /delay 1
 
-    /timed 6000 /if (${Macro.Name.Equal[turboLoot]}) /echo [turboLoot] SAFETY NET: Macro still running after 10 minutes - resuming E3Next (/e3p off).
-    /timed 6000 /if (${Macro.Name.Equal[turboLoot]}) /e3p off
+    /if (${Lua.Script[rgmercs].Status.Equal[RUNNING]}) {
+        /timed 6000 /if (${Macro.Name.Equal[turboLoot]}) /echo [turboLoot] SAFETY NET: Macro still running after 10 minutes - resuming RGmercs (/rgl unpause).
+        /timed 6000 /if (${Macro.Name.Equal[turboLoot]}) /rgl unpause
+    } else {
+        /timed 6000 /if (${Macro.Name.Equal[turboLoot]}) /echo [turboLoot] SAFETY NET: Macro still running after 10 minutes - resuming E3Next (/e3p off).
+        /timed 6000 /if (${Macro.Name.Equal[turboLoot]}) /e3p off
+    }
     
     /call PauseAFollow
     
@@ -1942,8 +1951,12 @@ Sub BeginLooting
     /varcalc mainLoopIterations ${mainLoopIterations}+1
     /if (${mainLoopIterations} > ${maxMainLoopIterations}) {
         /echo [turboLoot] WARNING: Main loop exceeded ${maxMainLoopIterations} iterations. Exiting to prevent infinite loop.
-    /if (${logToFile}) /call LogError "Main loop exceeded ${maxMainLoopIterations} iterations - exiting"
-        /e3p off
+        /if (${logToFile}) /call LogError "Main loop exceeded ${maxMainLoopIterations} iterations - exiting"
+        /if (${Lua.Script[rgmercs].Status.Equal[RUNNING]}) {
+            /rgl unpause
+        } else {
+            /e3p off
+        }
         /deletevar turboLootRunning
         /varset mainLoopIterations 0
         /if (${AlertIndex}) /squelch /alert clear ${AlertIndex}
@@ -2114,7 +2127,11 @@ Sub BeginLooting
                             /if (${Cursor.ID}) {
                                 /echo [turboLoot] ERROR: Item stuck on cursor after /autoinventory: ${Cursor.Name}. Clear cursor and rerun.
                                 /if (${logToFile}) /call LogError "Item stuck on cursor after autoinventory: ${Cursor.Name}"
-                                /e3p off
+                                /if (${Lua.Script[rgmercs].Status.Equal[RUNNING]}) {
+                                    /rgl unpause
+                                } else {
+                                    /e3p off
+                                }
                                 /deletevar turboLootRunning
                                 /if (${AlertIndex}) /squelch /alert clear ${AlertIndex}
                                 /if (${Defined[turboLootSafetyNet]}) /deletevar turboLootSafetyNet
@@ -2267,7 +2284,11 @@ Sub BeginLooting
         /call FormatMessage "\ar [turboLoot] My Inventory is full!!" "${announceMethod}"
         /declare msg string local ${Macro.Return}
         /docommand /${announceMethod} ${msg}
-        /e3p off
+        /if (${Lua.Script[rgmercs].Status.Equal[RUNNING]}) {
+            /rgl unpause
+        } else {
+            /e3p off
+        }
         /deletevar turboLootRunning
         /varset mainLoopIterations 0
         /if (${AlertIndex}) /squelch /alert clear ${AlertIndex}
@@ -5406,7 +5427,11 @@ Sub CheckLootAbortState
         }
         /varset abortingMacro TRUE
         /varset safetyNoResume TRUE
-        /e3p on
+        /if (${Lua.Script[rgmercs].Status.Equal[RUNNING]}) {
+            /rgl pause
+        } else {
+            /e3p on
+        }
         /deletevar turboLootRunning
         /if (${Defined[turboLootSafetyNet]}) /deletevar turboLootSafetyNet
         /call StopFollowAndMovement
@@ -5422,7 +5447,11 @@ Sub CheckLootAbortState
         /if (${logToFile}) /call LogError "Stopping: invisible and not looting"
         /varset abortingMacro TRUE
         /varset safetyNoResume TRUE
-        /e3p on
+        /if (${Lua.Script[rgmercs].Status.Equal[RUNNING]}) {
+            /rgl pause
+        } else {
+            /e3p on
+        }
         /deletevar turboLootRunning
         /if (${Defined[turboLootSafetyNet]}) /deletevar turboLootSafetyNet
         /call StopFollowAndMovement
@@ -5629,7 +5658,11 @@ Sub Cleanup
         /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] Cleanup: safety abort active; leaving E3/follow paused."
     } else {
         /call UnpauseAFollow
-        /e3p off
+        /if (${Lua.Script[rgmercs].Status.Equal[RUNNING]}) {
+            /rgl unpause
+        } else {
+            /e3p off
+        }
     }
     /docommand /lootnodrop ${lootNoDropPromptReset}
     /call SetTurboLootActive OFF

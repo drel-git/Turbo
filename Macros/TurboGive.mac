@@ -2032,7 +2032,11 @@ Sub HandOutToGroup(int countPerMember, string itemNameParam, string scopeParam)
     /varset handGiveCount ${Cursor.Stack}
     /if (${handGiveCount} <= 0) /varset handGiveCount 1
 
-    /squelch /e3bct ${recipName} /squelch /e3p on
+    /if (${Lua.Script[rgmercs].Status.Equal[RUNNING]}) {
+        /squelch /e3bct ${recipName} /squelch /rgl pause
+    } else {
+        /squelch /e3bct ${recipName} /squelch /e3p on
+    }
 
     /face fast
     /delay 1
@@ -2043,7 +2047,11 @@ Sub HandOutToGroup(int countPerMember, string itemNameParam, string scopeParam)
         /autoinventory
         /delay 5 !${Cursor.ID}
         /if (${Cursor.ID}) /call ForceClearCursor
-        /squelch /e3bct ${recipName} /squelch /e3p off
+        /if (${Lua.Script[rgmercs].Status.Equal[RUNNING]}) {
+            /squelch /e3bct ${recipName} /squelch /rgl unpause
+        } else {
+            /squelch /e3bct ${recipName} /squelch /e3p off
+        }
         /goto :nextHandRecip
     }
     /notify TargetWindow Target_HP leftmouseup
@@ -2055,7 +2063,11 @@ Sub HandOutToGroup(int countPerMember, string itemNameParam, string scopeParam)
             /autoinventory
             /delay 5 !${Cursor.ID}
             /if (${Cursor.ID}) /call ForceClearCursor
-            /squelch /e3bct ${recipName} /squelch /e3p off
+            /if (${Lua.Script[rgmercs].Status.Equal[RUNNING]}) {
+                /squelch /e3bct ${recipName} /squelch /rgl unpause
+            } else {
+                /squelch /e3bct ${recipName} /squelch /e3p off
+            }
             /goto :nextHandRecip
         }
         /click left target
@@ -2067,7 +2079,11 @@ Sub HandOutToGroup(int countPerMember, string itemNameParam, string scopeParam)
         /autoinventory
         /delay 5 !${Cursor.ID}
         /if (${Cursor.ID}) /call ForceClearCursor
-        /squelch /e3bct ${recipName} /squelch /e3p off
+        /if (${Lua.Script[rgmercs].Status.Equal[RUNNING]}) {
+            /squelch /e3bct ${recipName} /squelch /rgl unpause
+        } else {
+            /squelch /e3bct ${recipName} /squelch /e3p off
+        }
         /goto :nextHandRecip
     }
 
@@ -3066,7 +3082,11 @@ Sub GiveToTarget(string targetName)
 
             | Pause target's E3 when first item goes in (prevents premature auto-accept)
             /if (${itemsInBatch} == 1) {
-                /squelch /e3bct ${charName} /squelch /e3p on
+                /if (${Lua.Script[rgmercs].Status.Equal[RUNNING]}) {
+                    /squelch /e3bct ${charName} /squelch /rgl pause
+                } else {
+                    /squelch /e3bct ${charName} /squelch /e3p on
+                }
             }
 
             /echo ${tgTag} \ag[GIVE]\aw ${itemName} \atto ${charName} \aw(${itemsInBatch}/8 in batch)
@@ -3134,7 +3154,11 @@ Sub GiveToTarget(string targetName)
         /if (${wasFollowing}) /squelch /afollow unpause
     }
     | Always restore target's E3 and follow
-    /squelch /e3bct ${charName} /squelch /e3p off
+    /if (${Lua.Script[rgmercs].Status.Equal[RUNNING]}) {
+        /squelch /e3bct ${charName} /squelch /rgl unpause
+    } else {
+        /squelch /e3bct ${charName} /squelch /e3p off
+    }
     /squelch /e3bct ${charName} /squelch /afollow unpause
 /return
 
@@ -3261,7 +3285,11 @@ Sub ExecuteTrade(string tradeName)
     }
 
     | Unpause target's E3 now that trade is done
-    /squelch /e3bct ${tradeName} /squelch /e3p off
+    /if (${Lua.Script[rgmercs].Status.Equal[RUNNING]}) {
+        /squelch /e3bct ${tradeName} /squelch /rgl unpause
+    } else {
+        /squelch /e3bct ${tradeName} /squelch /e3p off
+    }
 
     | Brief pause to let game state settle before next batch
     /delay 1
