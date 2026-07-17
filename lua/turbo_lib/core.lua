@@ -2,6 +2,7 @@
 -- Shared TLO helpers, cursor/trade/inventory, and alt-currency reclaim.
 
 local mq = require('mq')
+local bot_pause = require('turbo_lib.bot_pause')
 
 local M = {}
 
@@ -153,18 +154,10 @@ function M.reclaim_alt_currency(opts)
     local quiet = opts.quiet == true
 
     if not M.has_reclaim_currency(items) then return 0 end
-    if mq.TLO.Lua.Script('rgmercs').Status.Equal('RUNNING')() then
-        mq.cmd('/rgl pause')
-    else
-        mq.cmd('/e3p on')
-    end
+    bot_pause.pause()
     mq.delay(100)
     if not M.ensure_inventory_window(out_fn) then
-        if mq.TLO.Lua.Script('rgmercs').Status.Equal('RUNNING')() then
-            mq.cmd('/rgl unpause')
-        else
-            mq.cmd('/e3p off')
-        end
+        bot_pause.resume()
         return 0
     end
 
@@ -186,28 +179,16 @@ function M.reclaim_alt_currency(opts)
             end
         end
     end
-    if mq.TLO.Lua.Script('rgmercs').Status.Equal('RUNNING')() then
-        mq.cmd('/rgl unpause')
-    else
-        mq.cmd('/e3p off')
-    end
+    bot_pause.resume()
     return clicks
 end
 
 function M.reclaim_diamond_coin(out_fn)
     if M.item_count('Diamond Coin', true) <= 0 then return 0 end
-    if mq.TLO.Lua.Script('rgmercs').Status.Equal('RUNNING')() then
-        mq.cmd('/rgl pause')
-    else
-        mq.cmd('/e3p on')
-    end
+    bot_pause.pause()
     mq.delay(100)
     if not M.ensure_inventory_window(out_fn) then
-        if mq.TLO.Lua.Script('rgmercs').Status.Equal('RUNNING')() then
-            mq.cmd('/rgl unpause')
-        else
-            mq.cmd('/e3p off')
-        end
+        bot_pause.resume()
         return 0
     end
 
@@ -220,11 +201,7 @@ function M.reclaim_diamond_coin(out_fn)
     end
     if id <= 0 then
         if out_fn then out_fn('\aySkipped reclaim:\ax could not find Diamond Coins in the alt-currency list.') end
-        if mq.TLO.Lua.Script('rgmercs').Status.Equal('RUNNING')() then
-            mq.cmd('/rgl unpause')
-        else
-            mq.cmd('/e3p off')
-        end
+        bot_pause.resume()
         return 0
     end
 
@@ -242,11 +219,7 @@ function M.reclaim_diamond_coin(out_fn)
             return M.item_count('Diamond Coin', true) < before_inv or M.read_alt_dc() > before_alt
         end)
     end
-    if mq.TLO.Lua.Script('rgmercs').Status.Equal('RUNNING')() then
-        mq.cmd('/rgl unpause')
-    else
-        mq.cmd('/e3p off')
-    end
+    bot_pause.resume()
     return math.max(0, before_inv - M.item_count('Diamond Coin', true))
 end
 
