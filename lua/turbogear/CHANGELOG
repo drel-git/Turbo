@@ -1,3 +1,9 @@
+1.2.66
+- DoN BiS Spells: track each learned ability (not Spell/Tome Packs). Status
+  order Known -> Ready to Learn -> Pack Owned -> Missing. Multi-ability packs
+  get one row per ability; hover shows Learned from only. Excludes unresolved
+  Ancient: Malicious Onslaught and Jolting Thunderkicks packs.
+
 1.2.65
 - Give Now / Give To (bank) confirm: Give 1, Give All (row qty), and Give Qty
   (InputInt). Bags use send / _sendstack; bank pulls stack via QuantityWnd

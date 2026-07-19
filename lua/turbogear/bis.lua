@@ -761,10 +761,15 @@ function M.evaluate(list, snap)
                 goto continue_eval
             end
         end
-        rows[#rows + 1] = { entry = entry, have = match ~= nil, match = match, status = status }
+        local have = status ~= nil and status ~= "missing"
+        rows[#rows + 1] = { entry = entry, have = have, match = match, status = status }
         ::continue_eval::
     end
     return rows
+end
+
+local function status_is_have(status)
+    return status ~= nil and status ~= "missing"
 end
 
 function M.evaluate_entry(entry, snap, opts)
@@ -783,7 +788,7 @@ function M.evaluate_entry(entry, snap, opts)
                 if handled then
                     return {
                         entry = entry,
-                        have = liveStatus ~= nil and liveStatus ~= "missing",
+                        have = status_is_have(liveStatus),
                         match = liveMatch,
                         status = liveStatus or "missing",
                     }
@@ -797,7 +802,7 @@ function M.evaluate_entry(entry, snap, opts)
             end
         end
     end
-    return { entry = entry, have = match ~= nil, match = match, status = status }
+    return { entry = entry, have = status_is_have(status), match = match, status = status }
 end
 
 local function link_matches_entry(entry, item_name, item_id)
@@ -812,22 +817,21 @@ local function link_matches_entry(entry, item_name, item_id)
     if iid and iid > 0 then
         for _, id in ipairs(entry.ids or {}) do if tonumber(id) == iid then return true end end
     end
-    -- DoN catalog: looted scroll/tome should match its pack or single row.
+    -- DoN catalog: looted teaching item / pack matches the ability row.
     local DS = ensure_don_spells()
     if DS and DS.lookup_entry then
         local hit = DS.lookup_entry(entry)
-        if hit and hit.row then
-            if hit.kind == 'pack' then
-                if iid and tonumber(hit.row.id) == iid then return true end
-                local pn = norm(hit.row.name)
-                if lname ~= "" and pn ~= "" and lname == pn then return true end
-                for _, ab in ipairs(hit.row.abilities or {}) do
-                    if iid and tonumber(ab.item) == iid then return true end
-                    if lname ~= "" and norm(ab.item_name) == lname then return true end
-                end
-            elseif hit.kind == 'single' then
-                if iid and tonumber(hit.row.id) == iid then return true end
-                if lname ~= "" and norm(hit.row.name) == lname then return true end
+        if hit and hit.kind == 'ability' and hit.row then
+            local ab = hit.row
+            if iid and tonumber(ab.primary_teaching_item_id) == iid then return true end
+            if iid and tonumber(ab.source_container_item_id) == iid then return true end
+            for _, alt in ipairs(ab.alternate_teaching_item_ids or {}) do
+                if iid and tonumber(alt) == iid then return true end
+            end
+            if lname ~= "" then
+                if norm(ab.display_name) == lname then return true end
+                if norm(ab.teaching_item_name) == lname then return true end
+                if norm(ab.source_name) == lname then return true end
             end
         end
     end
@@ -871,7 +875,9 @@ function M.counts(rows)
     for _, row in ipairs(rows or {}) do
         if not row.header and not row.empty then
             if row.status == "equipped" then equipped = equipped + 1
-            elseif row.status == "carried" or row.status == "known" then carried = carried + 1
+            elseif row.status == "carried" or row.status == "known"
+                or row.status == "ready" or row.status == "pack_owned" then
+                carried = carried + 1
             else missing = missing + 1 end
         end
     end

@@ -565,7 +565,53 @@ function M.first_visible_list_button()
     return nil
 end
 
+local DonSpellsMod = nil
+local function ensure_don_spells_mod()
+    if DonSpellsMod ~= nil then return DonSpellsMod end
+    local ok, mod = pcall(require, 'don_spells')
+    DonSpellsMod = ok and mod or false
+    return DonSpellsMod
+end
+
+--- Slots for a category. DoN Spells uses per-ability keys from don_spells
+--- (always per-class; roster height is computed separately via spell_index rows).
+local function category_slots(list_id, cat, class_name, _union)
+    if not cat then return {} end
+    if list_id == "don" and tostring(cat.name or "") == "Spells" then
+        local DS = ensure_don_spells_mod()
+        if DS and DS.spell_slots_for_class then
+            return DS.spell_slots_for_class(class_name)
+        end
+        return {}
+    end
+    return cat.slots or {}
+end
+
+local function is_don_spells_category(list_id, cat_name)
+    return list_id == "don" and tostring(cat_name or "") == "Spells"
+end
+
 function M.resolve_entry(list_id, class_name, slot)
+    -- DoN Spells: one BiS row per learned ability (not Pack1..Pack10).
+    if list_id == "don" then
+        local DS = ensure_don_spells_mod()
+        if DS and DS.ability_for_slot then
+            local ability = DS.ability_for_slot(class_name, slot)
+            if ability and DS.bis_entry_for_ability then
+                local out = bis.normalize_entry(DS.bis_entry_for_ability(ability))
+                out.slot = slot
+                out.group = "Spells"
+                out.don_ability = ability
+                out.learned_from = ability and (DS.learned_from and DS.learned_from(ability) or nil)
+                return out
+            end
+            -- Ability slot for another class -> empty cell (not LazBiS Pack fallback).
+            if DS.is_ability_slot and DS.is_ability_slot(slot) then
+                return nil
+            end
+        end
+    end
+
     local list = M.list(list_id)
     if not list then return nil end
     local class_bucket = list.classes and list.classes[class_key(class_name)] or nil
@@ -600,7 +646,7 @@ function M.rows_for_snap(list_id, snap)
     if not list or not snap then return rows end
     for _, cat in ipairs(list.categories or {}) do
         rows[#rows+1] = { category = cat.name, header = true }
-        for _, slot in ipairs(cat.slots or {}) do
+        for _, slot in ipairs(category_slots(list_id, cat, snap.class, false)) do
             local entry = M.resolve_entry(list_id, snap.class, slot)
             if entry then
                 entry.group = cat.name
@@ -615,14 +661,39 @@ function M.rows_for_snap(list_id, snap)
     return rows
 end
 
-function M.reference_rows(list_id)
+--- Roster reference rows. opts.class_names (optional) sizes DoN Spells to the
+--- max per-class ability count among visible characters instead of a shared matrix.
+function M.reference_rows(list_id, opts)
     local list = M.list(list_id)
     local rows = {}
     if not list then return rows end
+    opts = type(opts) == "table" and opts or {}
+    local class_names = opts.class_names
     for _, cat in ipairs(list.categories or {}) do
         rows[#rows+1] = { category = cat.name, header = true }
-        for _, slot in ipairs(cat.slots or {}) do
-            rows[#rows+1] = { category = cat.name, slot = slot }
+        if is_don_spells_category(list_id, cat.name) then
+            -- Per-character class columns: N index rows, no shared left-side list.
+            local DS = ensure_don_spells_mod()
+            local max_n = 0
+            if DS and DS.max_spell_slots_for_classes and type(class_names) == "table" and #class_names > 0 then
+                max_n = DS.max_spell_slots_for_classes(class_names)
+            elseif DS and DS.spell_slots_for_class and type(class_names) == "table" then
+                for _, cn in ipairs(class_names) do
+                    local n = #DS.spell_slots_for_class(cn)
+                    if n > max_n then max_n = n end
+                end
+            end
+            for i = 1, max_n do
+                rows[#rows+1] = {
+                    category = cat.name,
+                    spell_index = i,
+                    hide_slot = true,
+                }
+            end
+        else
+            for _, slot in ipairs(category_slots(list_id, cat, nil, false)) do
+                rows[#rows+1] = { category = cat.name, slot = slot }
+            end
         end
     end
     return rows
@@ -635,6 +706,25 @@ function M.evaluate_slot(list_id, snap, slot, category)
     local row = bis.evaluate_entry(entry, snap)
     row.category = category
     return row
+end
+
+--- Evaluate the Nth DoN spell for a character's class (1-based). Past the end
+--- of that class list returns a blank pad cell (not a shared-matrix miss).
+function M.evaluate_spell_index(list_id, snap, spell_index, category)
+    spell_index = tonumber(spell_index) or 0
+    if spell_index < 1 or not is_don_spells_category(list_id, category) then
+        return { category = category, empty = true, pad = true }
+    end
+    local DS = ensure_don_spells_mod()
+    if not (DS and DS.spell_slots_for_class) then
+        return { category = category, empty = true, pad = true }
+    end
+    local slots = DS.spell_slots_for_class(snap and snap.class)
+    local slot = slots[spell_index]
+    if not slot then
+        return { category = category, empty = true, pad = true }
+    end
+    return M.evaluate_slot(list_id, snap, slot, category)
 end
 
 function M.find_link_need(snap, item_name, item_id)
@@ -682,14 +772,13 @@ local function ensure_catalog_search_index()
         table.sort(class_names)
         if #class_names == 0 then class_names = { "" } end
 
-        local slots = {}
-        for _, cat in ipairs(list.categories or {}) do
-            for _, slot in ipairs(cat.slots or {}) do
-                slots[slot] = true
-            end
-        end
-
         for _, class_name in ipairs(class_names) do
+            local slots = {}
+            for _, cat in ipairs(list.categories or {}) do
+                for _, slot in ipairs(category_slots(spec.id, cat, class_name, false)) do
+                    slots[slot] = true
+                end
+            end
             for slot in pairs(slots) do
                 local entry = M.resolve_entry(spec.id, class_name, slot)
                 if entry then
@@ -951,7 +1040,7 @@ local function add_catalog_list_entries(idx, list_id, class_name)
     idx.list_count = (idx.list_count or 0) + 1
     local list_name = M.list_label(list_id)
     for _, cat in ipairs(list.categories or {}) do
-        for _, slot in ipairs(cat.slots or {}) do
+        for _, slot in ipairs(category_slots(list_id, cat, class_name, false)) do
             local entry = M.resolve_entry(list_id, class_name, slot)
             if entry then
                 for _, name in ipairs(entry.names or { entry.item }) do
@@ -1058,7 +1147,10 @@ local function step_ref_work(build)
             finish_ref_work(build)
             return true
         end
-        local slot = cat.slots and cat.slots[work.slot_i]
+        if not work.cat_slots then
+            work.cat_slots = category_slots(work.id, cat, build.class_name, false)
+        end
+        local slot = work.cat_slots[work.slot_i]
         if slot then
             local entry = M.resolve_entry(work.id, build.class_name, slot)
             if entry then add_entry_names(build.idx, work.id, work.list_name, entry) end
@@ -1067,6 +1159,7 @@ local function step_ref_work(build)
         end
         work.cat_i = work.cat_i + 1
         work.slot_i = 1
+        work.cat_slots = nil
     end
 end
 
@@ -1511,12 +1604,18 @@ local function direct_build_step(st)
     if not cat then
         st.ref_i = st.ref_i + 1
         st.cat_i, st.slot_i = 1, 1
+        st.cat_slots = nil
         return true
     end
-    local slot = (cat.slots or {})[st.slot_i]
+    if not st.cat_slots or st.cat_slots_i ~= st.cat_i then
+        st.cat_slots = category_slots(ref.id, cat, st.class_name, false)
+        st.cat_slots_i = st.cat_i
+    end
+    local slot = st.cat_slots[st.slot_i]
     if not slot then
         st.cat_i = st.cat_i + 1
         st.slot_i = 1
+        st.cat_slots = nil
         return true
     end
     local entry = M.resolve_entry(ref.id, st.class_name, slot)

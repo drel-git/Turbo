@@ -138,14 +138,16 @@ local FULL_NAME_CFG = { col_w = nil, slot_w = 124.0, name_max = 36, min_col_w = 
 
 -- TurboBiS roster colors (slot gold stays on Theme.slot; carried uses bag-blue).
 local BIS_GREEN  = { 0.43, 0.82, 0.58, 1.0 }
-local BIS_BAG    = { 0.52, 0.72, 1.00, 1.0 }  -- owned in bags/bank (not slot gold)
+local BIS_BAG    = { 0.52, 0.72, 1.00, 1.0 }  -- owned in bags/bank / Ready to Learn
 local BIS_MISS   = { 0.62, 0.34, 0.34, 1.0 }
 local BIS_ELSE   = { 0.95, 0.72, 0.30, 1.0 }
+local BIS_PACK   = { 0.95, 0.78, 0.35, 1.0 }  -- DoN Pack Owned
 local BIS_CYAN   = { 0.36, 0.66, 0.76, 1.0 }
 local BIS_ITEM   = { 0.37, 0.68, 0.80, 1.0 }
 local ULTRA_CELL_BG = {
     equipped = { 0.10, 0.20, 0.14, 0.94 },
     carried  = { 0.10, 0.15, 0.26, 0.94 },
+    pack     = { 0.22, 0.18, 0.08, 0.94 },
 }
 
 -- Friendlier slot labels for the frozen column (catalog keys -> display).
@@ -953,16 +955,37 @@ function M.prep_chrome()
     bis_dropdown_open = false
 end
 
+local function is_don_ability_row(row)
+    local e = row and row.entry
+    return type(e) == "table" and (e.don_ability ~= nil or (e.learned_from and e.learned_from ~= ""))
+end
+
+local function don_learned_from(row)
+    local e = row and row.entry
+    if not e then return "" end
+    if e.learned_from and tostring(e.learned_from) ~= "" then return tostring(e.learned_from) end
+    local ab = e.don_ability
+    if type(ab) == "table" then
+        if tostring(ab.source_type or "") == "bundle" then return tostring(ab.source_name or "") end
+        return tostring(ab.teaching_item_name or ab.source_name or "")
+    end
+    return ""
+end
+
 local function row_color(row)
     if row and row.status == "equipped" then return BIS_GREEN end
-    if row and (row.status == "carried" or row.status == "known") then return BIS_BAG end
+    if row and row.status == "known" then return BIS_GREEN end
+    if row and (row.status == "carried" or row.status == "ready") then return BIS_BAG end
+    if row and row.status == "pack_owned" then return BIS_PACK end
     if show_elsewhere() and row and row.elsewhere then return BIS_ELSE end
     return BIS_MISS
 end
 
 local function apply_ultra_cell_bg(row)
     if not row or row.empty or (row.status == "missing" and not (show_elsewhere() and row.elsewhere)) then return end
-    local bg = row.status == "equipped" and ULTRA_CELL_BG.equipped or ULTRA_CELL_BG.carried
+    local bg = ULTRA_CELL_BG.carried
+    if row.status == "equipped" or row.status == "known" then bg = ULTRA_CELL_BG.equipped
+    elseif row.status == "pack_owned" then bg = ULTRA_CELL_BG.pack end
     if not (ImGui.TableSetBgColor and ImGuiTableBgTarget and theme.color_u32) then return end
     local target = ImGuiTableBgTarget.CellBg or ImGuiTableBgTarget.RowBg0
     pcall(ImGui.TableSetBgColor, target, theme.color_u32(bg))
@@ -1004,6 +1027,9 @@ local function draw_slot_column_cell(rec)
     local col_w = column_width_now()
     if rec.header then
         views.col_text_fit(BIS_CYAN, rec.category or "", col_w)
+    elseif rec.hide_slot or rec.spell_index then
+        -- DoN Spells: no shared left-side ability list; names live in class columns.
+        ImGui.TextDisabled("")
     else
         local label = string.rep(" ", 3) .. slot_display_label(rec.slot)
         views.colored_text_fit(Theme.slot, label, col_w)
@@ -1057,8 +1083,9 @@ end
 
 local function status_glyph(row)
     if not row or row.empty then return "-" end
-    if row.status == "equipped" then return "W" end
-    if row.status == "carried" or row.status == "known" then return "B" end
+    if row.status == "equipped" or row.status == "known" then return "W" end
+    if row.status == "carried" or row.status == "ready" then return "B" end
+    if row.status == "pack_owned" then return "P" end
     if show_elsewhere() and row.elsewhere then return "E" end
     return "X"
 end
@@ -1067,18 +1094,20 @@ local function row_label(row)
     if row and row.status == "equipped" then return "Equipped" end
     if row and row.status == "carried" then return "Carried" end
     if row and row.status == "known" then return "Known" end
+    if row and row.status == "ready" then return "Ready to Learn" end
+    if row and row.status == "pack_owned" then return "Pack Owned" end
     if show_elsewhere() and row and row.elsewhere then return "Elsewhere" end
     return "Need"
 end
 
 local function row_location(row)
+    if row and row.status == "known" then return "Spell book / discs" end
+    if row and row.status == "ready" then return "Ready to learn" end
+    if row and row.status == "pack_owned" then return "Pack owned" end
     local m = row.match
-    if not m then
-        if row and row.status == "known" then return "Spell book / discs" end
-        return "-"
-    end
+    if not m then return "-" end
+    if type(m) == "string" then return m end
     if row.status == "equipped" then return m.slotname or m.where or "Equipped" end
-    if row.status == "known" then return "Spell book / discs" end
     return (m.location or "") .. " - " .. (m.where or "")
 end
 
@@ -1112,6 +1141,24 @@ end
 
 local function draw_cell_tooltip(row, snap, slot)
     if not (row and not row.empty and row.entry and ImGui.IsItemHovered and ImGui.IsItemHovered()) then return false end
+    -- DoN abilities: hover shows only "Learned from: <pack or teaching item>".
+    if is_don_ability_row(row) then
+        local src = don_learned_from(row)
+        if src == "" then src = tostring(row.entry.item or "?") end
+        local tip_text = "Learned from: " .. src
+        if not (ImGui.BeginTooltip and ImGui.EndTooltip) then
+            tip(tip_text)
+            return true
+        end
+        local ok = pcall(ImGui.BeginTooltip)
+        if not ok then
+            tip(tip_text)
+            return true
+        end
+        theme.colored_text(tip_text, Theme.dim)
+        pcall(ImGui.EndTooltip)
+        return true
+    end
     if not (ImGui.BeginTooltip and ImGui.EndTooltip) then
         tip(cell_tooltip(row, snap, slot))
         return true
@@ -1177,7 +1224,10 @@ local function draw_cell_tooltip(row, snap, slot)
         end
     end
     if row.match and row.status ~= "missing" then
-        local loc_color = row.status == "carried" and theme.location_color(row.match.location, row.match.where) or row_color(row)
+        local loc_color = (row.status == "carried" or row.status == "ready")
+            and type(row.match) == "table"
+            and theme.location_color(row.match.location, row.match.where)
+            or row_color(row)
         tooltip_label("Location:", Theme.dim, row_location(row), loc_color)
     elseif show_elsewhere() and row.elsewhere then
         tooltip_label("Available:", Theme.dim, elsewhere_location(row), BIS_ELSE)
@@ -2022,13 +2072,19 @@ local function copy_keys(keys)
 end
 
 local function start_roster_build_job(list_id, keys, cache_key)
-    local refs = catalog.reference_rows(list_id)
     local counts_by_key, snaps_by_key = {}, {}
     local build_keys = copy_keys(keys)
+    local class_names = {}
     for _, key in ipairs(build_keys) do
-        snaps_by_key[key] = views.source_snapshot(key)
+        local snap = views.source_snapshot(key)
+        snaps_by_key[key] = snap
         counts_by_key[key] = { 0, 0, 0 }
+        if snap and snap.class and tostring(snap.class) ~= "" then
+            class_names[#class_names + 1] = snap.class
+        end
     end
+    -- DoN Spells: size section to max class ability count among visible columns.
+    local refs = catalog.reference_rows(list_id, { class_names = class_names })
     roster_build_job = {
         key = cache_key,
         list_id = list_id,
@@ -2071,21 +2127,36 @@ local function process_roster_build_job(cache_key)
                 end
             else
                 local rows, any_missing, any_match = {}, false, (job.needle or "") == ""
+                local any_real = false
                 for _, key in ipairs(job.keys or {}) do
                     local snap = job.snaps and job.snaps[key]
-                    local row = catalog.evaluate_slot(job.list_id, snap, ref.slot, ref.category)
+                    local row
+                    if ref.spell_index then
+                        row = catalog.evaluate_spell_index(job.list_id, snap, ref.spell_index, ref.category)
+                    else
+                        row = catalog.evaluate_slot(job.list_id, snap, ref.slot, ref.category)
+                    end
                     rows[key] = row
-                    if row and not row.header and not row.empty then
+                    if row and not row.header and not row.empty and not row.pad then
+                        any_real = true
                         local c = job.counts[key]
                         if row.status == "equipped" then c[1] = (c[1] or 0) + 1
-                        elseif row.status == "carried" or row.status == "known" then c[2] = (c[2] or 0) + 1
+                        elseif row.status == "carried" or row.status == "known"
+                            or row.status == "ready" or row.status == "pack_owned" then
+                            c[2] = (c[2] or 0) + 1
                         else c[3] = (c[3] or 0) + 1 end
                     end
-                    if row and row.status == "missing" then any_missing = true end
+                    if row and row.status == "missing" and not row.pad then any_missing = true end
                     if catalog_row_matches(row, job.needle or "") then any_match = true end
                 end
-                if any_match and (not Settings.bisShowMissingOnly or any_missing) then
-                    job.rows[#job.rows + 1] = { slot = ref.slot, rows = rows }
+                if any_real and any_match and (not Settings.bisShowMissingOnly or any_missing) then
+                    job.rows[#job.rows + 1] = {
+                        slot = ref.slot,
+                        spell_index = ref.spell_index,
+                        hide_slot = ref.hide_slot == true or ref.spell_index ~= nil,
+                        category = ref.category,
+                        rows = rows,
+                    }
                 end
             end
             if os.clock() >= deadline then break end
@@ -2150,11 +2221,11 @@ end
 local function draw_catalog_cell(row, layout, layout_cfg, snap, slot, ridx, col_idx)
     ImGui.TableSetColumnIndex(col_idx)
     local name_max = layout_cfg and layout_cfg.name_max or 20
-    if Settings.bisShowMissingOnly and row and not row.empty and row.status ~= "missing" then
+    if Settings.bisShowMissingOnly and row and not row.empty and not row.pad and row.status ~= "missing" then
         ImGui.TextDisabled("-")
         return
     end
-    if row and not row.empty then
+    if row and not row.empty and not row.pad then
         decorate_elsewhere(row, snap)
         if layout == "ultra" then apply_ultra_cell_bg(row) end
         local txt = catalog_cell_text(row, layout, name_max)
@@ -2166,7 +2237,10 @@ local function draw_catalog_cell(row, layout, layout_cfg, snap, slot, ridx, col_
             _, clipped = views.colored_text_fit(row_color(row), txt, fit_w)
         end
         draw_item_context(row, "cat_roster_" .. tostring(ridx) .. "_" .. tostring(col_idx), snap, nil)
-        draw_cell_tooltip(row, snap, slot)
+        draw_cell_tooltip(row, snap, slot or (row.entry and row.entry.slot))
+    elseif row and row.pad then
+        -- Shorter class columns: blank padding below their last ability.
+        ImGui.TextDisabled("")
     else
         ImGui.TextDisabled("-")
     end
@@ -2181,18 +2255,20 @@ end
 -- this chunk sits near LuaJIT's 200-local main-chunk limit.
 M.bis_legend_tooltip = function(layout)
     local lines = {
-        "Green = equipped",
-        "Blue = carried (bag/bank)",
+        "Green = equipped / Known (scribed)",
+        "Blue = carried / Ready to Learn",
+        "Amber = Pack Owned (DoN spells)",
     }
     if show_elsewhere() then lines[#lines + 1] = "Gold = elsewhere" end
     lines[#lines + 1] = "Grey-red = missing"
     if layout == "ultra" then
         lines[#lines + 1] = ""
-        lines[#lines + 1] = "Ultra cells: W = equipped, B = carried"
+        lines[#lines + 1] = "Ultra cells: W = equipped/known, B = carried/ready, P = pack"
             .. (show_elsewhere() and ", E = elsewhere" or "") .. ", X = missing"
     end
     lines[#lines + 1] = ""
-    lines[#lines + 1] = "Hover a cell for the full item + location."
+    lines[#lines + 1] = "DoN Spells hover: Learned from pack or teaching item."
+    lines[#lines + 1] = "Hover other cells for item + location."
     lines[#lines + 1] = "Right-click a cell for Inspect / Alla / Copy."
     return table.concat(lines, "\n")
 end

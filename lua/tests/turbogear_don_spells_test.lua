@@ -1,5 +1,5 @@
 -- Run from repo root:  luajit lua\tests\turbogear_don_spells_test.lua
--- DoN pack/single ownership: pack OR (each scroll held / ability known).
+-- DoN per-ability ownership: Known / Ready / Pack Owned / Missing.
 
 package.path = "lua/turbogear/?.lua;lua/turbogear/?/init.lua;" .. package.path
 
@@ -9,7 +9,6 @@ package.preload["mq"] = function()
         TLO = {
             Me = {
                 CleanName = function() return "Tester" end,
-                -- Same signal as /echo Book?=${Me.Book[Shroud of the Accursed]} → 4
                 Book = function(name)
                     if name == "Shroud of the Accursed" then return 4 end
                     return nil
@@ -45,6 +44,7 @@ end
 
 local bis = require("bis")
 local DS = require("don_spells")
+DS._reset_index_for_tests()
 
 local passed, failed = 0, 0
 local function check(cond, label)
@@ -56,11 +56,11 @@ local function check(cond, label)
     end
 end
 
-local function snap_with(bags, spells, spell_ids)
+local function snap_with(bags, spells, spell_ids, class_name)
     return {
         name = "Tester",
         server = "Srv",
-        class = "Cleric",
+        class = class_name or "Cleric",
         bags = bags or {},
         equipped = {},
         bank = {},
@@ -70,106 +70,91 @@ local function snap_with(bags, spells, spell_ids)
     }
 end
 
--- Allegiance pack: three scrolls; one scroll alone must NOT clear.
-local allegiance = {
-    item = "Spell Pack: Allegiance",
-    ids = { 82658 },
-    names = { "Spell Pack: Allegiance" },
-    spells = { "Allegiance" }, -- intentional incomplete LazBiS-style metadata
-}
+local function ability_entry(class_name, display_name)
+    local ab = DS.ability_for_slot(class_name, display_name)
+    check(ab ~= nil, "catalog has " .. tostring(display_name) .. " for " .. tostring(class_name))
+    return DS.bis_entry_for_ability(ab)
+end
 
-local one_scroll = snap_with({ { id = 78067, name = "Spell: Allegiance" } })
-local r1 = bis.evaluate_entry(allegiance, one_scroll, { skip_live = true })
-check(r1.have ~= true, "Allegiance: one scroll does not clear pack")
+-- Allegiance ability: independent of Hand of Allegiance.
+local allegiance = ability_entry("Cleric", "Allegiance")
+local hand = ability_entry("Cleric", "Hand of Allegiance")
 
-local pack_held = snap_with({ { id = 82658, name = "Spell Pack: Allegiance" } })
-local r2 = bis.evaluate_entry(allegiance, pack_held, { skip_live = true })
-check(r2.have == true and r2.status == "carried", "Allegiance: pack held clears")
+local empty = snap_with({})
+local r0 = bis.evaluate_entry(allegiance, empty, { skip_live = true })
+check(r0.have ~= true and r0.status == "missing", "Allegiance: missing when empty")
 
-local all_scrolls = snap_with({
-    { id = 78067, name = "Spell: Allegiance" },
-    { id = 78146, name = "Spell: Hand of Allegiance" },
-    { id = 78046, name = "Spell: Symbol of Elushar" },
-})
-local r3 = bis.evaluate_entry(allegiance, all_scrolls, { skip_live = true })
-check(r3.have == true, "Allegiance: all three scrolls clear")
+local teach = snap_with({ { id = 78067, name = "Spell: Allegiance" } })
+local r1 = bis.evaluate_entry(allegiance, teach, { skip_live = true })
+check(r1.have == true and r1.status == "ready", "Allegiance: teaching scroll => Ready")
 
-local all_known = snap_with({}, {
+local r1b = bis.evaluate_entry(hand, teach, { skip_live = true })
+check(r1b.have ~= true or r1b.status == "missing" or r1b.status == "pack_owned",
+    "Hand of Allegiance: Allegiance scroll alone does not mark Ready")
+
+local pack = snap_with({ { id = 82658, name = "Spell Pack: Allegiance" } })
+local r2 = bis.evaluate_entry(allegiance, pack, { skip_live = true })
+check(r2.have == true and r2.status == "pack_owned", "Allegiance: pack held => Pack Owned (not Known)")
+
+local r2b = bis.evaluate_entry(hand, pack, { skip_live = true })
+check(r2b.have == true and r2b.status == "pack_owned", "Hand of Allegiance: same pack => Pack Owned")
+
+local known = snap_with({}, {
     ["allegiance"] = { name = "Allegiance", book = 1 },
-    ["hand of allegiance"] = { name = "Hand of Allegiance", book = 1 },
-    ["symbol of elushar"] = { name = "Symbol of Elushar", book = 1 },
-}, { [9730] = true, [9809] = true, [9709] = true })
-local r4 = bis.evaluate_entry(allegiance, all_known, { skip_live = true })
-check(r4.have == true and r4.status == "known", "Allegiance: all abilities known clears")
+}, { [9730] = true })
+local r3 = bis.evaluate_entry(allegiance, known, { skip_live = true })
+check(r3.have == true and r3.status == "known", "Allegiance: learned_spell_id => Known")
 
--- WAR Malicious: scroll id clears even when LazBiS only lists pack id
+local r3b = bis.evaluate_entry(hand, known, { skip_live = true })
+check(r3b.status == "missing", "Hand of Allegiance: Allegiance known does not clear Hand")
+
+-- Echoes alternate teaching item
+local echoes = ability_entry("Bard", "Echoes of the Ancient")
+local alt = snap_with({ { id = 81936, name = "Song: Echoes of the Ancient" } }, nil, nil, "Bard")
+local r4 = bis.evaluate_entry(echoes, alt, { skip_live = true })
+check(r4.have == true and r4.status == "ready", "Echoes: alternate teaching item => Ready")
+
+-- Excluded packs must not resolve as known via container alone
 local malicious = {
     item = "Tome Pack: Ancient: Malicious Onslaught",
     ids = { 82654 },
     names = { "Tome Pack: Ancient: Malicious Onslaught" },
-    spells = { "Malicious Onslaught Discipline" }, -- old wrong/partial name
 }
-local scroll_only = snap_with({
-    { id = 78424, name = "Tome of Ancient: Malicious Onslaught" },
-})
-local r5 = bis.evaluate_entry(malicious, scroll_only, { skip_live = true })
-check(r5.have == true, "Malicious: opened pack scroll clears via catalog")
+local handled_m = select(1, DS.try_match(malicious, snap_with({ { id = 82654 } }, nil, nil, "Warrior")))
+check(handled_m == false, "Malicious Onslaught pack excluded from catalog match")
 
-local known_ability = snap_with({}, {
-    ["ancient: malicious onslaught"] = { name = "Ancient: Malicious Onslaught", book = 1 },
-}, { [10849] = true })
-local r6 = bis.evaluate_entry(malicious, known_ability, { skip_live = true })
-check(r6.have == true and r6.status == "known", "Malicious: catalog ability/spell_id known clears")
+local jolting = {
+    item = "Tome Pack: Jolting Thunderkicks",
+    ids = { 82816 },
+    names = { "Tome Pack: Jolting Thunderkicks" },
+}
+local handled_j = select(1, DS.try_match(jolting, snap_with({ { id = 82816 } }, nil, nil, "Monk")))
+check(handled_j == false, "Jolting Thunderkicks pack excluded from catalog match")
 
 -- Single vendor tome
-local field = {
-    item = "Tome of Field Conqueror",
-    ids = { 88919 },
-    names = { "Tome of Field Conqueror" },
-    spell_ids = { 25036 },
-    spells = { "Field Conqueror" },
-}
-local r7 = bis.evaluate_entry(field, snap_with({}), { skip_live = true })
+local field = ability_entry("Warrior", "Field Conqueror")
+local r7 = bis.evaluate_entry(field, snap_with({}, nil, nil, "Warrior"), { skip_live = true })
 check(r7.have ~= true, "Field Conqueror: missing when empty")
-local r8 = bis.evaluate_entry(field, snap_with({}, {}, { [25036] = true }), { skip_live = true })
-check(r8.have == true, "Field Conqueror: spell_id known clears")
+local r8 = bis.evaluate_entry(field, snap_with({}, {}, { [25036] = true }, "Warrior"), { skip_live = true })
+check(r8.have == true and r8.status == "known", "Field Conqueror: spell_id => Known")
 
--- Partial Sha's pack (2 abilities)
-local shas = {
-    item = "Spell Pack: Sha's Urgent Renewal",
-    ids = { 82820 },
-    names = { "Spell Pack: Sha's Urgent Renewal" },
-    spells = { "Sha's Urgent Renewal" },
-}
-local half = snap_with({
-    { id = 115093, name = "Spell: Sha's Urgent Renewal" },
-})
+-- Sha's abilities are independent
+local shas = ability_entry("Beastlord", "Sha's Urgent Renewal")
+local feral = ability_entry("Beastlord", "Feral Exigency")
+local half = snap_with({ { id = 115093, name = "Spell: Sha's Urgent Renewal" } }, nil, nil, "Beastlord")
 local r9 = bis.evaluate_entry(shas, half, { skip_live = true })
-check(r9.have ~= true, "Sha's: one of two scrolls does not clear")
+check(r9.status == "ready", "Sha's: teaching scroll => Ready")
+local r9b = bis.evaluate_entry(feral, half, { skip_live = true })
+check(r9b.status == "missing", "Feral Exigency: Sha's scroll alone does not Ready")
 
-local both = snap_with({
-    { id = 115093, name = "Spell: Sha's Urgent Renewal" },
-    { id = 115099, name = "Spell: Feral Exigency" },
-})
-local r10 = bis.evaluate_entry(shas, both, { skip_live = true })
-check(r10.have == true, "Sha's: both scrolls clear")
-
--- Non-catalog gear falls through (not handled as missing by don_spells)
+-- Non-catalog gear falls through
 local gear = { item = "Some Random Sword", ids = { 999999 }, names = { "Some Random Sword" } }
 local handled = select(1, DS.try_match(gear, snap_with({})))
 check(handled == false, "non-catalog entry is not claimed by don_spells")
 
--- BiS tab path: bis.evaluate (not evaluate_entry) must live-check Me.Book
--- for the local toon when the pack/scroll is gone but the spell is scribed.
-local shroud = {
-    item = "Spell Pack: Shroud of the Accursed",
-    ids = { 82808 },
-    names = { "Spell Pack: Shroud of the Accursed" },
-    spells = { "Shroud of the Accursed" },
-    spell_ids = { 10251 },
-}
-local empty_local = snap_with({})
-empty_local.class = "Shadow Knight"
+-- Live Book path for local toon
+local shroud = ability_entry("Shadow Knight", "Shroud of the Accursed")
+local empty_local = snap_with({}, nil, nil, "Shadow Knight")
 local r11 = bis.evaluate_entry(shroud, empty_local, { skip_live = true })
 check(r11.have ~= true, "Shroud: snap-only missing without scroll/book in snap")
 local _, _, liveStatus = DS.try_live_match(shroud)
@@ -177,7 +162,27 @@ check(liveStatus == "known", "Shroud: try_live_match uses Me.Book")
 local list = { entries = { shroud } }
 local rows = bis.evaluate(list, empty_local)
 check(rows[1] and rows[1].have == true and rows[1].status == "known",
-    "Shroud: bis.evaluate (BiS tab) marks owned via Me.Book")
+    "Shroud: bis.evaluate marks Known via Me.Book")
+
+-- Slot listing: Cleric has Allegiance; Warrior does not
+local clr_slots = DS.spell_slots_for_class("Cleric")
+local has_all = false
+for _, s in ipairs(clr_slots) do if s == "Allegiance" then has_all = true end end
+check(has_all, "Cleric spell slots include Allegiance")
+check(DS.ability_for_slot("Warrior", "Allegiance") == nil, "Warrior has no Allegiance slot")
+
+-- Per-class lists are alphabetical and independent (no shared cross-class matrix).
+local sk_slots = DS.spell_slots_for_class("Shadow Knight")
+check(#sk_slots == 9, "Shadow Knight has 9 DoN abilities")
+check(sk_slots[1] == "Blood of the Harbinger", "SK slots sorted A-Z (first)")
+check(sk_slots[#sk_slots] == "Voice of Emoush", "SK slots sorted A-Z (last)")
+local war_has_cloak = false
+for _, s in ipairs(DS.spell_slots_for_class("Warrior")) do
+    if s == "Cloak of the Corrupter" then war_has_cloak = true end
+end
+check(not war_has_cloak, "Warrior list excludes Shadow Knight abilities")
+check(DS.max_spell_slots_for_classes({ "Shadow Knight", "Cleric" }) == #clr_slots,
+    "roster height is max of visible class lists")
 
 print(string.format("don_spells: %d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)
