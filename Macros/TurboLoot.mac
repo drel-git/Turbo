@@ -304,6 +304,8 @@ Sub InitState
     /declare restoreFollowDriver string outer
     /declare afollowWasPaused bool outer FALSE
     /declare stopLootWhenAttacked bool outer FALSE
+    | Leave combat paused after FD/Invis abort (default ON). OFF still aborts loot but resumes bot.
+    /declare leavePausedOnFeignInvis bool outer TRUE
     /declare autoRsayInRaid bool outer FALSE
     /if (${Defined[iniFile]}) /deletevar iniFile
     /declare iniFile string global
@@ -1012,6 +1014,19 @@ Sub LoadSettings
         }
     } else {
         /varset stopLootWhenAttacked FALSE
+    }
+
+    | LeavePausedOnFeignInvis: after FD/Invis abort, leave combat paused (default: ON)
+    /declare leavePausedSetting string local ${IniGetStringOrEmpty[Settings,LeavePausedOnFeignInvis]}
+    /if (${leavePausedSetting.Length}) {
+        /declare leavePausedUpper string local ${leavePausedSetting.Upper.Replace[ ,]}
+        /if (${leavePausedUpper.Equal[OFF]} || ${leavePausedUpper.Equal[FALSE]} || ${leavePausedUpper.Equal[NO]} || ${leavePausedUpper.Equal[0]}) {
+            /varset leavePausedOnFeignInvis FALSE
+        } else {
+            /varset leavePausedOnFeignInvis TRUE
+        }
+    } else {
+        /varset leavePausedOnFeignInvis TRUE
     }
 
     | AutoRsayInRaid: auto-switch announce method to rsay when in a raid (default: OFF)
@@ -5418,36 +5433,40 @@ Sub Event_LoreAlreadyPossessNoName
 Sub CheckLootAbortState
     /if (${lootPerfLog}) /varcalc perfAbortChecks ${perfAbortChecks}+1
     /if (${Me.Feigning}) {
-        /if (${Me.Grouped}) {
-            /docommand /${announceMethod} [FEIGNED] Currently FD and not looting
-        } else {
-            /echo [turboLoot] Feigned - stopping loot macro
-        }
-        /varset abortingMacro TRUE
-        /varset safetyNoResume TRUE
-        /call PauseBotLogic
-        /deletevar turboLootRunning
-        /if (${Defined[turboLootSafetyNet]}) /deletevar turboLootSafetyNet
-        /call StopFollowAndMovement
-        /call Cleanup
-        /endmac
+        /call AbortLootSafeguard FEIGNED "FD"
+        /return
     }
     /if (${Me.Invis}) {
-        /if (${Me.Grouped}) {
-            /docommand /${announceMethod} [INVIS] Currently invisible and not looting
-        } else {
-            /echo [turboLoot] Invisible - stopping loot macro
-        }
         /if (${logToFile}) /call LogError "Stopping: invisible and not looting"
-        /varset abortingMacro TRUE
-        /varset safetyNoResume TRUE
-        /call PauseBotLogic
-        /deletevar turboLootRunning
-        /if (${Defined[turboLootSafetyNet]}) /deletevar turboLootSafetyNet
-        /call StopFollowAndMovement
-        /call Cleanup
-        /endmac
+        /call AbortLootSafeguard INVIS "Invisible"
+        /return
     }
+/return
+
+| tag = FEIGNED|INVIS, reasonWord = FD|Invisible (shown in announce line)
+Sub AbortLootSafeguard(string tag, string reasonWord)
+    /declare leavePaused bool local TRUE
+    /if (${Defined[leavePausedOnFeignInvis]}) /varset leavePaused ${leavePausedOnFeignInvis}
+    /declare msg string local
+    /if (${leavePaused}) {
+        /varset msg [${tag}] ${reasonWord} - not looting (safeguard). Combat left paused -- /e3p off or /rgl unpause to resume. To Toggle: Turbo INI Config > Behavior > Leave paused on FD/Invis.
+        /varset safetyNoResume TRUE
+    } else {
+        /varset msg [${tag}] ${reasonWord} - not looting (safeguard). Resuming combat.
+        /varset safetyNoResume FALSE
+    }
+    /if (${Me.Grouped}) {
+        /docommand /${announceMethod} ${msg}
+    } else {
+        /echo [turboLoot] ${msg}
+    }
+    /varset abortingMacro TRUE
+    /call PauseBotLogic
+    /deletevar turboLootRunning
+    /if (${Defined[turboLootSafetyNet]}) /deletevar turboLootSafetyNet
+    /call StopFollowAndMovement
+    /call Cleanup
+    /endmac
 /return
 
 

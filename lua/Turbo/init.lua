@@ -10283,7 +10283,8 @@ local function renderTurboLootMain(g, tip, ACTION_BTN_H, getActiveProfile)
     end
 
     local _, availY = ImGui.GetContentRegionAvail()
-    local footerH = ACTION_BTN_H + 38
+    -- Reserve separator + status line + button row so Save/Reload/Open INI are not clipped.
+    local footerH = (tonumber(ACTION_BTN_H) or 24) + 56
     local bodyH = math.max(40, (availY or 220) - footerH)
     if ImGui.BeginChild('##tl_settings_schema_body', 0, bodyH, true) then
         renderTurboLootSettingsSchemaPage(g, profile, iniPath, iniExists, tip, ACTION_BTN_H)

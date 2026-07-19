@@ -209,6 +209,12 @@ local SETTINGS_META = {
         description = 'Stop looting if aggressive mobs are detected nearby.',
         group = 'Behavior', type = 'bool',
     },
+    LeavePausedOnFeignInvis = {
+        label = 'Leave paused on FD/Invis', default = 'ON', options = 'ON, OFF',
+        tooltip = 'When ON, TurboLoot aborts loot if you are feigned or invisible and leaves your combat bot paused so E3/RGMercs cannot stand you up. Turn OFF if you want loot aborted but combat auto-resumed (/e3p off or /rgl unpause). Default ON.',
+        description = 'Abort loot on FD/Invis and leave combat paused (ON), or abort loot and resume combat (OFF).',
+        group = 'Behavior', type = 'bool',
+    },
     followRestoreMode = {
         label = 'Follow restore mode', default = 'NONE', options = 'NONE',
         tooltip = 'Controls how follow state is restored after TurboLoot finishes.',
@@ -264,7 +270,7 @@ local SCHEMA_ORDER = {
     'announceLoot', 'announceDestroy', 'announceRunSummary', 'AutoRsayInRaid',
     'lootAnnounceMethod', 'loreAnnounceMethod', 'bankSellTributeAnnounceMethod',
     'corpseHideMode', 'lootNoDropPrompt', 'lootNoDropPromptReset', 'dropLevBeforeNav',
-    'returnToLeader', 'StopLootWhenAttacked', 'followRestoreMode', 'followRestoreDriver',
+    'returnToLeader', 'StopLootWhenAttacked', 'LeavePausedOnFeignInvis', 'followRestoreMode', 'followRestoreDriver',
     'debug', 'logToFile', 'logLevel', 'logSkipListForIni',
 }
 
