@@ -298,6 +298,55 @@ local function me_clean()
     return clean_name(ok and n or "")
 end
 
+-- Instant Inventory redraw after local Give Now (bags only). Bank Give To can
+-- still be cancelled mid-nav, so bank qty waits for bg note / real pull.
+local function optimistic_local_give(item_id, qty, source, opts, location_group)
+    if clean_name(source) ~= me_clean() then return end
+    item_id = math.floor(tonumber(item_id) or 0)
+    qty = math.floor(tonumber(qty) or 1)
+    if item_id <= 0 or qty <= 0 then return end
+    opts = type(opts) == "table" and opts or {}
+    local group = tostring(location_group or opts.locationGroup or "bags"):lower()
+    if group == "bank" then return end
+    pcall(function()
+        local snapshot = require('snapshot')
+        if not snapshot.apply_local_give_delta then return end
+        snapshot.apply_local_give_delta(item_id, qty, {
+            locationGroup = "bags",
+            where = opts.where,
+            slotid = opts.slotid,
+        })
+        local ok_iw, iw = pcall(require, 'inventory_watch')
+        if ok_iw and iw then
+            if iw.seed_signature then iw.seed_signature() end
+            if iw.request_store_adopt then iw.request_store_adopt(8) end
+        end
+        local ok_gs, gs = pcall(require, 'global_search')
+        if ok_gs and gs and gs.invalidate then gs.invalidate() end
+    end)
+end
+
+--- Stop TurboGive + MQ2Nav on source (local or e3bct target). Used when a
+--- bank Give To navigates to a banker the user cannot reach.
+function M.stop_source_nav(source)
+    source = trim(source)
+    local stop_nav = "squelch /nav stop"
+    local end_mac = "squelch /endmacro"
+    if source == "" or clean_name(source) == me_clean() then
+        mq.cmd("/squelch /nav stop")
+        mq.cmd("/squelch /endmacro")
+        return true, "Stopped local navigation and TurboGive macro."
+    end
+    local c1 = cfg.transport_command("target", stop_nav, source)
+    local c2 = cfg.transport_command("target", end_mac, source)
+    if c1 == "" and c2 == "" then
+        return false, "Active broadcast transport has no targeted-send option."
+    end
+    if c1 ~= "" then mq.cmd(c1) end
+    if c2 ~= "" then mq.cmd(c2) end
+    return true, string.format("Sent stop nav/macro to %s.", source)
+end
+
 local function current_zone_short()
     local ok, zone = pcall(function() return mq.TLO.Zone.ShortName() end)
     return ok and trim(zone):lower() or ""
@@ -377,7 +426,7 @@ local function preflight_give_now(item_id, source, recipient, opts, allow_bank)
     local group = tostring(opts.locationGroup or ""):lower()
     local where = tostring(opts.where or ""):lower()
     local is_bank_item = group == "bank" or where == "bank"
-    if is_bank_item and not allow_bank then return nil, "Item is in bank/cache; use Bank + Give or move it to bags first." end
+    if is_bank_item and not allow_bank then return nil, "Item is in bank/cache; use Give To (pulls from bank) or move it to bags first." end
     if allow_bank and not is_bank_item then return nil, "Item is not marked as banked; use normal Give Now." end
     if group == "equipped" or where == "equipped" then return nil, "Item is equipped; remove it to bags first." end
     if group == "installed_aug" or where == "installed_aug" then return nil, "Aug is installed; remove it to bags first." end
@@ -449,6 +498,7 @@ function M.send_stack(item_name, item_id, qty, source, recipient, opts)
     local cmd, err = M.send_stack_command(item_id, item_name, qty, source, recipient)
     if cmd == "" then return false, err end
     mq.cmd(cmd)
+    optimistic_local_give(item_id, qty, source, opts, "bags")
     transfers.record({
         item = item_name ~= "" and item_name or ("id " .. tostring(math.floor(tonumber(item_id) or 0))),
         id = item_id,
@@ -480,6 +530,53 @@ function M.bank_give_now_command(item_id, source, recipient)
         return "", "Active broadcast transport has no targeted-send option."
     end
     return cmd
+end
+
+--- Bank pull exact qty (QuantityWnd) then SendMyStack. Id-only CLI (no name path).
+function M.bank_send_stack_command(item_id, qty, source, recipient)
+    item_id = math.floor(tonumber(item_id) or 0)
+    qty = math.floor(tonumber(qty) or 0)
+    source, recipient = trim(source), trim(recipient)
+    if item_id <= 0 then return "", "No item id (re-sync the source character)." end
+    if qty <= 0 then return "", "Qty must be > 0." end
+    if recipient == "" then return "", "No recipient selected." end
+    if source == "" then return "", "No source character." end
+    local inner = string.format("mac turbogive _banksendstack %s %d %d", recipient, item_id, qty)
+    if clean_name(source) == me_clean() then
+        return "/" .. inner
+    end
+    local cmd = cfg.transport_command("target", inner, source)
+    if cmd == "" then
+        return "", "Active broadcast transport has no targeted-send option."
+    end
+    return cmd
+end
+
+function M.bank_send_stack(item_name, item_id, qty, source, recipient, opts)
+    opts = type(opts) == "table" and opts or {}
+    item_name = trim(item_name)
+    source, recipient = trim(source), trim(recipient)
+    qty = math.floor(tonumber(qty) or 0)
+    local guard, guard_err = preflight_give_now(item_id, source, recipient, opts, true)
+    if not guard then return false, guard_err end
+    local cmd, err = M.bank_send_stack_command(item_id, qty, source, recipient)
+    if cmd == "" then return false, err end
+    mq.cmd(cmd)
+    optimistic_local_give(item_id, qty, source, opts, "bank")
+    transfers.record({
+        item = item_name ~= "" and item_name or ("id " .. tostring(math.floor(tonumber(item_id) or 0))),
+        id = item_id,
+        from = source,
+        to = recipient,
+        qty = qty,
+        location = trim(opts.sourceLocation),
+        at = os.time(),
+        status = "bank-send-stack",
+    })
+    return true, string.format("Give To %dx %s (from bank): %s -> %s",
+        qty,
+        item_name ~= "" and item_name or ("id " .. tostring(item_id)),
+        source, recipient)
 end
 
 function M.preview_give_now(item_name, item_id, source, recipient, opts)
@@ -530,6 +627,7 @@ function M.give_now(item_name, item_id, source, recipient, opts)
     local cmd, err = M.give_now_command(item_id, source, recipient)
     if cmd == "" then return false, err end
     mq.cmd(cmd)
+    optimistic_local_give(item_id, 1, source, opts, "bags")
     transfers.record({
         item = item_name ~= "" and item_name or ("id " .. tostring(math.floor(tonumber(item_id) or 0))),
         id = item_id,
@@ -553,6 +651,7 @@ function M.bank_give_now(item_name, item_id, source, recipient, opts)
     local cmd, err = M.bank_give_now_command(item_id, source, recipient)
     if cmd == "" then return false, err end
     mq.cmd(cmd)
+    optimistic_local_give(item_id, 1, source, opts, "bank")
     transfers.record({
         item = item_name ~= "" and item_name or ("id " .. tostring(math.floor(tonumber(item_id) or 0))),
         id = item_id,
@@ -563,7 +662,7 @@ function M.bank_give_now(item_name, item_id, source, recipient, opts)
         at = os.time(),
         status = "bank-give-now",
     })
-    return true, string.format("Bank + Give: %s -> %s (%s)",
+    return true, string.format("Give To (from bank): %s -> %s (%s)",
         item_name ~= "" and item_name or ("id " .. tostring(item_id)), recipient, cfg.transport_profile().label)
 end
 

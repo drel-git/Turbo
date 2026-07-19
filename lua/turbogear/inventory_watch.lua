@@ -22,6 +22,10 @@ local last_bg_poll_at = 0
 -- compute changed-slot deltas. { equipped/bags/bank = slot_key -> item }.
 local delta_baseline = nil
 local delta_baseline_bank = false
+-- UI viewer: prefer adopting bg-saved Store self over a local bag TLO walk
+-- (avoids hitch on Give Now). Counts down on tick; no bag-scan fallback
+-- (optimistic give delta + later bg note cover the UI).
+local store_adopt_retries = 0
 
 local function enabled()
     return CFG.inventory_watch_enabled ~= false
@@ -51,8 +55,39 @@ local function on_inventory_line(_line)
     mark_dirty()
 end
 
+-- Prefer bg Store adopt on the UI (no bag TLO walk / hitch). Bg still gathers.
+local function try_adopt_store_self(force_reload)
+    local ok_store, store_mod = pcall(require, 'store')
+    if not ok_store or not store_mod or not store_mod.Store then return false end
+    local Store = store_mod.Store
+    if force_reload and Store.reload_cache_if_changed then
+        pcall(Store.reload_cache_if_changed, true)
+    elseif Store.reload_cache_if_changed then
+        pcall(Store.reload_cache_if_changed, false)
+    end
+    local key = store_mod.my_key and store_mod.my_key() or nil
+    if not key or key == "" then return false end
+    local s = Store.get(key)
+    if type(s) ~= "table" or type(s.bags) ~= "table" then return false end
+    local cached = snapshot.cached()
+    local store_ts = tonumber(s.inventoryUpdated or s.updated) or 0
+    local cache_ts = tonumber(cached and (cached.inventoryUpdated or cached.updated)) or 0
+    if store_ts <= cache_ts then return false end
+    if not snapshot.adopt or not snapshot.adopt(s) then return false end
+    last_known_sig = snapshot.lite_signature(s)
+    diag.count("inventory_watch.store_adopt")
+    return true
+end
+
+-- Trade/equip/give: urgent lite is enough for bag qty/slot changes (no full
+-- make_item stats walk). Bank put/pick still use full so bankLive can refresh.
 local function on_gear_line(_line)
-    mark_dirty(true, true)
+    -- UI viewer: wait for bg lite save + adopt (avoids mid-frame bag scan hitch).
+    if state.engine_claim_disabled == true then
+        store_adopt_retries = math.max(store_adopt_retries, 12)
+        return
+    end
+    mark_dirty(true, false)
 end
 
 local function on_bank_line(_line)
@@ -295,7 +330,34 @@ end
 
 function M.tick()
     if not enabled() then return end
-    if state.engine_claim_disabled == true then return end
+    -- UI viewer: prefer Store adopt from bg; only bag-scan as last resort.
+    if state.engine_claim_disabled == true then
+        diag.time("inventory_watch.tick_ui", function()
+            if store_adopt_retries > 0 then
+                if try_adopt_store_self(store_adopt_retries % 3 == 0) then
+                    store_adopt_retries = 0
+                    dirty_at = nil
+                    dirty_urgent = false
+                    dirty_full = false
+                    return
+                end
+                store_adopt_retries = store_adopt_retries - 1
+                if store_adopt_retries <= 0 and not dirty_at then
+                    -- No UI bag-scan fallback: optimistic give delta already
+                    -- refreshed counts; bg note may still land later.
+                    diag.count("inventory_watch.store_adopt_miss")
+                end
+            end
+            if dirty_at and try_adopt_store_self(false) then
+                dirty_at = nil
+                dirty_urgent = false
+                dirty_full = false
+                return
+            end
+            flush_if_due()
+        end)
+        return
+    end
     diag.time("inventory_watch.tick", function()
         flush_if_due()
         bg_poll_if_due()
@@ -323,6 +385,15 @@ end
 -- debounce so the next tick can publish a lite snap promptly.
 function M.note_change(urgent, full)
     mark_dirty(urgent == true, full == true)
+end
+
+-- UI: request Store adopt retries after Give Now /tgear note (no sync bag walk).
+function M.request_store_adopt(retries)
+    store_adopt_retries = math.max(store_adopt_retries, math.max(1, math.floor(tonumber(retries) or 8)))
+end
+
+function M.try_adopt_store_self(force_reload)
+    return try_adopt_store_self(force_reload == true)
 end
 
 return M

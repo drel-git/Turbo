@@ -18,6 +18,8 @@ local last_link_at = 0
 local last_link_name = ""
 local INSPECT_DEBOUNCE_S = 0.35
 local context_body_suffix = nil
+-- Bank Give To in flight: show Stop Nav until timeout / explicit stop.
+local IN_FLIGHT_TTL_S = 95
 
 local function trim(s)
     return tostring(s or ""):match("^%s*(.-)%s*$") or ""
@@ -39,9 +41,17 @@ local function is_local_owner(owner)
     return clean_name(owner) == clean_name(me)
 end
 
+local function opts_qty_from(row_or_item)
+    local q = tonumber(row_or_item.qty or row_or_item.stack or row_or_item.count)
+    if not q then return nil end
+    q = math.floor(q)
+    if q < 1 then q = 1 end
+    return q
+end
+
 function M.pickup_opts_from_row(row)
     if type(row) ~= "table" then return nil end
-    return {
+    local opts = {
         owner = row.owner,
         locationGroup = row.locationGroup,
         where = row.where,
@@ -51,6 +61,10 @@ function M.pickup_opts_from_row(row)
         attuned = row.attuned,
         attunable = row.attunable,
     }
+    local qty = opts_qty_from(row)
+    if qty then opts.qty = qty end
+    if row.stack ~= nil then opts.stack = row.stack end
+    return opts
 end
 
 function M.pickup_opts_from_item(item, owner)
@@ -59,7 +73,7 @@ function M.pickup_opts_from_item(item, owner)
     local group = nil
     if loc == "Bank" then group = "bank"
     elseif loc == "Bags" then group = "bags" end
-    return {
+    local opts = {
         owner = owner,
         locationGroup = group,
         where = item.where,
@@ -69,6 +83,10 @@ function M.pickup_opts_from_item(item, owner)
         attuned = item.attuned,
         attunable = item.attunable,
     }
+    local qty = opts_qty_from(item)
+    if qty then opts.qty = qty end
+    if item.stack ~= nil then opts.stack = item.stack end
+    return opts
 end
 
 function M.context_opts(base, row_or_item, owner)
@@ -418,16 +436,39 @@ function M.context_needed(suffix)
     return false
 end
 
-local function queue_preview(title, lines, confirm_label, run)
+-- confirm_label + run: single-button (legacy). Optional 5th arg:
+--   actions = { { label=, run=, primary= }, ... }
+--   qty_edit = { min=, max=, value= }  (InputInt when max > 1)
+--   sync_preview = function(pending)  (refresh lines after qty change)
+--   modal = true  (BeginPopupModal — bank Give To)
+local function queue_preview(title, lines, confirm_label, run, extra)
+    extra = type(extra) == "table" and extra or {}
     M.pending_action = {
         title = trim(title),
         lines = type(lines) == "table" and lines or {},
         confirm_label = trim(confirm_label) ~= "" and trim(confirm_label) or "Confirm",
         run = run,
+        actions = type(extra.actions) == "table" and extra.actions or nil,
+        qty_edit = type(extra.qty_edit) == "table" and extra.qty_edit or nil,
+        sync_preview = type(extra.sync_preview) == "function" and extra.sync_preview or nil,
+        modal = extra.modal == true,
     }
     M.pending_open = true
     M.status_msg = "Pending: " .. (M.pending_action.title ~= "" and M.pending_action.title or "action")
     if ImGui.CloseCurrentPopup then ImGui.CloseCurrentPopup() end
+end
+
+local function run_pending_fn(run)
+    if type(run) ~= "function" then
+        M.status_msg = "No action queued."
+        return
+    end
+    local ran, ok, detail = pcall(run)
+    if ran then
+        set_status(ok, detail)
+    else
+        M.status_msg = "Action failed: " .. tostring(ok)
+    end
 end
 
 local function preview_or_status(ok, preview)
@@ -443,15 +484,67 @@ local function preview_line_text_color(line)
     local text = tostring(line or "")
     local lower = text:lower()
     if lower:find("^blocked:") or lower:find("^guard:") then return text, Theme.amber or Theme.gold end
+    if lower:find("^warning:") or lower:find("^navigat") or lower:find("^will navigate") then
+        return text, Theme.amber or Theme.gold
+    end
     if lower:find("^item:") then return text, Theme.item end
     if lower:find("^from:") then return text, Theme.online or Theme.green end
     if lower:find("^to:") then return text, Theme.sync or Theme.blue end
     if lower:find("^zone:") then return text, Theme.value or Theme.cyan end
     if lower:find("^location:") or lower:find("^slot:") or lower:find("^result:") then return text, Theme.value or Theme.green end
+    if lower:find("^qty available:") or lower:find("^give qty:") then return text, Theme.value or Theme.cyan end
     if lower:find("^transport:") or lower:find("^requires:") then return text, Theme.section or Theme.header end
     if lower:find("^command:") then return text, Theme.dim end
     if lower:find("no ini rule") or lower:find("^mode:") then return text, Theme.dim end
     return text, Theme.dim
+end
+
+local function mark_bank_give_inflight(source, recipient, item_name, item_id)
+    M.in_flight_give = {
+        kind = "bank",
+        source = trim(source),
+        recipient = trim(recipient),
+        item = trim(item_name),
+        id = math.floor(tonumber(item_id) or 0),
+        at = os.clock(),
+        until_at = os.clock() + IN_FLIGHT_TTL_S,
+    }
+end
+
+function M.stop_in_flight_give()
+    local flight = M.in_flight_give
+    if not flight then
+        M.status_msg = "No bank give in progress."
+        return false
+    end
+    local source = flight.source
+    M.in_flight_give = nil
+    if not integrations or not integrations.stop_source_nav then
+        M.status_msg = "Stop unavailable."
+        return false
+    end
+    local ok, detail = integrations.stop_source_nav(source)
+    set_status(ok, detail)
+    return ok
+end
+
+function M.draw_in_flight()
+    local flight = M.in_flight_give
+    if not flight then return end
+    if os.clock() > (tonumber(flight.until_at) or 0) then
+        M.in_flight_give = nil
+        return
+    end
+    local who = flight.source ~= "" and flight.source or "source"
+    local item = flight.item ~= "" and flight.item or ("id " .. tostring(flight.id))
+    col_text(Theme.amber or Theme.gold, string.format("Bank give: %s navigating / pulling for %s…", who, item))
+    ImGui.SameLine()
+    if ImGui.Button("Stop Nav##tg_stop_bank_give") then
+        M.stop_in_flight_give()
+    end
+    if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
+        ImGui.SetTooltip("/nav stop + /endmacro on the source character.")
+    end
 end
 
 local function preview_lines_for_ini(preview, action_label)
@@ -472,7 +565,14 @@ function M.draw_pending_modal()
         ImGui.OpenPopup(PREVIEW_POPUP)
         M.pending_open = false
     end
-    if not (ImGui.BeginPopup and ImGui.BeginPopup(PREVIEW_POPUP)) then return end
+    local opened = false
+    if pending.modal and ImGui.BeginPopupModal then
+        local flags = (ImGuiWindowFlags and ImGuiWindowFlags.AlwaysAutoResize) or 0
+        opened = not not ImGui.BeginPopupModal(PREVIEW_POPUP, nil, flags)
+    elseif ImGui.BeginPopup then
+        opened = not not ImGui.BeginPopup(PREVIEW_POPUP)
+    end
+    if not opened then return end
 
     col_text(Theme.item, pending.title ~= "" and pending.title or "Confirm Action")
     ImGui.Separator()
@@ -480,22 +580,53 @@ function M.draw_pending_modal()
         local text, color = preview_line_text_color(line)
         col_text(color, text)
     end
-    ImGui.Separator()
-    if ImGui.Button((pending.confirm_label or "Confirm") .. "##tg_preview_confirm") then
-        local run = pending.run
-        M.pending_action = nil
-        M.pending_open = false
-        if type(run) == "function" then
-            local ran, ok, detail = pcall(run)
-            if ran then
-                set_status(ok, detail)
-            else
-                M.status_msg = "Action failed: " .. tostring(ok)
+
+    local qty_edit = pending.qty_edit
+    if qty_edit and (tonumber(qty_edit.max) or 1) > 1 and ImGui.InputInt then
+        ImGui.Separator()
+        local max_q = math.max(1, math.floor(tonumber(qty_edit.max) or 1))
+        local min_q = math.max(1, math.floor(tonumber(qty_edit.min) or 1))
+        local cur = math.floor(tonumber(qty_edit.value) or max_q)
+        if cur < min_q then cur = min_q end
+        if cur > max_q then cur = max_q end
+        qty_edit.value = cur
+        ImGui.Text("Give qty")
+        ImGui.SameLine()
+        local next_v, changed = ImGui.InputInt("##tg_preview_give_qty", cur, 1, 5)
+        if changed then
+            next_v = math.floor(tonumber(next_v) or cur)
+            if next_v < min_q then next_v = min_q end
+            if next_v > max_q then next_v = max_q end
+            qty_edit.value = next_v
+            if pending.sync_preview then
+                pcall(pending.sync_preview, pending)
             end
-        else
-            M.status_msg = "No action queued."
         end
-        if ImGui.CloseCurrentPopup then ImGui.CloseCurrentPopup() end
+    end
+
+    ImGui.Separator()
+    local actions = pending.actions
+    if type(actions) == "table" and #actions > 0 then
+        for i, action in ipairs(actions) do
+            if i > 1 then ImGui.SameLine() end
+            local label = trim(action.label)
+            if label == "" then label = "Confirm" end
+            if ImGui.Button(label .. "##tg_preview_act_" .. tostring(i)) then
+                local run = action.run
+                M.pending_action = nil
+                M.pending_open = false
+                run_pending_fn(run)
+                if ImGui.CloseCurrentPopup then ImGui.CloseCurrentPopup() end
+            end
+        end
+    else
+        if ImGui.Button((pending.confirm_label or "Confirm") .. "##tg_preview_confirm") then
+            local run = pending.run
+            M.pending_action = nil
+            M.pending_open = false
+            run_pending_fn(run)
+            if ImGui.CloseCurrentPopup then ImGui.CloseCurrentPopup() end
+        end
     end
     ImGui.SameLine()
     if ImGui.Button("Cancel##tg_preview_cancel") then
@@ -548,8 +679,144 @@ function M.bank_give_now_available(item_id, source, recipient, opts)
     return ok and preview == true
 end
 
+local function give_avail_qty(opts)
+    local q = math.floor(tonumber(opts and opts.qty) or 1)
+    if q < 1 then q = 1 end
+    return q
+end
+
+local function replace_preview_prefix(lines, prefix, text)
+    prefix = tostring(prefix or ""):lower()
+    for i, line in ipairs(lines or {}) do
+        local raw = type(line) == "table" and tostring(line.text or line[1] or "") or tostring(line or "")
+        if raw:lower():sub(1, #prefix) == prefix then
+            lines[i] = text
+            return
+        end
+    end
+    lines[#lines + 1] = text
+end
+
+-- Shared Give 1 / All / Qty confirm for bags (send_stack) and bank (_banksendstack).
+local function queue_give_qty_confirm(kind, item_name, item_id, source, recipient, opts, extra_lines, preview)
+    local avail = give_avail_qty(opts)
+    local is_bank = kind == "bank"
+    local title = is_bank and "Give To - Pull from Bank" or "Give Gear Now"
+    local one_label = is_bank and "Pull & Give 1" or "Give 1"
+
+    local function one_command()
+        if is_bank then
+            return integrations.bank_give_now_command(item_id, source, recipient)
+        end
+        return integrations.give_now_command(item_id, source, recipient)
+    end
+
+    local function stack_command(qty)
+        if is_bank then
+            return integrations.bank_send_stack_command(item_id, qty, source, recipient)
+        end
+        return integrations.send_stack_command(item_id, item_name, qty, source, recipient)
+    end
+
+    local function run_one()
+        if is_bank then
+            local ok, detail = integrations.bank_give_now(item_name, item_id, source, recipient, opts)
+            if ok then mark_bank_give_inflight(source, recipient, item_name, item_id) end
+            return ok, detail
+        end
+        return integrations.give_now(item_name, item_id, source, recipient, opts)
+    end
+
+    local function run_stack(qty)
+        qty = math.max(1, math.min(avail, math.floor(tonumber(qty) or 1)))
+        if is_bank then
+            local ok, detail = integrations.bank_send_stack(item_name, item_id, qty, source, recipient, opts)
+            if ok then mark_bank_give_inflight(source, recipient, item_name, item_id) end
+            return ok, detail
+        end
+        return integrations.send_stack(item_name, item_id, qty, source, recipient, opts)
+    end
+
+    local lines
+    if is_bank then
+        lines = {
+            "Pull from bank, then live trade - no INI rule written.",
+            "Warning: if the bank is closed, the source will navigate to a banker.",
+            "Cancel here = no movement. After start: use Stop Nav in TurboGear.",
+            "Item: " .. (item_name ~= "" and item_name or ("id " .. tostring(preview.id))),
+            "From: " .. tostring(preview.source or source),
+            "To: " .. tostring(preview.recipient or recipient),
+            "Zone: " .. tostring(preview.zone or "?") .. (preview.zoneSource and preview.zoneSource ~= "" and (" (" .. tostring(preview.zoneSource) .. ")") or ""),
+            "Requires: source can reach/open a banker, recipient is in same zone.",
+            "Macro verifies exact item ID in bank before moving it.",
+            "Transport: " .. tostring(preview.transport or "?"),
+            "Qty available: " .. tostring(avail),
+        }
+    else
+        lines = {
+            "Live trade now - no INI rule written.",
+            "Item: " .. (item_name ~= "" and item_name or ("id " .. tostring(preview.id))),
+            "From: " .. tostring(preview.source or source),
+            "To: " .. tostring(preview.recipient or recipient),
+            "Zone: " .. tostring(preview.zone or "?") .. (preview.zoneSource and preview.zoneSource ~= "" and (" (" .. tostring(preview.zoneSource) .. ")") or ""),
+            "Transport: " .. tostring(preview.transport or "?"),
+            "Qty available: " .. tostring(avail),
+        }
+    end
+
+    local cmd0 = avail > 1 and stack_command(avail) or one_command()
+    if avail > 1 then
+        lines[#lines + 1] = "Give qty: " .. tostring(avail)
+    end
+    lines[#lines + 1] = "Command: " .. tostring((cmd0 ~= "" and cmd0) or preview.command or "")
+    for _, line in ipairs(extra_lines or {}) do
+        if trim(line) ~= "" then lines[#lines + 1] = tostring(line) end
+    end
+
+    local modal_extra = is_bank and { modal = true } or nil
+    if avail <= 1 then
+        queue_preview(title, lines, one_label, run_one, modal_extra)
+        return true
+    end
+
+    local qty_state = { min = 1, max = avail, value = avail }
+    local function sync_preview(pending)
+        local q = math.max(1, math.min(avail, math.floor(tonumber(pending.qty_edit and pending.qty_edit.value) or avail)))
+        pending.qty_edit.value = q
+        replace_preview_prefix(pending.lines, "give qty:", "Give qty: " .. tostring(q))
+        local cmd = stack_command(q)
+        replace_preview_prefix(pending.lines, "command:", "Command: " .. tostring(cmd ~= "" and cmd or "?"))
+    end
+
+    queue_preview(title, lines, one_label, run_one, {
+        modal = is_bank,
+        qty_edit = qty_state,
+        sync_preview = sync_preview,
+        actions = {
+            {
+                label = is_bank and string.format("Pull & Give All (%d)", avail) or string.format("Give All (%d)", avail),
+                primary = true,
+                run = function()
+                    return run_stack(avail)
+                end,
+            },
+            {
+                label = one_label,
+                run = run_one,
+            },
+            {
+                label = is_bank and "Pull & Give Qty" or "Give Qty",
+                run = function()
+                    return run_stack(qty_state.value)
+                end,
+            },
+        },
+    })
+    return true
+end
+
 -- Live cross-box hand-off (no INI rule). Shows a confirm modal first because the
--- trade is immediate and irreversible.
+-- trade is immediate and irreversible. Stack rows offer Give 1 / All / Qty.
 function M.give_now_action(item_name, item_id, source, recipient, opts, extra_lines)
     item_name = trim(item_name)
     recipient = trim(recipient)
@@ -573,27 +840,11 @@ function M.give_now_action(item_name, item_id, source, recipient, opts, extra_li
         end)
         return false
     end
-    local lines = {
-        "Live trade now - no INI rule written.",
-        "Item: " .. (item_name ~= "" and item_name or ("id " .. tostring(preview.id))),
-        "From: " .. tostring(preview.source or source),
-        "To: " .. tostring(preview.recipient or recipient),
-        "Zone: " .. tostring(preview.zone or "?") .. (preview.zoneSource and preview.zoneSource ~= "" and (" (" .. tostring(preview.zoneSource) .. ")") or ""),
-        "Transport: " .. tostring(preview.transport or "?"),
-        "Command: " .. tostring(preview.command or ""),
-    }
-    for _, line in ipairs(extra_lines or {}) do
-        if trim(line) ~= "" then lines[#lines + 1] = tostring(line) end
-    end
-    queue_preview("Give Gear Now", lines, "Give Now", function()
-        return integrations.give_now(item_name, item_id, source, recipient, opts)
-    end)
-    return true
+    return queue_give_qty_confirm("bags", item_name, item_id, source, recipient, opts, extra_lines, preview)
 end
 
--- Live bank withdrawal plus cross-box hand-off. The macro verifies the bank item
--- by exact item ID after opening the bank, then reuses the standard one-item
--- send path. No TurboGive INI rule is written.
+-- Live bank withdrawal plus cross-box hand-off. Pulls qty from bank (QuantityWnd),
+-- then SendMyItem / SendMyStack. No TurboGive INI rule is written.
 function M.bank_give_now_action(item_name, item_id, source, recipient, opts, extra_lines)
     item_name = trim(item_name)
     recipient = trim(recipient)
@@ -606,35 +857,18 @@ function M.bank_give_now_action(item_name, item_id, source, recipient, opts, ext
     local ok, preview_or_err = integrations.preview_bank_give_now(item_name, item_id, source, recipient, opts)
     local preview = preview_or_status(ok, preview_or_err)
     if not preview then
-        queue_preview("Bank + Give Blocked", {
+        queue_preview("Give To Blocked", {
             "Pull from bank, then live trade - no INI rule written.",
             "Item: " .. (item_name ~= "" and item_name or ("id " .. tostring(item_id))),
             "From: " .. tostring(source),
             "To: " .. tostring(recipient),
             "Blocked: " .. tostring(preview_or_err or "Could not build preview."),
         }, "OK", function()
-            return true, "Bank + Give blocked."
+            return true, "Give To blocked."
         end)
         return false
     end
-    local lines = {
-        "Pull from bank, then live trade - no INI rule written.",
-        "Item: " .. (item_name ~= "" and item_name or ("id " .. tostring(preview.id))),
-        "From: " .. tostring(preview.source or source),
-        "To: " .. tostring(preview.recipient or recipient),
-        "Zone: " .. tostring(preview.zone or "?") .. (preview.zoneSource and preview.zoneSource ~= "" and (" (" .. tostring(preview.zoneSource) .. ")") or ""),
-        "Requires: source can reach/open a banker, recipient is in same zone.",
-        "Macro verifies exact item ID in bank before moving it.",
-        "Transport: " .. tostring(preview.transport or "?"),
-        "Command: " .. tostring(preview.command or ""),
-    }
-    for _, line in ipairs(extra_lines or {}) do
-        if trim(line) ~= "" then lines[#lines + 1] = tostring(line) end
-    end
-    queue_preview("Bank + Give Gear", lines, "Bank + Give", function()
-        return integrations.bank_give_now(item_name, item_id, source, recipient, opts)
-    end)
-    return true
+    return queue_give_qty_confirm("bank", item_name, item_id, source, recipient, opts, extra_lines, preview)
 end
 
 function M.show_action_notice(title, lines)
@@ -642,6 +876,25 @@ function M.show_action_notice(title, lines)
         return true, "No action written."
     end)
     return true
+end
+
+local function push_menu_text_color(color)
+    if not color or not ImGuiCol or not ImGuiCol.Text or not ImGui.PushStyleColor then return false end
+    return pcall(ImGui.PushStyleColor, ImGuiCol.Text, color[1], color[2], color[3], color[4] or 1) == true
+end
+
+local function begin_menu_colored(label, color)
+    local pushed = push_menu_text_color(color)
+    local open = ImGui.BeginMenu and ImGui.BeginMenu(label)
+    if pushed then ImGui.PopStyleColor(1) end
+    return open
+end
+
+local function selectable_colored(label, color)
+    local pushed = push_menu_text_color(color)
+    local clicked = ImGui.Selectable(label)
+    if pushed then ImGui.PopStyleColor(1) end
+    return clicked
 end
 
 local function draw_integrations(name, id, suffix, opts)
@@ -666,7 +919,7 @@ local function draw_integrations(name, id, suffix, opts)
         end
     end
 
-    if ImGui.BeginMenu and ImGui.BeginMenu("Add to List...##tgctx_bis_menu_" .. suffix) then
+    if begin_menu_colored("Add to List...##tgctx_bis_menu_" .. suffix, Theme.item or Theme.cyan) then
         local slot_name = opts.slotname or opts.sourceLocation or ""
         local add_opts = {}
         if trim(opts.installedIn or "") ~= "" then
@@ -727,7 +980,7 @@ local function draw_integrations(name, id, suffix, opts)
         ImGui.SetTooltip("Reassign this planned aug to another socket on the loadout list.")
     end
 
-    if ImGui.BeginMenu and ImGui.BeginMenu("Keep Qty##tgctx_stock_" .. suffix) then
+    if begin_menu_colored("Keep Qty##tgctx_stock_" .. suffix, Theme.amber or Theme.gold) then
         for _, count in ipairs(integrations.stock_count_options()) do
             if ImGui.Selectable(tostring(count) .. " across cache##tgctx_stock_" .. tostring(count) .. "_" .. suffix) then
                 local qty = count
@@ -753,7 +1006,8 @@ local function draw_integrations(name, id, suffix, opts)
     end
 
     local bank_ctx = tostring(opts.locationGroup or ""):lower() == "bank" or tostring(opts.where or ""):lower() == "bank"
-    if not bank_ctx and ImGui.BeginMenu and ImGui.BeginMenu("Give Now##tgctx_live_give_" .. suffix) then
+    local give_color = Theme.online or Theme.green
+    if not bank_ctx and begin_menu_colored("Give Now##tgctx_live_give_" .. suffix, give_color) then
         local targets = integrations.give_target_options(opts.owner)
         if #targets == 0 then
             ImGui.TextDisabled("No cached targets")
@@ -773,7 +1027,7 @@ local function draw_integrations(name, id, suffix, opts)
         ImGui.SetTooltip("Runs a one-time TurboGive _senditem command. No INI rule is written.")
     end
 
-    if bank_ctx and ImGui.BeginMenu and ImGui.BeginMenu("Bank + Give##tgctx_bank_give_" .. suffix) then
+    if bank_ctx and begin_menu_colored("Give To##tgctx_bank_give_" .. suffix, give_color) then
         local targets = integrations.give_target_options(opts.owner)
         if #targets == 0 then
             ImGui.TextDisabled("No cached targets")
@@ -786,14 +1040,14 @@ local function draw_integrations(name, id, suffix, opts)
             end
         end
         ImGui.Separator()
-        ImGui.TextDisabled("Banked item, same-zone handoff only.")
+        ImGui.TextDisabled("Confirms before navigating to a banker.")
         ImGui.EndMenu()
     end
     if bank_ctx and ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
-        ImGui.SetTooltip("Runs a one-time TurboGive _banksenditem command. Source must be able to open a banker.")
+        ImGui.SetTooltip("Confirm first, then pull from bank and give. Opens Stop Nav if navigation starts. No INI rule.")
     end
 
-    if ImGui.BeginMenu and ImGui.BeginMenu("Advanced##tgctx_advanced_" .. suffix) then
+    if begin_menu_colored("Advanced##tgctx_advanced_" .. suffix, Theme.dim or Theme.muted) then
         if ImGui.BeginMenu and ImGui.BeginMenu("Queue Give Rule##tgctx_give_" .. suffix) then
             local targets = integrations.give_target_options(opts.owner)
             if #targets == 0 then
@@ -854,7 +1108,7 @@ local function draw_integrations(name, id, suffix, opts)
         ImGui.EndMenu()
     end
 
-    if ImGui.BeginMenu and ImGui.BeginMenu("Set TurboLoot Rule##tgctx_tl_rule_" .. suffix) then
+    if begin_menu_colored("Set TurboLoot Rule##tgctx_tl_rule_" .. suffix, Theme.purple or Theme.bank) then
         for _, rec in ipairs(integrations.rule_options()) do
             if ImGui.Selectable(tostring(rec.label) .. "##tgctx_rule_" .. tostring(rec.value) .. "_" .. suffix) then
                 local rule = rec.value
@@ -921,7 +1175,9 @@ function M.draw_context(name, id, suffix, opts)
     end
     local can_pickup, pickup_tip = M.can_pickup(opts)
     if can_pickup then
-        if ImGui.Selectable("Pickup##tgctx_pickup_" .. suffix) then M.pickup_item(name, opts) end
+        if selectable_colored("Pickup##tgctx_pickup_" .. suffix, Theme.online or Theme.green) then
+            M.pickup_item(name, opts)
+        end
         if pickup_tip and ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
             ImGui.SetTooltip(pickup_tip)
         end

@@ -1,3 +1,26 @@
+1.2.65
+- Give Now / Give To (bank) confirm: Give 1, Give All (row qty), and Give Qty
+  (InputInt). Bags use send / _sendstack; bank pulls stack via QuantityWnd
+  then SendMyStack (_banksendstack). Bank context menu renamed to Give To;
+  popup still says it pulls from bank. TurboGive 1.10.0.
+- Context menu: Give Now / Give To green; Keep Qty amber; Add to List cyan;
+  TurboLoot purple; Advanced dim; Pickup green.
+- Near-live Inventory after give/trade: UI inventory_watch now flushes local
+  lite snapshot (was skipped while viewer); TurboGive post-trade uses
+  /tgearbg note + /tgear note (lite) instead of full publish.
+- Fix: lite_signature omitted stack qty, so Give Now qty-only changes were
+  treated as unchanged and never published/refreshed. Also honor force=true
+  on lite gather; UI prefers fresher Store self after bg save.
+- Post-trade UI refresh avoids bag TLO walk hitch: adopt bg-saved Store snap
+  (retries) instead of sync gather on /tgear note.
+- Instant local Inventory after Give 1/All/Qty: optimistic id/qty patch on
+  confirm (no TLO walk); adopt clears stale full cache when fresher lite
+  arrives; UI no longer falls back to a bag scan if bg adopt misses;
+  TurboGive trade sync note timing 8->2.
+- Bank Give To: modal confirm warns about banker navigation; buttons say
+  Pull & Give; Stop Nav banner ends macro + /nav stop; no optimistic bank
+  qty (cancel-safe).
+
 1.2.64
 - RGMercs tip on Actions/Setup when Chase or Camp While Paused (RunMovePaused)
   is ON: Turbo pauses mercs for loot/give, but that setting still lets

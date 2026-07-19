@@ -1116,6 +1116,7 @@ local function draw_main_body()
         -- draw_sync_status); rendering it inline here inserted/removed a row and
         -- shoved the whole window down, which read as a distracting resize.
         if item_actions.draw_pending_modal then item_actions.draw_pending_modal() end
+        if item_actions.draw_in_flight then item_actions.draw_in_flight() end
         diag.time("ui.global_search.bar", draw_global_search_bar)
         ImGui.Separator()
 

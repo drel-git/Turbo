@@ -632,6 +632,19 @@ function M.source_snapshot(key)
     if key == "__self__" then
         local depth = snapshot.depth_for_settings()
         local cached = snapshot.cached()
+        -- UI is a viewer: bg may have saved a fresher self snap after Give Now.
+        -- Prefer Store self when inventoryUpdated is newer so counts update
+        -- without waiting for a local TLO gather.
+        local mine = store.my_key and store.my_key() or nil
+        local store_self = (mine and Store.get(mine)) or nil
+        if type(store_self) == "table" and type(store_self.bags) == "table" then
+            local store_ts = tonumber(store_self.inventoryUpdated or store_self.updated) or 0
+            local cache_ts = tonumber(cached and (cached.inventoryUpdated or cached.updated)) or 0
+            if store_ts > cache_ts then
+                if snapshot.adopt then pcall(snapshot.adopt, store_self) end
+                return store_self, true, "Self"
+            end
+        end
         if cached and (depth == "lite" or cached.depth == "full") then
             return cached, true, "Self"
         end

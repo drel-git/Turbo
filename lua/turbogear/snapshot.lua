@@ -354,13 +354,16 @@ function M.lite_signature(snap)
     local parts = {}
     local function add_list(list, prefix)
         for _, item in ipairs(list or {}) do
+            -- Include qty/slot: Give Now / Stock Up change stacks without moving slots.
             parts[#parts + 1] = string.format(
-                "%s:%d:%s:%s:%s",
+                "%s:%d:%s:%s:%s:%s:%d",
                 prefix,
                 tonumber(item.id) or 0,
                 tostring(item.name or ""),
                 tostring(item.location or ""),
-                tostring(item.where or "")
+                tostring(item.where or ""),
+                tostring(item.slotid or ""),
+                math.max(1, math.floor(tonumber(item.qty or item.count) or 1))
             )
             for _, aug in ipairs(item.augs or {}) do
                 parts[#parts + 1] = string.format(
@@ -381,6 +384,181 @@ function M.lite_signature(snap)
     return table.concat(parts, "\31")
 end
 
+-- Adopt an externally-built snap (e.g. fresher Store self from bg cache) into
+-- the in-process cache so __self__ views update without a second TLO walk.
+function M.adopt(snap)
+    if type(snap) ~= "table" then return false end
+    if not snap.name or snap.name == "?" then return false end
+    local now = os.clock()
+    local depth = tostring(snap.depth or "lite")
+    local snap_ts = tonumber(snap.inventoryUpdated or snap.updated) or 0
+    if depth == "full" then
+        self_full_snap = snap
+        self_full_time = now
+        self_lite_snap = snap
+        self_lite_time = now
+    else
+        self_lite_snap = snap
+        self_lite_time = now
+        -- cached() prefers full; a fresher lite must not leave a stale full
+        -- snap as the Inventory source (qty-only Give Now looked "stuck").
+        if self_full_snap then
+            local full_ts = tonumber(self_full_snap.inventoryUpdated or self_full_snap.updated) or 0
+            if snap_ts >= full_ts then
+                self_full_snap = nil
+                self_full_time = 0
+            end
+        end
+    end
+    remember_bank(snap)
+    return true
+end
+
+local function list_item_id(it)
+    return math.floor(tonumber(it and it.id) or 0)
+end
+
+local function list_item_qty(it)
+    local q = math.floor(tonumber(it and (it.qty or it.stack or it.count)) or 1)
+    if q < 1 then q = 1 end
+    return q
+end
+
+-- Subtract qty of item_id from a bags/bank list. Prefers where/slotid match.
+-- Returns how many were removed.
+local function consume_from_list(list, item_id, qty, prefer_where, prefer_slotid)
+    if type(list) ~= "table" or item_id <= 0 or qty <= 0 then return 0 end
+    local remaining = qty
+    local prefer = (prefer_where and prefer_where ~= "")
+        or (prefer_slotid ~= nil and tostring(prefer_slotid) ~= "")
+
+    local function pass(strict)
+        local i = 1
+        while i <= #list and remaining > 0 do
+            local it = list[i]
+            if list_item_id(it) ~= item_id then
+                i = i + 1
+            elseif strict then
+                local where_ok = (not prefer_where or prefer_where == "")
+                    or tostring(it.where or "") == tostring(prefer_where)
+                local slot_ok = (prefer_slotid == nil or tostring(prefer_slotid) == "")
+                    or tostring(it.slotid or "") == tostring(prefer_slotid)
+                if not (where_ok and slot_ok) then
+                    i = i + 1
+                else
+                    local have = list_item_qty(it)
+                    if have <= remaining then
+                        remaining = remaining - have
+                        table.remove(list, i)
+                    else
+                        local left = have - remaining
+                        it.qty = left
+                        if it.stack ~= nil then it.stack = left end
+                        if it.count ~= nil then it.count = left end
+                        remaining = 0
+                    end
+                end
+            else
+                local have = list_item_qty(it)
+                if have <= remaining then
+                    remaining = remaining - have
+                    table.remove(list, i)
+                else
+                    local left = have - remaining
+                    it.qty = left
+                    if it.stack ~= nil then it.stack = left end
+                    if it.count ~= nil then it.count = left end
+                    remaining = 0
+                end
+            end
+        end
+    end
+
+    if prefer then pass(true) end
+    if remaining > 0 then pass(false) end
+    return qty - remaining
+end
+
+local function stamp_snap_inventory(snap)
+    local now = os.time()
+    snap.updated = now
+    snap.inventoryUpdated = now
+    snap.seq = next_seq()
+end
+
+-- Optimistic local Give Now / Give To: subtract id/qty from in-memory bags or
+-- bank with no TLO walk. UI redraws immediately; bg /tgearbg note reconciles.
+-- opts: locationGroup ("bags"|"bank"), where, slotid
+function M.apply_local_give_delta(item_id, qty, opts)
+    item_id = math.floor(tonumber(item_id) or 0)
+    qty = math.floor(tonumber(qty) or 0)
+    opts = type(opts) == "table" and opts or {}
+    if item_id <= 0 or qty <= 0 then return false end
+
+    local group = tostring(opts.locationGroup or opts.location or "bags"):lower()
+    local list_key = (group == "bank") and "bank" or "bags"
+    local prefer_where = opts.where
+    local prefer_slotid = opts.slotid
+
+    local targets = {}
+    if self_full_snap then targets[#targets + 1] = self_full_snap end
+    if self_lite_snap and self_lite_snap ~= self_full_snap then
+        targets[#targets + 1] = self_lite_snap
+    end
+    if #targets == 0 then
+        local ok_store, store_mod = pcall(require, 'store')
+        if ok_store and store_mod and store_mod.Store and store_mod.my_key then
+            local s = store_mod.Store.get(store_mod.my_key())
+            if type(s) == "table" and type(s[list_key]) == "table" then
+                targets[#targets + 1] = s
+            end
+        end
+    end
+    if #targets == 0 then return false end
+
+    local any = false
+    for _, snap in ipairs(targets) do
+        local list = snap[list_key]
+        if type(list) == "table" then
+            local taken = consume_from_list(list, item_id, qty, prefer_where, prefer_slotid)
+            if taken > 0 then
+                any = true
+                stamp_snap_inventory(snap)
+                if list_key == "bank" then
+                    snap.bankValid = true
+                end
+            end
+        end
+    end
+    if not any then return false end
+
+    local clock = os.clock()
+    if self_full_snap then self_full_time = clock end
+    if self_lite_snap then self_lite_time = clock end
+    -- Fresher lite/full bags after qty patch: drop stale full if lite is newer.
+    if self_full_snap and self_lite_snap and self_lite_snap ~= self_full_snap then
+        local full_ts = tonumber(self_full_snap.inventoryUpdated or self_full_snap.updated) or 0
+        local lite_ts = tonumber(self_lite_snap.inventoryUpdated or self_lite_snap.updated) or 0
+        if lite_ts > full_ts then
+            self_full_snap = nil
+            self_full_time = 0
+        end
+    end
+
+    local best = self_full_snap or self_lite_snap or targets[1]
+    if best then
+        remember_bank(best)
+        pcall(function()
+            local store_mod = require('store')
+            if store_mod and store_mod.Store and store_mod.Store.put then
+                store_mod.Store.put(best, "client")
+            end
+        end)
+    end
+    diag.count("snapshot.local_give_delta")
+    return true
+end
+
 function M.gather(arg)
     local opts = normalize_opts(arg)
     local force = opts.force == true
@@ -392,7 +570,9 @@ function M.gather(arg)
         tostring(opts.skipLockouts == true), tostring(opts.skipLiveStats == true)))
 
     local now = os.clock()
-    if not include_spells and depth == "lite" and self_full_snap and (now - self_full_time) < (tonumber(CFG.self_cache_lite_s) or 8.0) then
+    -- force=true must always re-walk TLOs (post-trade / inventory_watch).
+    if not force and not include_spells and depth == "lite" and self_full_snap
+        and (now - self_full_time) < (tonumber(CFG.self_cache_lite_s) or 8.0) then
         return self_full_snap
     end
 

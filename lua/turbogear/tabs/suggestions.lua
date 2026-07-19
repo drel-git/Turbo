@@ -1022,7 +1022,7 @@ local function build_transfer_action(meta, wrapped, slot_id, current)
             action.queueOnly = false
             action.reason = ""
             action.mode = "pull from bank, then live trade via configured transport; no INI rule written."
-            action.label = "Bank + Give"
+            action.label = "Give To"
         elseif not action.queueOnly and row.id and item_actions.give_now_available(row.id, row.owner, recipient, action.opts) then
             action.liveGive = true
             action.mode = "live trade now via configured transport; no INI rule written."
@@ -1032,7 +1032,7 @@ local function build_transfer_action(meta, wrapped, slot_id, current)
             action.detailOnly = true
             action.reason = action.reason ~= "" and action.reason
                 or (bucket == "bank"
-                    and "Bring source and recipient to the same zone; source must be able to open a banker for Bank + Give."
+                    and "Bring source and recipient to the same zone; source must be able to open a banker for Give To."
                     or "Bring the source and recipient to the same zone with the item in bags, then use Give Now.")
         end
     end
@@ -2259,7 +2259,7 @@ local function build_aug_transfer_action(meta, wrapped, sock_rec)
             action.queueOnly = false
             action.reason = ""
             action.mode = "pull from bank, then live trade via configured transport; no INI rule written."
-            action.label = "Bank + Give"
+            action.label = "Give To"
         elseif row.id and item_actions.give_now_available(row.id, row.owner, recipient, action.opts) then
             action.liveGive = true
             action.mode = "live trade now via configured transport; no INI rule written."
@@ -2269,7 +2269,7 @@ local function build_aug_transfer_action(meta, wrapped, sock_rec)
             action.detailOnly = true
             action.reason = action.reason ~= "" and action.reason
                 or (bucket == "bank"
-                    and "Bring source and recipient to the same zone; source must be able to open a banker for Bank + Give."
+                    and "Bring source and recipient to the same zone; source must be able to open a banker for Give To."
                     or "Bring the source and recipient to the same zone with the aug in bags, then use Give Now.")
         end
     end
@@ -2286,7 +2286,7 @@ local function run_aug_transfer_action(action)
     local lines = transfer_lines(action)
     lines[#lines + 1] = "After Give Now moves the aug, install it into the listed socket manually."
     if action.bankGive then
-        lines[#lines] = "After Bank + Give moves the aug, install it into the listed socket manually."
+        lines[#lines] = "After Give To pulls from bank and moves the aug, install it into the listed socket manually."
         lines[#lines + 1] = "Source must be online, same zone, and able to open a banker."
         lines[#lines + 1] = "TurboGive verifies the exact bank aug ID before moving it."
         return item_actions.bank_give_now_action(

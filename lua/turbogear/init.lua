@@ -20,7 +20,7 @@
   BG    /lua run turbogear_bg         (headless responder; leaves UI entrypoint free)
   MINI  /lua run turbogear mini       (UI loaded, starts as mini icon)
   UI    /lua run turbogear ui         (explicit UI start)
-  CMDS  /tgear show|hide|sync|publish|status|debug|diag|perfdiag|stop|toggle   (also /turbogear)
+  CMDS  /tgear show|hide|sync|publish|note|status|debug|diag|perfdiag|stop|toggle   (also /turbogear)
         /tgear exportspells [copies]  export missing research list
         /tgear import <file>  /tgear export <list>  /tgear sharelist <list>
         /tgear pulllists <Server_CharName>
@@ -554,6 +554,20 @@ local function tgear_command(...)
             ok = Engine.publish(true, "full", { skipLockouts = true, skipLiveStats = true, reason = "manual_publish" })
         end
         print(ok and "[TurboGear] publish: full local inventory sent" or "[TurboGear] publish: local inventory queued/cache updated")
+    elseif arg == "note" or arg == "dirty" or arg == "refresh" then
+        -- Lightweight post-trade reconcile. UI prefers Store adopt (and may
+        -- already show an optimistic give delta); bg walks bags + saves.
+        local full = (args[2] or ""):lower() == "full"
+        if not state.bg then
+            inventory_watch.request_store_adopt(8)
+            pcall(function() inventory_watch.try_adopt_store_self(true) end)
+            request_local_bg_start("note command")
+            mq.cmd('/timed 1 /squelch /tgearbg note' .. (full and " full" or ""))
+            print("[TurboGear] note: adopt bg snap (no UI bag scan) + delegated refresh")
+        else
+            inventory_watch.note_change(true, full)
+            print(full and "[TurboGear] note: urgent full dirty marked" or "[TurboGear] note: urgent lite dirty marked")
+        end
     elseif arg == "spellsync" then
         -- Spell-book round trip. The Spells tab delegates here because the UI
         -- never owns the actor mailbox (static roles).

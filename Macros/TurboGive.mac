@@ -7,7 +7,7 @@
 |                            \/              \/              \/
 |              https://www.github.com/drel-git/TurboLoot
 |                       TurboGive.mac v1.9.5 for TurboLoot 3.8
-| @version TurboGive.mac 1.9.9
+| @version TurboGive.mac 1.10.0
 | Companion to TurboLoot - item redistribution between characters
 |
 | =========================================================================================
@@ -1519,6 +1519,32 @@ Sub Main(string modeIn, string argIn)
         /return
     }
 
+    | ---- INTERNAL: _BANKSENDSTACK (pull QTY from bank, then SendMyStack) ----
+    | /mac turbogive _banksendstack <recipient> <itemID> <qty>
+    | /mac turbogive _banksendstack <recipient> <qty> id <itemID>
+    /if (${modeUpper.Equal[_BANKSENDSTACK]}) {
+        /declare bankStackId int local 0
+        /declare bankStackQty int local 0
+        /if (${Param2.Length} && ${Param2.Upper.Equal[ID]} && ${Param3.Length} && ${Int[${Param3}]} > 0) {
+            /varset bankStackId ${Int[${Param3}]}
+            /if (${Param4.Length} && ${Int[${Param4}]} > 0) /varset bankStackQty ${Int[${Param4}]}
+        } else /if (${Param3.Length} && ${Param3.Upper.Equal[ID]} && ${Param4.Length} && ${Int[${Param4}]} > 0) {
+            /if (${Param2.Length} && ${Int[${Param2}]} > 0) /varset bankStackQty ${Int[${Param2}]}
+            /varset bankStackId ${Int[${Param4}]}
+        } else {
+            /if (${Param2.Length} && ${Int[${Param2}]} > 0) /varset bankStackId ${Int[${Param2}]}
+            /if (${Param3.Length} && ${Int[${Param3}]} > 0) /varset bankStackQty ${Int[${Param3}]}
+        }
+        /if (${bankStackId} <= 0 || ${bankStackQty} <= 0) {
+            /echo ${tgTag} \arUsage: /mac turbogive _banksendstack CHAR ITEMID QTY\ax
+            /echo ${tgTag} \ar   or: /mac turbogive _banksendstack CHAR QTY id ITEMID\ax
+            /return
+        }
+        /call BankSendMyStack "${arg}" ${bankStackId} ${bankStackQty}
+        /call SendDoneToOrchestrator
+        /return
+    }
+
     | ---- GIVE (CHARNAME [cash|dc|plat|pp] [amount] or CHARNAME [amount]) ----
     /if (${mode.Length} && !${mode.Equal[NULL]}) {
         /declare giveArgUp string local ${arg.Upper.Replace[ ,]}
@@ -2688,6 +2714,7 @@ Sub FindAndOpenBank
     /if (${Target.Distance} > 10) {
         /declare bankerID int local ${Target.ID}
         /echo ${tgTag} \ayNavigating to banker (distance: \aw${Target.Distance}\ay)...
+        /echo ${tgTag} \ayCancel: \aw/endmacro\ay or TurboGear \awStop Nav\ay (also \aw/nav stop\ay).
         /call NavToIDWithDoorsAndNudges ${bankerID} 10 900
 
         /if (!${Target.ID} || ${Target.ID} != ${bankerID}) {
@@ -4532,6 +4559,9 @@ Sub AskOneForCash(string senderName, int maxAmount)
 | See CollectCash comment for rationale.
 | v1.9.4: collector reclaims received inventory DC after each trade/delivery.
 | v1.9.5: per-bot/final summaries announce once; reclaim chatter is debug-only.
+| v1.10.0: PullExactBankItemById(wantQty); BankSendMyStack + _banksendstack;
+|          RequestTurboGearTradeSync note timing 8->2 (UI optimistic qty);
+|          banker nav echoes cancel tip (/endmacro / Stop Nav).
 | =====================================================================
 Sub CollectDC(string scopeParam, int maxAmount)
     /declare scope string local ${scopeParam.Upper.Replace[ ,]}
@@ -5188,21 +5218,28 @@ Sub SendMyDC(string collectorName, int maxAmount)
 | the button (defense in depth).
 | =====================================================================
 Sub RequestTurboGearTradeSync(string recipientName)
-    | Keep TurboGear's dashboard from showing stale post-trade ownership.
-    | Force a local publish (not just autostart noop) so Stock counts refresh.
-    /squelch /timed 5 /lua run turbogear_autostart
-    /squelch /timed 8 /tgearbg publish
+    | Reconcile after trade. UI already optimistically patches local qty on
+    | Give Now; short timed lite note lets bg save truth without a long wait.
+    /squelch /timed 1 /lua run turbogear_autostart
+    /squelch /timed 2 /tgearbg note
+    /squelch /timed 2 /tgear note
     /if (${recipientName.Length} && !${recipientName.Equal[NULL]} && !${recipientName.Equal[${Me.Name}]}) {
         /squelch /e3bct ${recipientName} /squelch /lua run turbogear_autostart
-        /squelch /e3bct ${recipientName} /squelch /timed 8 /tgearbg publish
+        /squelch /e3bct ${recipientName} /squelch /timed 2 /tgearbg note
+        /squelch /e3bct ${recipientName} /squelch /timed 2 /tgear note
     }
 /return
 
-Sub PullExactBankItemById(int wantItemId)
+| wantQty defaults to 1 when omitted / <= 0 (back-compat for BankSendMyItem).
+| QuantityWnd: SetQuantityWndValue wantQty. Without QuantityWnd, whole-slot
+| pickup is only accepted when wantQty is 1 or Cursor.Stack equals wantQty.
+Sub PullExactBankItemById(int wantItemId, int wantQty)
     /if (${wantItemId} <= 0) {
         /echo ${tgTag} \ar[BANK ITEM]\aw Invalid item id.
         /return FALSE
     }
+    /declare biWantQty int local ${wantQty}
+    /if (${biWantQty} <= 0) /varset biWantQty 1
     /if (${Cursor.ID}) {
         /echo ${tgTag} \ar[BANK ITEM]\aw Cursor is occupied (${Cursor.Name}) - aborting before bank pull.
         /return FALSE
@@ -5224,6 +5261,8 @@ Sub PullExactBankItemById(int wantItemId)
     /declare biSlot int local
     /declare biMaxSlots int local
     /declare biName string local
+    /declare biStack int local
+    /declare biCursorStack int local
 
     /for biBank 1 to 24
         /if (!${Me.Bank[${biBank}].ID}) /continue
@@ -5238,15 +5277,35 @@ Sub PullExactBankItemById(int wantItemId)
                 /echo ${tgTag} \ar[BANK ITEM]\aw ${Me.Bank[${biBank}].Name} is NO-DROP - cannot trade.
                 /return FALSE
             }
+            /varset biStack ${Me.Bank[${biBank}].Stack}
+            /if (${biStack} <= 0) /varset biStack 1
+            /if (${biWantQty} > ${biStack}) {
+                /echo ${tgTag} \ar[BANK ITEM]\aw Bank stack only has ${biStack}, need ${biWantQty}.
+                /return FALSE
+            }
             /varset biName ${Me.Bank[${biBank}].Name}
             /nomodkey /itemnotify bank${biBank} leftmouseup
             /delay 15 ${Cursor.ID} || ${Window[QuantityWnd].Open}
             /if (${Window[QuantityWnd].Open}) {
-                /call SetQuantityWndValue 1
+                /call SetQuantityWndValue ${biWantQty}
                 /notify QuantityWnd QTYW_Accept_Button leftmouseup
                 /delay 5 !${Window[QuantityWnd].Open}
                 /if (${Window[QuantityWnd].Open}) /keypress ENTER
                 /delay 5 ${Cursor.ID}
+            } else /if (${biWantQty} > 1) {
+                /if (!${Cursor.ID}) {
+                    /echo ${tgTag} \ar[BANK ITEM]\aw Quantity window did not open; cannot pull ${biWantQty} of ${biName}.
+                    /return FALSE
+                }
+                /varset biCursorStack ${Cursor.Stack}
+                /if (${biCursorStack} <= 0) /varset biCursorStack 1
+                /if (${biCursorStack} != ${biWantQty}) {
+                    /echo ${tgTag} \ar[BANK ITEM]\aw No QuantityWnd; whole-slot pickup is ${biCursorStack}, need ${biWantQty} - returning.
+                    /autoinventory
+                    /delay 5 !${Cursor.ID}
+                    /if (${Cursor.ID}) /call ForceClearCursor
+                    /return FALSE
+                }
             }
             /if (!${Cursor.ID}) {
                 /echo ${tgTag} \ar[BANK ITEM]\aw Failed to pick up ${biName} from bank slot ${biBank}.
@@ -5259,11 +5318,22 @@ Sub PullExactBankItemById(int wantItemId)
                 /if (${Cursor.ID}) /call ForceClearCursor
                 /return FALSE
             }
+            /if (${biWantQty} > 1) {
+                /varset biCursorStack ${Cursor.Stack}
+                /if (${biCursorStack} <= 0) /varset biCursorStack 1
+                /if (${biCursorStack} < ${biWantQty}) {
+                    /echo ${tgTag} \ar[BANK ITEM]\aw Cursor has ${biCursorStack}, need ${biWantQty} - returning.
+                    /autoinventory
+                    /delay 5 !${Cursor.ID}
+                    /if (${Cursor.ID}) /call ForceClearCursor
+                    /return FALSE
+                }
+            }
             /autoinventory
             /delay 10 !${Cursor.ID}
             /if (${Cursor.ID}) /call ForceClearCursor
             /if (${Cursor.ID}) /return FALSE
-            /echo ${tgTag} \ag[BANK ITEM]\aw Pulled ${biName} from bank.
+            /echo ${tgTag} \ag[BANK ITEM]\aw Pulled ${biWantQty}x ${biName} from bank.
             /return TRUE
         }
 
@@ -5275,15 +5345,35 @@ Sub PullExactBankItemById(int wantItemId)
                 /echo ${tgTag} \ar[BANK ITEM]\aw ${Me.Bank[${biBank}].Item[${biSlot}].Name} is NO-DROP - cannot trade.
                 /return FALSE
             }
+            /varset biStack ${Me.Bank[${biBank}].Item[${biSlot}].Stack}
+            /if (${biStack} <= 0) /varset biStack 1
+            /if (${biWantQty} > ${biStack}) {
+                /echo ${tgTag} \ar[BANK ITEM]\aw Bank stack only has ${biStack}, need ${biWantQty}.
+                /return FALSE
+            }
             /varset biName ${Me.Bank[${biBank}].Item[${biSlot}].Name}
             /nomodkey /itemnotify in bank${biBank} ${biSlot} leftmouseup
             /delay 15 ${Cursor.ID} || ${Window[QuantityWnd].Open}
             /if (${Window[QuantityWnd].Open}) {
-                /call SetQuantityWndValue 1
+                /call SetQuantityWndValue ${biWantQty}
                 /notify QuantityWnd QTYW_Accept_Button leftmouseup
                 /delay 5 !${Window[QuantityWnd].Open}
                 /if (${Window[QuantityWnd].Open}) /keypress ENTER
                 /delay 5 ${Cursor.ID}
+            } else /if (${biWantQty} > 1) {
+                /if (!${Cursor.ID}) {
+                    /echo ${tgTag} \ar[BANK ITEM]\aw Quantity window did not open; cannot pull ${biWantQty} of ${biName}.
+                    /return FALSE
+                }
+                /varset biCursorStack ${Cursor.Stack}
+                /if (${biCursorStack} <= 0) /varset biCursorStack 1
+                /if (${biCursorStack} != ${biWantQty}) {
+                    /echo ${tgTag} \ar[BANK ITEM]\aw No QuantityWnd; whole-slot pickup is ${biCursorStack}, need ${biWantQty} - returning.
+                    /autoinventory
+                    /delay 5 !${Cursor.ID}
+                    /if (${Cursor.ID}) /call ForceClearCursor
+                    /return FALSE
+                }
             }
             /if (!${Cursor.ID}) {
                 /echo ${tgTag} \ar[BANK ITEM]\aw Failed to pick up ${biName} from bank${biBank} slot ${biSlot}.
@@ -5296,11 +5386,22 @@ Sub PullExactBankItemById(int wantItemId)
                 /if (${Cursor.ID}) /call ForceClearCursor
                 /return FALSE
             }
+            /if (${biWantQty} > 1) {
+                /varset biCursorStack ${Cursor.Stack}
+                /if (${biCursorStack} <= 0) /varset biCursorStack 1
+                /if (${biCursorStack} < ${biWantQty}) {
+                    /echo ${tgTag} \ar[BANK ITEM]\aw Cursor has ${biCursorStack}, need ${biWantQty} - returning.
+                    /autoinventory
+                    /delay 5 !${Cursor.ID}
+                    /if (${Cursor.ID}) /call ForceClearCursor
+                    /return FALSE
+                }
+            }
             /autoinventory
             /delay 10 !${Cursor.ID}
             /if (${Cursor.ID}) /call ForceClearCursor
             /if (${Cursor.ID}) /return FALSE
-            /echo ${tgTag} \ag[BANK ITEM]\aw Pulled ${biName} from bank${biBank} slot ${biSlot}.
+            /echo ${tgTag} \ag[BANK ITEM]\aw Pulled ${biWantQty}x ${biName} from bank${biBank} slot ${biSlot}.
             /return TRUE
         /next biSlot
     /next biBank
@@ -5332,7 +5433,7 @@ Sub BankSendMyItem(string recipientName, int wantItemId)
         /return
     }
 
-    /call PullExactBankItemById ${wantItemId}
+    /call PullExactBankItemById ${wantItemId} 1
     /if (!${Macro.Return.Equal[TRUE]}) {
         /if (${Window[BigBankWnd].Open}) {
             /notify BigBankWnd DoneButton leftmouseup
@@ -5349,6 +5450,52 @@ Sub BankSendMyItem(string recipientName, int wantItemId)
     /if (${wasFollowingBS}) /squelch /afollow unpause
 
     /call SendMyItem "${recipientName}" ${wantItemId}
+/return
+
+Sub BankSendMyStack(string recipientName, int wantItemId, int wantQty)
+    /if (!${recipientName.Length} || ${recipientName.Equal[NULL]} || ${recipientName.Equal[${Me.Name}]}) {
+        /echo ${tgTag} \ar[BANK SEND]\aw Invalid recipient '${recipientName}'.
+        /return
+    }
+    /if (${wantItemId} <= 0 || ${wantQty} <= 0) {
+        /echo ${tgTag} \ar[BANK SEND]\aw Invalid item id/qty (${wantItemId}x${wantQty}).
+        /return
+    }
+    /if (${Me.Feigning}) {
+        /echo ${tgTag} \ar[BANK SEND]\aw Cannot bank/give while feigned.
+        /return
+    }
+
+    /declare wasFollowingBSS bool local FALSE
+    /if (${AdvPath.Following}) {
+        /varset wasFollowingBSS TRUE
+        /squelch /afollow pause
+    }
+
+    /call AcquireTradeTarget "${recipientName}"
+    /if (!${_tradeTargetID}) {
+        /echo ${tgTag} \ar[BANK SEND]\aw Cannot target ${recipientName} as a PC (same zone / in range?).
+        /if (${wasFollowingBSS}) /squelch /afollow unpause
+        /return
+    }
+
+    /call PullExactBankItemById ${wantItemId} ${wantQty}
+    /if (!${Macro.Return.Equal[TRUE]}) {
+        /if (${Window[BigBankWnd].Open}) {
+            /notify BigBankWnd DoneButton leftmouseup
+            /delay 5 !${Window[BigBankWnd].Open}
+        }
+        /if (${wasFollowingBSS}) /squelch /afollow unpause
+        /return
+    }
+
+    /if (${Window[BigBankWnd].Open}) {
+        /notify BigBankWnd DoneButton leftmouseup
+        /delay 5 !${Window[BigBankWnd].Open}
+    }
+    /if (${wasFollowingBSS}) /squelch /afollow unpause
+
+    /call SendMyStack "${recipientName}" ${wantItemId} ${wantQty}
 /return
 
 Sub PickupExactBagItemById(int wantItemId)
@@ -5596,6 +5743,7 @@ Sub SendMyItem(string recipientName, int wantItemId)
 |   /mac turbogive send CHAR QTY Item Name...
 |   /mac turbogive send CHAR QTY id ITEMID
 |   /mac turbogive _sendstack CHAR ITEMID QTY
+|   /mac turbogive _banksendstack CHAR ITEMID QTY  (pull qty from bank, then SendMyStack)
 | =====================================================================
 | OPEN packs only (never toggle-close). rightmouseup on an already-open pack
 | closes it — that was causing Stock Even Out Have=0 / pickup fails mid-queue.
