@@ -3,6 +3,13 @@
   order Known -> Ready to Learn -> Pack Owned -> Missing. Multi-ability packs
   get one row per ability; hover shows Learned from only. Excludes unresolved
   Ancient: Malicious Onslaught and Jolting Thunderkicks packs.
+- DoN BiS Spells roster: per-character class columns (no shared cross-class
+  matrix). Section height is the max ability count among visible columns;
+  shorter classes leave blank cells. Lists sorted A-Z by ability name.
+- TurboLoot: LeavePausedOnFeignInvis setting (default ON). FD/Invis still
+  aborts loot; ON leaves combat paused, OFF resumes. Chat announce explains
+  /e3p off or /rgl unpause and where to toggle. Turbo INI Config footer
+  clipping fixed so Save/Reload/Open INI stay visible.
 
 1.2.65
 - Give Now / Give To (bank) confirm: Give 1, Give All (row qty), and Give Qty
