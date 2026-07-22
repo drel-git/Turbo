@@ -220,6 +220,135 @@ function M.beacon_fresh(seen_at, now, ttl_s)
     return age >= 0 and age <= ttl_s
 end
 
+local function norm_name(s)
+    return tostring(s or ""):lower():gsub("%s+", ""):match("^%s*(.-)%s*$") or ""
+end
+
+--- Build a stable group signature from member names (sorted, pipe-joined).
+function M.group_sig_from_names(names)
+    local clean = {}
+    for _, name in ipairs(type(names) == "table" and names or {}) do
+        local n = tostring(name or ""):match("^%s*(.-)%s*$") or ""
+        if n ~= "" then clean[#clean + 1] = n end
+    end
+    table.sort(clean, function(a, b) return a:lower() < b:lower() end)
+    return table.concat(clean, "|")
+end
+
+--- Look up the per-group coordinator record.
+function M.coordinator_record(coordinators, group_sig)
+    if type(coordinators) ~= "table" then return nil end
+    group_sig = tostring(group_sig or "")
+    if group_sig == "" then return nil end
+    local rec = coordinators[group_sig]
+    if type(rec) ~= "table" then return nil end
+    return rec
+end
+
+--- Sticky per-group claim decision for an announce-active UI.
+--- Returns: action ("refresh"|"claim"|"defer"|"skip"), holder_name, reason
+--- force_claim=true steals even when another holder is fresh.
+function M.coordinator_claim_decision(opts)
+    opts = opts or {}
+    local group_sig = tostring(opts.group_sig or "")
+    local me = tostring(opts.me_name or "")
+    local now = tonumber(opts.now) or 0
+    local ttl = tonumber(opts.ttl_s) or 90
+    if group_sig == "" or me == "" then
+        return "skip", "", "ungrouped"
+    end
+    local rec = M.coordinator_record(opts.coordinators, group_sig)
+    local holder = rec and tostring(rec.name or "") or ""
+    local seen_at = rec and tonumber(rec.seenAt) or 0
+    local fresh = M.beacon_fresh(seen_at, now, ttl)
+    if opts.force_claim == true then
+        return "claim", me, "force_claim"
+    end
+    if fresh and holder ~= "" and norm_name(holder) ~= norm_name(me) then
+        return "defer", holder, "other_holder"
+    end
+    if fresh and norm_name(holder) == norm_name(me) then
+        return "refresh", me, "self_holder"
+    end
+    return "claim", me, "vacant_or_stale"
+end
+
+--- Should this process defer chat-triggered [TG] emission?
+--- UI defers only when another same-group holder is fresh.
+--- Bg defers when same-group holder is fresh, or (fallback) legacy machine stamp.
+--- Returns defer(bool), reason, holder_name
+function M.should_defer_announce(opts)
+    opts = opts or {}
+    local group_sig = tostring(opts.group_sig or "")
+    local me = tostring(opts.me_name or "")
+    local now = tonumber(opts.now) or 0
+    local ttl = tonumber(opts.ttl_s) or 90
+    local is_bg = opts.is_bg == true
+    local rec = M.coordinator_record(opts.coordinators, group_sig)
+    local holder = rec and tostring(rec.name or "") or ""
+    local seen_at = rec and tonumber(rec.seenAt) or 0
+    if group_sig ~= "" and M.beacon_fresh(seen_at, now, ttl) and holder ~= "" then
+        if is_bg then
+            return true, "group_beacon", holder
+        end
+        if norm_name(holder) ~= norm_name(me) then
+            return true, "other_holder", holder
+        end
+        return false, "self_holder", holder
+    end
+    -- Legacy machine-wide stamp: older boxes / transition. Bg always defers;
+    -- UI only defers when the legacy stamp exists and we have no per-group claim
+    -- of our own (ungrouped UI should not silence itself forever).
+    local legacy = tonumber(opts.legacy_seen_at) or 0
+    if is_bg and M.beacon_fresh(legacy, now, ttl) then
+        return true, "legacy_beacon", holder
+    end
+    return false, "no_beacon", holder
+end
+
+--- Apply a claim/refresh into a coordinators table (mutates a copy-friendly shape).
+--- Returns updated table, changed(bool).
+function M.apply_coordinator_stamp(coordinators, group_sig, name, seen_at)
+    coordinators = type(coordinators) == "table" and coordinators or {}
+    group_sig = tostring(group_sig or "")
+    name = tostring(name or "")
+    seen_at = tonumber(seen_at) or 0
+    if group_sig == "" or name == "" or seen_at <= 0 then
+        return coordinators, false
+    end
+    local prev = coordinators[group_sig]
+    local same = type(prev) == "table"
+        and tostring(prev.name or "") == name
+        and tonumber(prev.seenAt) == seen_at
+    if same then return coordinators, false end
+    coordinators[group_sig] = { name = name, seenAt = seen_at }
+    return coordinators, true
+end
+
+--- Drop coordinator entries older than ttl (and empty keys).
+function M.prune_coordinators(coordinators, now, ttl_s)
+    coordinators = type(coordinators) == "table" and coordinators or {}
+    now = tonumber(now) or 0
+    ttl_s = tonumber(ttl_s) or 90
+    local out, changed = {}, false
+    for sig, rec in pairs(coordinators) do
+        if type(rec) == "table" and tostring(sig or "") ~= ""
+            and M.beacon_fresh(rec.seenAt, now, ttl_s * 2) then
+            out[sig] = rec
+        else
+            changed = true
+        end
+    end
+    if not changed then
+        local n = 0
+        for _ in pairs(coordinators) do n = n + 1 end
+        local m = 0
+        for _ in pairs(out) do m = m + 1 end
+        if n ~= m then changed = true end
+    end
+    return changed and out or coordinators, changed
+end
+
 -- TurboLoot GO mode outcome echo:
 --   [GOLOOT] starting Wand of Foo (ID: 141)
 --   [GOLOOT] looted Wand of Foo (ID: 141)

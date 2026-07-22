@@ -286,7 +286,9 @@ end
 local function sync_full()
     snapshot.invalidate()
     if state.engine_claim_disabled then
-        mq.cmd(cfg.soft_start_bg_command())
+        -- Ensure local bg only; do not /e3bcg soft-start the whole group.
+        local bg_name = tostring((cfg.CFG and cfg.CFG.bg_lua_name) or 'turbogear_bg')
+        mq.cmd('/squelch /lua run ' .. bg_name)
         mq.cmd('/squelch /tgearbg sync')
         pcall(function()
             if Store.reload_cache_if_changed then Store.reload_cache_if_changed(false)
@@ -294,8 +296,6 @@ local function sync_full()
         end)
         return
     end
-    if cfg.Settings.autoLaunch then cfg.launch_peers() end
-    if cfg.Settings.autoAddOnlinePeers ~= false then cfg.launch_all_online_peers() end
     Engine.publish(true, "full")
     Engine.request_all(true)
     Engine.begin_startup_sync(8.0)
@@ -371,7 +371,8 @@ local function draw_global_search_bar()
             ImGui.TableSetColumnIndex(3)
             if theme.themed_button("Sync Banks##tg_global_bank", Theme.purple, bank_w, 0) then
                 if state.engine_claim_disabled then
-                    mq.cmd(cfg.soft_start_bg_command())
+                    local bg_name = tostring((cfg.CFG and cfg.CFG.bg_lua_name) or 'turbogear_bg')
+                    mq.cmd('/squelch /lua run ' .. bg_name)
                     mq.cmd('/timed 5 /squelch /tgearbg sync')
                 else
                     Engine.sync_banks_network()
@@ -405,7 +406,8 @@ local function draw_global_search_bar()
     ImGui.SameLine()
     if theme.themed_button("Sync Banks##tg_global_bank", Theme.purple, bank_w, 0) then
         if state.engine_claim_disabled then
-            mq.cmd(cfg.soft_start_bg_command())
+            local bg_name = tostring((cfg.CFG and cfg.CFG.bg_lua_name) or 'turbogear_bg')
+            mq.cmd('/squelch /lua run ' .. bg_name)
             mq.cmd('/timed 5 /squelch /tgearbg sync')
         else
             Engine.sync_banks_network()

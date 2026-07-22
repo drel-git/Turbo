@@ -1,3 +1,21 @@
+1.2.68
+- Autostart safeguards: Sync / Sync Now / bank sync no longer broadcast
+  turbogear_autostart. UI open group soft-wakes once; all-online is Launch All
+  Online only. Peer discovery ignores empty ConnectedClients flaps.
+- Sticky per-group [TG] announce driver (SharedSettings announceCoordinators +
+  legacy stamp). Same-group UIs/bg defer; Become announce driver on Setup;
+  status shows holder. Characters pill footer notes it drives [TG] needer names.
+- Startup tools: Driver / Bot presets, confirm on multi-target Apply, target
+  list in preview, Stop extras (Gear UI/Rolls/Gains/Mobs; leave turbogear_bg).
+- BiS roster columns: equal viewport widths. Few characters grow to fill;
+  larger rosters keep about 6 visible then scroll. Narrow windows drop to
+  5/4. Scope changes reset table ids so fat left / slim right leftovers clear.
+
+1.2.67
+- Performance: fleet item-index rebuild is budgeted across frames. Focus/Stats/
+  Search keep last-good rows until a generation finishes (no mid-draw fleet
+  walk). Post-zone frame-work budget soft-ramps instead of jumping lean->stale.
+
 1.2.66
 - DoN BiS Spells: track each learned ability (not Spell/Tome Packs). Status
   order Known -> Ready to Learn -> Pack Owned -> Missing. Multi-ability packs

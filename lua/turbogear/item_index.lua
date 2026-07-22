@@ -2,6 +2,9 @@
 -- Flattens Store snapshots into cached searchable rows. The current box's
 -- cached live snapshot is overlaid so viewer-mode UIs do not show self-owned
 -- items as offline/cache when Store still has an older persisted copy.
+--
+-- Rebuilds are budgeted across ticks (M.tick): M.rows always holds the last
+-- complete index until a job finishes, then swaps atomically.
 
 local store = require('store')
 local Store = store.Store
@@ -14,6 +17,9 @@ local M = {
     self_signature = "",
     summary = { total = 0, withAnyStat = 0 },
 }
+
+-- In-progress rebuild. Never assigned to M.rows until complete.
+local job = nil
 
 local function safe_stats(stats)
     return type(stats) == "table" and stats or {}
@@ -260,42 +266,163 @@ local function build_summary(rows)
     return summary
 end
 
-function M.rebuild()
-    local rows = {}
+local function is_stale()
+    return M.content_version ~= (Store.content_version or 0)
+        or M.self_signature ~= self_index_signature()
+end
+
+local function job_targets_match(j)
+    if not j then return false end
+    return j.target_cv == (Store.content_version or 0)
+        and j.target_self_sig == self_index_signature()
+end
+
+local function collect_peer_sources(self_snap)
+    local peers = {}
+    for _, snap in pairs(Store.sources or {}) do
+        if type(snap) == "table" and snap.name then
+            if not (self_snap and same_owner(self_snap, snap)) then
+                peers[#peers + 1] = snap
+            end
+        end
+    end
+    table.sort(peers, function(a, b)
+        local an = clean_text(a.name)
+        local bn = clean_text(b.name)
+        if an ~= bn then return an < bn end
+        return clean_text(a.server) < clean_text(b.server)
+    end)
+    return peers
+end
+
+local function start_job()
+    local target_cv = Store.content_version or 0
+    local target_self_sig = self_index_signature()
     local self_snap = live_self_snapshot_for_index()
+    local rows = {}
     if self_snap then
         preserve_self_bank_cache(self_snap)
         add_equipped(rows, self_snap)
         add_storage(rows, self_snap)
     end
-    for _, snap in pairs(Store.sources or {}) do
-        if self_snap and same_owner(self_snap, snap) then goto continue_source end
-        add_equipped(rows, snap)
-        add_storage(rows, snap)
-        ::continue_source::
-    end
-    M.rows = rows
-    M.summary = build_summary(rows)
+    job = {
+        rows = rows,
+        peers = collect_peer_sources(self_snap),
+        peer_i = 1,
+        target_cv = target_cv,
+        target_self_sig = target_self_sig,
+        started_at = os.clock(),
+    }
+    return job
+end
+
+local function finish_job(j)
+    if not j then return M.rows, M.version end
+    M.rows = j.rows
+    M.summary = build_summary(j.rows)
     M.version = (M.version or 0) + 1
-    M.content_version = Store.content_version or 0
-    M.self_signature = self_index_signature()
+    M.content_version = j.target_cv
+    M.self_signature = j.target_self_sig
+    job = nil
     return M.rows, M.version
 end
 
+local function ensure_job(force)
+    if force or is_stale() then
+        if not job or not job_targets_match(job) then
+            start_job()
+        end
+        return true
+    end
+    return job ~= nil
+end
+
+--- Synchronous full rebuild (tests / rare explicit callers). Prefer get+tick.
+function M.rebuild()
+    start_job()
+    local j = job
+    while j and j.peer_i <= #(j.peers or {}) do
+        local snap = j.peers[j.peer_i]
+        j.peer_i = j.peer_i + 1
+        if snap then
+            add_equipped(j.rows, snap)
+            add_storage(j.rows, snap)
+        end
+    end
+    return finish_job(j)
+end
+
+--- Advance an in-progress rebuild within budget_ms. Returns true if a job finished.
+function M.tick(budget_ms)
+    if job and not job_targets_match(job) then
+        start_job()
+    end
+    if not job and is_stale() then
+        start_job()
+    end
+    local j = job
+    if not j then return false end
+
+    budget_ms = tonumber(budget_ms) or 4
+    if budget_ms < 0.25 then budget_ms = 0.25 end
+    local deadline = os.clock() + budget_ms / 1000
+    local processed = 0
+
+    while j.peer_i <= #(j.peers or {}) do
+        if os.clock() >= deadline and processed > 0 then break end
+        local snap = j.peers[j.peer_i]
+        j.peer_i = j.peer_i + 1
+        processed = processed + 1
+        if snap then
+            add_equipped(j.rows, snap)
+            add_storage(j.rows, snap)
+        end
+        if os.clock() >= deadline then break end
+    end
+
+    if j.peer_i > #(j.peers or {}) then
+        finish_job(j)
+        return true
+    end
+    return false
+end
+
+function M.building()
+    return job ~= nil
+end
+
 function M.get(force)
-    if force or M.content_version ~= (Store.content_version or 0) or M.self_signature ~= self_index_signature() then
+    force = force == true
+    -- Cold start: no last-good rows yet -> finish synchronously once so UI
+    -- does not flash empty. Later bumps use budgeted ticks.
+    if (#(M.rows or {}) == 0) and (force or is_stale()) then
+        return M.rebuild()
+    end
+    ensure_job(force)
+    return M.rows, M.version
+end
+
+function M.refresh()
+    ensure_job(true)
+    if #(M.rows or {}) == 0 then
         return M.rebuild()
     end
     return M.rows, M.version
 end
 
-function M.refresh()
-    return M.rebuild()
-end
-
 function M.get_summary()
     M.get(false)
     return M.summary or { total = 0, withAnyStat = 0, byStat = {} }
+end
+
+--- Test helper: drop in-flight job and published index.
+function M._reset_for_tests()
+    job = nil
+    M.rows = {}
+    M.version = 0
+    M.content_version = -1
+    M.self_signature = ""
+    M.summary = { total = 0, withAnyStat = 0 }
 end
 
 return M

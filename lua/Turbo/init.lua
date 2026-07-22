@@ -4548,6 +4548,41 @@ TG.normalizeStartupToolState = function()
     end
     if not anyTool then TG.startupToolSelections.turbo = true end
     if type(TG.startupToolTargets) ~= 'table' then TG.startupToolTargets = {} end
+    -- Collapse case duplicates (Ista / ista) into one canonical key.
+    local collapsed = {}
+    for name, on in pairs(TG.startupToolTargets) do
+        local clean = tostring(name or ''):match('^%s*(.-)%s*$') or ''
+        if clean ~= '' and on then
+            local key = clean:lower()
+            if not collapsed[key] then collapsed[key] = clean end
+        end
+    end
+    TG.startupToolTargets = {}
+    for _, clean in pairs(collapsed) do
+        TG.startupToolTargets[clean] = true
+    end
+end
+
+TG.startupToolTargetOn = function(name)
+    name = tostring(name or ''):match('^%s*(.-)%s*$') or ''
+    if name == '' then return false end
+    local want = name:lower()
+    for stored, on in pairs(TG.startupToolTargets or {}) do
+        if on and tostring(stored):lower() == want then return true end
+    end
+    return false
+end
+
+TG.setStartupToolTarget = function(name, on)
+    name = tostring(name or ''):match('^%s*(.-)%s*$') or ''
+    if name == '' then return end
+    local want = name:lower()
+    for stored, _ in pairs(TG.startupToolTargets or {}) do
+        if tostring(stored):lower() == want then
+            TG.startupToolTargets[stored] = nil
+        end
+    end
+    if on then TG.startupToolTargets[name] = true end
 end
 
 TG.selectedStartupToolList = function()
@@ -4720,8 +4755,32 @@ TG.repairStartupToolsForTargets = function()
     return repaired, skipped, failed
 end
 
+TG.startupToolConfirmNeeded = function()
+    -- Wide applies always confirm. Single-target (This box / one char) stays one-click.
+    return #TG.selectedStartupTargetList() >= 2
+end
+
+TG.applyStartupToolPreset = function(preset)
+    preset = tostring(preset or ''):lower()
+    TG.normalizeStartupToolState()
+    if type(TG.startupToolSelections) ~= 'table' then TG.startupToolSelections = {} end
+    for _, tool in ipairs(TG.startupToolChoices or {}) do
+        TG.startupToolSelections[tool.id] = false
+    end
+    if preset == 'driver' then
+        TG.startupToolSelections.turbo = true
+        TG.startupToolSelections.turbogear = true
+    elseif preset == 'bot' then
+        TG.startupToolSelections.turbowares = true
+    end
+    TG.startupToolsEnabled = true
+    TG.normalizeStartupToolState()
+    saveSettings()
+end
+
 TG.startupToolPreviewText = function()
     local tools = TG.selectedStartupToolList()
+    local targets = TG.selectedStartupTargetList()
     if #tools == 0 then return 'No tools selected.' end
     local delayStart = 100
     local delayStep = 50
@@ -4730,14 +4789,52 @@ TG.startupToolPreviewText = function()
         labels[#labels + 1] = tool.label
         ids[#ids + 1] = tool.id
     end
-    return string.format('Selected tools: %s\nWrites under E3 [Startup Commands]:\nCommand=/lua run Turbo/startup_tool %d %d %s',
-        table.concat(labels, ', '), delayStart, delayStep, table.concat(ids, ' '))
+    return string.format(
+        'Targets (%d): %s\nTools: %s\nWrites under E3 [Startup Commands]:\nCommand=/lua run Turbo/startup_tool %d %d %s',
+        #targets,
+        #targets > 0 and table.concat(targets, ', ') or '(this box)',
+        table.concat(labels, ', '),
+        delayStart, delayStep, table.concat(ids, ' '))
+end
+
+--- Stop Gear UI / Rolls / Gains / Mobs on selected targets. Leaves turbogear_bg
+--- (and soft-starts it) so linked-needs inventory sync can continue.
+TG.stopStartupExtrasOnTargets = function()
+    local targets = TG.selectedStartupTargetList()
+    local me = mq.TLO.Me.CleanName() or mq.TLO.Me.Name() or ''
+    me = tostring(me or '')
+    local stopScripts = { 'turbogear', 'TurboRolls', 'TurboMobs' }
+    local sent = 0
+    for _, name in ipairs(targets) do
+        local isSelf = me ~= '' and tostring(name):lower() == me:lower()
+        for _, script in ipairs(stopScripts) do
+            if isSelf then
+                mq.cmd('/squelch /lua stop ' .. script)
+            else
+                mq.cmdf('/squelch /e3bct %s /lua stop %s', name, script)
+            end
+        end
+        if isSelf then
+            mq.cmd('/squelch /lua run Turbo/gains_toggle stop')
+            mq.cmd('/squelch /lua run turbogear_autostart')
+        else
+            mq.cmdf('/squelch /e3bct %s /lua run Turbo/gains_toggle stop', name)
+            mq.cmdf('/squelch /e3bct %s /lua run turbogear_autostart', name)
+        end
+        sent = sent + 1
+    end
+    TG.statusMessage = string.format(
+        'Stop extras sent to %d character(s): stopped Gear UI/Rolls/Gains/Mobs; left/ensured turbogear_bg.',
+        sent)
+    return sent
 end
 
 TG.renderStartupToolsSetupPanel = function(tip)
     TG.normalizeStartupToolState()
     if not ImGui.CollapsingHeader('Startup tools###setup_startup_tools') then return end
-    tip('Choose which Turbo companion tools are written to selected characters\' E3 [Startup Commands].')
+    tip('Choose which Turbo companion tools are written to selected characters\' E3 [Startup Commands]. Startup targets are independent of Actions Mode.')
+
+    if TG.startupToolsConfirmPending == nil then TG.startupToolsConfirmPending = false end
 
     local function wrappedMuted(text)
         local avail = ImGui.GetContentRegionAvail()
@@ -4764,8 +4861,20 @@ TG.renderStartupToolsSetupPanel = function(tip)
         saveSettings()
     end
     tip('Master switch for Turbo companion startup commands. Apply writes/removes only Turbo-generated Command= startup lines.')
-    wrappedMuted('Apply writes one E3 Command= line to each selected character.')
+    wrappedMuted('Apply writes login INI only. It does not stop tools already running. Use Stop extras for live cleanup.')
     wrappedMuted('On login, Turbo/startup_tool starts the selected tools one at a time: first after 10s, then 5s apart.')
+    wrappedMuted('TurboGear UI belongs on announce drivers. Bots get turbogear_bg from the driver peer wake, not from Startup tools.')
+
+    ImGui.TextColored(0.65, 0.72, 0.9, 1.0, 'Presets')
+    if Ui.buttonVariant('Driver##startup_preset_driver', 'primaryButton', 100, 0) then
+        TG.applyStartupToolPreset('driver')
+    end
+    tip('Turbo + TurboGear UI for this team\'s announce/driver box. Add Rolls/Gains/Mobs manually if needed.')
+    ImGui.SameLine()
+    if Ui.buttonVariant('Bot / filler##startup_preset_bot', 'successButton', 110, 0) then
+        TG.applyStartupToolPreset('bot')
+    end
+    tip('TurboWares only. No Gear UI on login. Peer wake starts turbogear_bg when the driver needs inventory sync.')
 
     ImGui.TextColored(0.65, 0.72, 0.9, 1.0, 'Tools')
     local toolCols, toolW, toolGap = Ui.adaptiveColumns(3, 102, 4)
@@ -4781,28 +4890,41 @@ TG.renderStartupToolsSetupPanel = function(tip)
     end
 
     ImGui.TextColored(0.65, 0.72, 0.9, 1.0, 'Characters')
-    local roster = TG.collectOnlineCharacters and TG.collectOnlineCharacters() or {}
+    local onlineList = TG.collectOnlineCharacters and TG.collectOnlineCharacters() or {}
     local me = mq.TLO.Me.CleanName() or mq.TLO.Me.Name() or ''
-    local haveMe = false
-    for _, name in ipairs(roster) do
-        if tostring(name):lower() == tostring(me):lower() then haveMe = true break end
+    local onlineSet, roster, seenTarget = {}, {}, {}
+    local function addRoster(name, isOnline)
+        name = tostring(name or ''):match('^%s*(.-)%s*$') or ''
+        if name == '' or name == 'NOBODY' then return end
+        local key = name:lower()
+        if seenTarget[key] then return end
+        seenTarget[key] = true
+        if isOnline then onlineSet[key] = true end
+        roster[#roster + 1] = name
     end
-    if me ~= '' and me ~= 'NULL' and not haveMe then table.insert(roster, 1, me) end
+    for _, name in ipairs(onlineList) do addRoster(name, true) end
+    if me ~= '' and me ~= 'NULL' then addRoster(me, true) end
+    -- Keep selected offline names visible so they can be unchecked
+    -- (otherwise Preview shows them with no button).
+    for _, name in ipairs(TG.selectedStartupTargetList()) do
+        addRoster(name, false)
+    end
 
     if Ui.buttonVariant('This box##startup_targets_self', 'secondaryButton', 88, 0) then
         TG.startupToolTargets = {}
-        if me ~= '' and me ~= 'NULL' then TG.startupToolTargets[me] = true end
+        if me ~= '' and me ~= 'NULL' then TG.setStartupToolTarget(me, true) end
         saveSettings()
     end
     tip('Select only this character.')
     ImGui.SameLine()
     if Ui.buttonVariant('All online##startup_targets_all', 'secondaryButton', 92, 0) then
-        for _, name in ipairs(roster) do
-            if name and name ~= '' and name ~= 'NOBODY' then TG.startupToolTargets[name] = true end
+        for _, name in ipairs(onlineList) do
+            if name and name ~= '' and name ~= 'NOBODY' then TG.setStartupToolTarget(name, true) end
         end
+        if me ~= '' and me ~= 'NULL' then TG.setStartupToolTarget(me, true) end
         saveSettings()
     end
-    tip('Select all currently known online characters.')
+    tip('Select all currently known online characters. Writes every selected INI. Confirm before Apply on wide sets.')
     ImGui.SameLine()
     if Ui.buttonVariant('Clear##startup_targets_clear', 'secondaryButton', 70, 0) then
         TG.startupToolTargets = {}
@@ -4813,30 +4935,71 @@ TG.renderStartupToolsSetupPanel = function(tip)
     local targetCols, targetW, targetGap = Ui.adaptiveColumns(4, 78, 4)
     local targetIdx = 0
     for _, name in ipairs(roster) do
-        if name and name ~= '' and name ~= 'NOBODY' then
-            targetIdx = targetIdx + 1
-            Ui.gridSameLine(targetIdx, targetCols, targetGap)
-            local on = TG.startupToolTargets[name] == true
-            if Ui.buttonVariant(name .. '##startup_target_' .. name, on and 'primaryButton' or 'secondaryButton', targetW, 0) then
-                TG.startupToolTargets[name] = not on
-                saveSettings()
-            end
-            tip((on and 'Remove ' or 'Add ') .. name .. ' from the startup edit target list.')
+        targetIdx = targetIdx + 1
+        Ui.gridSameLine(targetIdx, targetCols, targetGap)
+        local on = TG.startupToolTargetOn(name)
+        local label = onlineSet[tostring(name):lower()] and name or (name .. ' (off)')
+        if Ui.buttonVariant(label .. '##startup_target_' .. name, on and 'primaryButton' or 'secondaryButton', targetW, 0) then
+            TG.setStartupToolTarget(name, not on)
+            saveSettings()
         end
+        tip((on and 'Remove ' or 'Add ') .. name .. ' from the startup edit target list.')
     end
 
     ImGui.TextColored(0.55, 0.62, 0.72, 1.0, 'Preview')
     wrappedMuted(TG.startupToolPreviewText())
     local applyLabel = (TG.startupToolsEnabled == true) and 'Apply startup tools##startup_tools_apply' or 'Remove startup tools##startup_tools_apply'
     if Ui.buttonVariant(applyLabel, TG.startupToolsEnabled == true and 'successButton' or 'secondaryButton', 154, 0) then
-        TG.applyStartupToolsToTargets(TG.startupToolsEnabled == true)
+        if TG.startupToolsEnabled == true and TG.startupToolConfirmNeeded() then
+            TG.startupToolsConfirmPending = true
+            if ImGui.OpenPopup then ImGui.OpenPopup('Confirm Startup Tools') end
+        else
+            TG.applyStartupToolsToTargets(TG.startupToolsEnabled == true)
+        end
     end
     tip('Writes the previewed E3 Command= startup line, or removes Turbo companion startup lines if Startup is OFF.')
+    ImGui.SameLine()
+    if Ui.buttonVariant('Stop extras##startup_tools_stop_extras', 'dangerButton', 110, 0) then
+        TG.stopStartupExtrasOnTargets()
+    end
+    tip('Live cleanup on selected characters: stop TurboGear UI, Rolls, Gains, Mobs; leave/ensure turbogear_bg. Does not change INI.')
     ImGui.SameLine()
     if Ui.buttonVariant('Repair duplicates##startup_tools_repair_dupes', 'secondaryButton', 136, 0) then
         TG.repairStartupToolsForTargets()
     end
     tip('Collapses duplicate E3 [Startup Commands] sections for the selected character INIs, preserving non-Turbo commands.')
+
+    if TG.startupToolsConfirmPending and ImGui.IsPopupOpen and not ImGui.IsPopupOpen('Confirm Startup Tools') then
+        if ImGui.OpenPopup then ImGui.OpenPopup('Confirm Startup Tools') end
+    end
+    if ImGui.BeginPopupModal and ImGui.BeginPopupModal('Confirm Startup Tools') then
+        local tools = TG.selectedStartupToolList()
+        local targets = TG.selectedStartupTargetList()
+        local labels = {}
+        for _, tool in ipairs(tools) do labels[#labels + 1] = tool.label end
+        ImGui.Text('Apply startup tools?')
+        ImGui.Separator()
+        wrappedMuted(string.format('Tools: %s\nCharacters (%d): %s\n\nThis only updates login INI. It does not stop tools already running. Use Stop extras for live cleanup.',
+            table.concat(labels, ', '),
+            #targets,
+            table.concat(targets, ', ')))
+        ImGui.Dummy(0, 6)
+        if ImGui.Button('Confirm##startup_tools_confirm', 120, 0) then
+            TG.applyStartupToolsToTargets(true)
+            TG.startupToolsConfirmPending = false
+            ImGui.CloseCurrentPopup()
+        end
+        ImGui.SameLine()
+        if ImGui.Button('Cancel##startup_tools_confirm_cancel', 120, 0) then
+            TG.startupToolsConfirmPending = false
+            ImGui.CloseCurrentPopup()
+        end
+        ImGui.EndPopup()
+    elseif TG.startupToolsConfirmPending and not ImGui.BeginPopupModal then
+        -- No modal support: apply directly after the flag was set.
+        TG.applyStartupToolsToTargets(true)
+        TG.startupToolsConfirmPending = false
+    end
 end
 
 require('Turbo.setup_status').install(TG, {

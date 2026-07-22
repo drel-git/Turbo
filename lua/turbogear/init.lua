@@ -538,9 +538,10 @@ local function tgear_command(...)
             mq.cmd('/timed 5 /squelch /tgearbg sync')
             print("[TurboGear] sync: delegated to local bg responder")
         else
+            -- Sync is publish + request only. Peer wake is Launch Group Peers /
+            -- Launch All Online (or UI-open group soft-wake) -- never rebroadcast
+            -- turbogear_autostart from sync (launch-storm footgun).
             Engine.publish(true, "full", { reason = "manual_sync" }); Engine.request_all(true)
-            if cfg.Settings.autoLaunch then cfg.launch_peers() end
-            if cfg.Settings.autoAddOnlinePeers ~= false then cfg.launch_all_online_peers() end
             print("[TurboGear] sync: full publish + requested peers")
         end
     elseif arg == "publish" or arg == "publishnow" or arg == "inventory" then
@@ -986,6 +987,13 @@ local function run_loop(inspect_tick, peer_refresh)
                         { allow_peers = true })
                 end)
             end
+            -- Keep fleet item-index warm when announcer.tick is skipped (passive bg).
+            pcall(function()
+                local budget = state.bg
+                    and (tonumber(CFG.item_index_budget_bg_ms) or 20)
+                    or (tonumber(CFG.item_index_budget_ms) or 4)
+                require('item_index').tick(budget)
+            end)
         else
             announcer.tick()
         end
@@ -1053,15 +1061,14 @@ end
 if state.show then
     -- Interactive driver: wake peers and pull fresh data right away. All actor
     -- work is delegated to the local bg responder that owns sync.
+    -- Group soft-wake once on UI open. All-online is explicit Launch All Online
+    -- only -- auto /e3bcaa here re-stormed fleets when many UIs started.
     if cfg.Settings.autoLaunch then
         mq.delay(50)
         if cfg.launch_peers() then
             peer_autostart.last_at = os.clock()
             peer_autostart.last_sig = group_roster_sig()
         end
-    end
-    if cfg.Settings.autoAddOnlinePeers ~= false then
-        cfg.launch_all_online_peers()
     end
     request_local_bg_start("startup sync")
     -- R5: gate the delegated sync on the bg readiness ack (deadline fallback)

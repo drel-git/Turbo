@@ -126,5 +126,49 @@ check(R.beacon_fresh(0, 1000, 90) == false, 'beacon: zero stamp never fresh')
 check(R.beacon_fresh(nil, 1000, 90) == false, 'beacon: nil stamp never fresh')
 check(R.beacon_fresh(2000, 1000, 90) == false, 'beacon: future stamp (clock skew) not fresh')
 
+-- sticky per-group coordinator election
+do
+    local sig = R.group_sig_from_names({ "Alghol", "Dhaimon" })
+    check(sig == "Alghol|Dhaimon", 'group_sig: two members sorted')
+    local coords = { [sig] = { name = "Alghol", seenAt = 1000 } }
+    local action, holder, reason = R.coordinator_claim_decision({
+        me_name = "Dhaimon", group_sig = sig, now = 1020, ttl_s = 90,
+        coordinators = coords,
+    })
+    check(action == "defer" and holder == "Alghol" and reason == "other_holder", 'claim: defer to sticky holder')
+    action, holder, reason = R.coordinator_claim_decision({
+        me_name = "Alghol", group_sig = sig, now = 1020, ttl_s = 90,
+        coordinators = coords,
+    })
+    check(action == "refresh" and reason == "self_holder", 'claim: self refreshes')
+    action, holder, reason = R.coordinator_claim_decision({
+        me_name = "Dhaimon", group_sig = sig, now = 1020, ttl_s = 90,
+        coordinators = coords, force_claim = true,
+    })
+    check(action == "claim" and reason == "force_claim", 'claim: force steals')
+    action = select(1, R.coordinator_claim_decision({
+        me_name = "Dhaimon", group_sig = sig, now = 1200, ttl_s = 90,
+        coordinators = coords,
+    }))
+    check(action == "claim", 'claim: stale beacon is vacant')
+    local defer, dreason = R.should_defer_announce({
+        is_bg = true, me_name = "Bot", group_sig = sig, now = 1020, ttl_s = 90,
+        coordinators = coords, legacy_seen_at = 0,
+    })
+    check(defer == true and dreason == "group_beacon", 'defer: bg defers to group holder')
+    defer, dreason = R.should_defer_announce({
+        is_bg = false, me_name = "Alghol", group_sig = sig, now = 1020, ttl_s = 90,
+        coordinators = coords, legacy_seen_at = 0,
+    })
+    check(defer == false and dreason == "self_holder", 'defer: holder UI does not defer')
+    defer, dreason = R.should_defer_announce({
+        is_bg = true, me_name = "Bot", group_sig = "", now = 1020, ttl_s = 90,
+        coordinators = {}, legacy_seen_at = 1000,
+    })
+    check(defer == true and dreason == "legacy_beacon", 'defer: bg uses legacy stamp')
+    local next_coords, changed = R.apply_coordinator_stamp({}, sig, "Alghol", 1000)
+    check(changed and next_coords[sig].name == "Alghol", 'stamp: writes record')
+end
+
 io.write(string.format('announce_rules: %d passed, %d failed\n', passed, failed))
 os.exit(failed == 0 and 0 or 1)

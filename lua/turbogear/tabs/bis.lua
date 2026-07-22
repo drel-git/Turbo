@@ -437,32 +437,67 @@ local function measure_slot_col_w(layout, layout_cfg)
     return math.min(math.max(max_w, min_w), cap)
 end
 
-local function cap_char_col_w_for_viewport(measured_w, num_keys, slot_w, layout_cfg, layout)
-    measured_w = tonumber(measured_w) or 96.0
+-- Equal character-column widths from the viewport budget:
+--   n <= 6  -> fill width equally (columns grow when few chars are shown)
+--   n > 6   -> size so ~6 fit; remainder scrolls (narrow windows drop to 5/4)
+-- Ultra stays glyph-narrow. measured cell text no longer widens columns
+-- (that left fat legacy columns when switching Group -> All Known).
+local function viewport_char_col_w(num_keys, slot_w, layout_cfg, layout)
+    local fit_target, few_max_w = 6, 360.0
     num_keys = math.max(1, tonumber(num_keys) or 1)
     slot_w = tonumber(slot_w) or 120.0
-    local floor_w = tonumber(layout_cfg and layout_cfg.min_col_w) or 88.0
-    local cfg_cap = tonumber(layout_cfg and layout_cfg.max_col_w) or 196.0
-    if layout == "ultra" then return tonumber(layout_cfg and layout_cfg.col_w) or floor_w end
+    layout_cfg = layout_cfg or {}
+    if layout == "ultra" then
+        return tonumber(layout_cfg.col_w) or tonumber(layout_cfg.min_col_w) or 44.0
+    end
+
+    local floor_w = tonumber(layout_cfg.min_col_w) or 88.0
+    local many_cap = tonumber(layout_cfg.max_col_w) or 196.0
     local compact_short = layout == "compact" and not Settings.bisCompactFullNames
     if compact_short then
-        floor_w = tonumber(layout_cfg and layout_cfg.fit_w) or floor_w
-        measured_w = math.max(measured_w, floor_w)
-        -- Short-name compact mode is usually 88px, but on wide monitors a
-        -- moderate roster should fill the viewport instead of leaving a blank
-        -- right side. Very large rosters keep the compact fixed-scroll width.
-        cfg_cap = num_keys <= 12 and 170.0 or floor_w
+        floor_w = tonumber(layout_cfg.fit_w) or floor_w
+        many_cap = math.max(many_cap, 120.0)
     end
+    local readable = floor_w
+    if compact_short then
+        readable = math.max(72.0, floor_w - 8.0)
+    elseif layout == "normal" or Settings.bisCompactFullNames then
+        readable = math.max(110.0, math.min(floor_w, 140.0))
+    end
+
     local avail = stable_avail_x()
     if avail <= 0 then avail = 800.0 end
     local budget = math.max(120.0, avail - slot_w - 28.0)
-    local equal = math.floor(budget / num_keys)
-    if num_keys > 12 and cfg_cap > 160 then cfg_cap = 160 end
-    local desired = math.max(measured_w, floor_w)
-    if num_keys <= 12 and equal > desired then
-        desired = equal
+
+    local target = math.min(num_keys, fit_target)
+    while target > 1 and (budget / target) < readable do
+        target = target - 1
     end
-    return math.min(desired, cfg_cap)
+
+    local col_w
+    if num_keys <= fit_target then
+        col_w = budget / num_keys
+        local few_cap = math.max(many_cap, math.min(few_max_w, budget / num_keys))
+        col_w = math.min(col_w, few_cap)
+    else
+        col_w = math.min(budget / target, many_cap)
+    end
+    return math.max(floor_w, col_w)
+end
+
+local function roster_table_id(prefix, keys)
+    keys = keys or {}
+    local h = #keys * 17
+    for i, key in ipairs(keys) do
+        local s = tostring(key or "")
+        h = (h + (#s * (i + 3)) + (string.byte(s, 1) or 0) * i) % 1000003
+    end
+    return string.format("%s_%s_%s_n%d_%d",
+        tostring(prefix or "BiSRost"),
+        tostring(Settings.bisRosterScope or "x"),
+        tostring(Settings.bisViewKey or "all"):gsub("[^%w_]", ""):sub(1, 24),
+        #keys,
+        h)
 end
 
 local function measure_roster_char_col_w(keys, layout, layout_cfg)
@@ -1014,12 +1049,11 @@ local function roster_table_flags(use_fixed)
 end
 
 local function roster_use_fixed_columns(layout, key_count)
+    -- Always fixed+equal character columns so Group -> All Known cannot leave
+    -- stretch leftovers (fat left columns + slim newcomers). Width comes from
+    -- viewport_char_col_w (few chars grow; many chars fit ~6 then scroll).
     key_count = tonumber(key_count) or 0
-    if layout == "ultra" then return true end
-    -- A single group should use the whole window on wide monitors. Larger
-    -- rosters keep the fixed-column horizontal-scroll behavior.
-    if layout == "compact" then return key_count > 6 end
-    return false
+    return key_count > 0 or layout == "ultra"
 end
 
 local function draw_slot_column_cell(rec)
@@ -2292,16 +2326,7 @@ local function draw_catalog_roster(list_id)
     local short_header = layout ~= "normal"
     local slot_col_w = roster_cache.slot_col_w or layout_cfg.slot_w or 145.0
     local use_fixed_columns = roster_use_fixed_columns(layout, #keys)
-    local char_col_w = nil
-    if use_fixed_columns then
-        char_col_w = cap_char_col_w_for_viewport(
-            roster_cache.measured_char_col_w or layout_cfg.min_col_w,
-            #keys,
-            slot_col_w,
-            layout_cfg,
-            layout
-        )
-    end
+    local char_col_w = viewport_char_col_w(#keys, slot_col_w, layout_cfg, layout)
     local layout_cfg_use = {
         col_w = char_col_w or layout_cfg.col_w,
         slot_w = slot_col_w,
@@ -2309,7 +2334,8 @@ local function draw_catalog_roster(list_id)
         glyph = layout_cfg.glyph,
         min_col_w = layout_cfg.min_col_w,
         max_col_w = layout_cfg.max_col_w,
-        fit_w = layout_cfg.fit_w,
+        -- Clip item text to the live column width (grows when few chars show).
+        fit_w = (layout == "ultra") and layout_cfg.fit_w or math.max(40.0, (char_col_w or 88.0) - 10.0),
     }
     local cols = 1 + #keys
     if cols < 1 then return end
@@ -2317,7 +2343,11 @@ local function draw_catalog_roster(list_id)
     -- a layout oscillator when it toggled. Horizontal scroll still works as before.)
     local table_flags = roster_table_flags(use_fixed_columns)
     local table_h = stable_bis_roster_table_h(44.0, 220.0)
-    if views.begin_scroll_table("BiSCatalogRoster", cols, table_flags, 44.0, 220.0, table_h) then
+    -- Id includes roster scope/count/sig so Group -> All Known drops ImGui's
+    -- previous column widths (fat left + slim right). Resizable still allowed;
+    -- the next roster change equalizes again.
+    local table_id = roster_table_id("BiSCatalogRoster", keys)
+    if views.begin_scroll_table(table_id, cols, table_flags, 44.0, 220.0, table_h) then
         local ok, err = pcall(function()
             ImGui.TableSetupColumn("Slot", ImGuiTableColumnFlags.WidthFixed, layout_cfg_use.slot_w or 145.0)
             for _, key in ipairs(keys) do
@@ -2328,7 +2358,7 @@ local function draw_catalog_roster(list_id)
                 local col_flags, col_w = char_column_flags(char_col_w, layout)
                 ImGui.TableSetupColumn(hdr .. "##col_" .. tostring(key), col_flags, col_w)
             end
-            views.setup_scroll_freeze("BiSCatalogRoster", 1, 1)
+            views.setup_scroll_freeze(table_id, 1, 1)
             ImGui.TableNextRow()
             ImGui.TableSetColumnIndex(0); col_text(Theme.header or Theme.item, "Slot")
             if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then

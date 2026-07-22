@@ -35,7 +35,7 @@ M.CFG = {
     script_name  = 'TurboGear',    -- display/settings/cache name
     lua_name     = 'turbogear',     -- folder/module name used by /lua run and /lua stop
     bg_lua_name  = 'turbogear_bg',  -- wrapper responder name; leaves /lua run turbogear free for UI
-    version      = '1.2.66',
+    version      = '1.2.68',
     mailbox      = 'turbogear',     -- shared actor mailbox name across all boxes
     proto        = 1,              -- snapshot protocol version (guards mismatched boxes)
     frame_round  = 5.0,
@@ -82,6 +82,8 @@ M.CFG = {
     publish_jitter_s = 2.0,
     peer_soft_sync_delay_s = 3.0,   -- wait for bg script to register before requesting snapshots
     peer_autostart_settle_s = 1.5,  -- coalesce staggered group-roster repopulation (zone-ins) before soft-launch
+    peer_discovery_empty_hold_s = 20.0, -- ignore empty ConnectedClients polls this long (flap guard)
+    announce_coordinator_group_settle_s = 1.5, -- debounce groupSig changes before re-claiming beacon
     all_online_autostart_cooldown_s = 5.0, -- short guard against multi-team launch storms
     bis_announce_cooldown_s = 1.8, -- duplicate suppression after chat + actor reports
     announce_snap_max_age_s = 60.0, -- chat uses cached context; candidate ownership is checked live
@@ -119,11 +121,15 @@ M.CFG = {
     needs_index_budget_lean_ms = 2, -- minimized/lean should yield quickly while zoning/running
     needs_index_budget_bg_ms = 25, -- bg responder (no render) builds local + peer needs
     needs_index_budget_stale_ms = 20, -- lean/UI boost when oldest queued rebuild exceeds stale age
-    needs_index_stale_queue_s = 60,   -- oldestQueue age that triggers the stale budget boost
+    needs_index_stale_queue_s = 60,   -- oldestQueue age that starts the stale budget ramp
+    needs_index_stale_ramp_s = 60,    -- seconds after stale_queue_s to reach full stale frame budget
+    item_index_budget_ms = 4,      -- fleet item-index rebuild budget per tick (UI)
+    item_index_budget_lean_ms = 2, -- minimized/lean item-index tick
+    item_index_budget_bg_ms = 20,  -- bg responder item-index tick
     frame_work_budget_ms = 10,     -- P5: per-tick ceiling for background build work (catalog warm + needs index) on the UI
     frame_work_budget_lean_ms = 6, -- minimized/lean: keep frames snappy while moving/zoning
     frame_work_budget_bg_ms = 40,  -- bg responder can spend more; no render to protect
-    frame_work_budget_stale_ms = 30, -- lean frame ceiling while the needs-index queue is stale
+    frame_work_budget_stale_ms = 30, -- lean frame ceiling at full stale ramp (soft-ramped from lean)
     delta_publish_enabled = true,  -- send changed-slot deltas immediately on inventory change
     delta_max_items = 24,          -- above this many changed slots, rely on the full publish instead
     inventory_watch_enabled = true,
@@ -343,6 +349,10 @@ M.SharedSettings = {
     bisAnnounceListenGuild = false, -- listen for item links in guild chat (off by default)
     bisAnnounceListenOoc = false,   -- listen for item links in OOC (off by default)
     announceUseActor = true,        -- broadcast LOOT_LINK to peers (reliable; chat remains fallback)
+    -- Legacy machine-wide stamp (kept for older boxes). Newer builds also write
+    -- announceCoordinators[groupSig] = { name, seenAt } for sticky per-group election.
+    announceCoordinatorSeenAt = 0,
+    announceCoordinators = {},
     ignoredChars = {},              -- normalized char name -> display name; muted/forgotten, hidden & not scanned (fleet-wide)
     characterSets = {},             -- id -> { name, members = { normalized char name -> display name } }
 }
@@ -637,6 +647,10 @@ function M.sanitize_ui_settings()
     if type(M.SharedSettings.characterSets) ~= "table" then
         M.SharedSettings.characterSets = {}
     end
+    if type(M.SharedSettings.announceCoordinators) ~= "table" then
+        M.SharedSettings.announceCoordinators = {}
+    end
+    M.SharedSettings.announceCoordinatorSeenAt = tonumber(M.SharedSettings.announceCoordinatorSeenAt) or 0
     if M.SharedSettings.announceUseActor == nil then
         M.SharedSettings.announceUseActor = true
     end

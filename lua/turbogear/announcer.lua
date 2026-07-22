@@ -14,6 +14,7 @@ local item_actions = require('item_actions')
 local diag = require('diagnostics')
 local Store = require('store').Store
 local needs_index = require('needs_index')
+local item_index = require('item_index')
 local rules = require('announce_rules')
 local roster_sets = require('roster_sets')
 
@@ -134,31 +135,161 @@ local function item_announce_cooldown_s()
     return math.max(0, tonumber(CFG.announce_item_cooldown_s) or 30)
 end
 
--- Coordinator beacon: while a driver UI is announce-active it stamps shared
--- settings; bg responders on the same machine defer their chat-triggered
--- announces to it ("driver-first"). Staleness (driver closed/crashed) makes
--- bg boxes resume automatically. The fleet-wide [TG] dedupe remains the
--- safety net for warm-up races and multi-PC fleets.
+-- Sticky per-group coordinator beacon: announce-active UIs claim/refresh a
+-- {name,seenAt} record keyed by groupSig. Same-group UIs and bgs defer while
+-- that holder is fresh. Legacy announceCoordinatorSeenAt is dual-written for
+-- older boxes. Fleet [TG] dedupe remains the cross-PC backstop.
 local coordinator_beacon_next = 0
+local coordinator_force_claim = false
+local coordinator_group = { pending_sig = "", pending_since = 0, settled_sig = "" }
+
+local function live_group_member_names()
+    local names, seen = {}, {}
+    local function add(name)
+        name = tostring(name or ""):match("^%s*(.-)%s*$") or ""
+        local key = name:lower()
+        if name == "" or seen[key] then return end
+        seen[key] = true
+        names[#names + 1] = name
+    end
+    pcall(function()
+        add(me_name())
+        local group = mq.TLO.Group
+        local n = tonumber(group and group.Members and group.Members()) or 0
+        -- Include 0..n: some builds put self at 0; others only list others at 1..n.
+        for i = 0, n do
+            local member = group.Member(i)
+            local name = member and member.Name and member.Name() or ""
+            add(name)
+        end
+    end)
+    return names
+end
+
+local function settled_group_sig()
+    local raw = rules.group_sig_from_names(live_group_member_names())
+    local now = os.clock()
+    local settle = tonumber(CFG.announce_coordinator_group_settle_s) or 1.5
+    if raw == "" then
+        coordinator_group.pending_sig = ""
+        coordinator_group.pending_since = 0
+        coordinator_group.settled_sig = ""
+        return ""
+    end
+    if raw == coordinator_group.settled_sig then
+        coordinator_group.pending_sig = ""
+        coordinator_group.pending_since = 0
+        return raw
+    end
+    if coordinator_group.pending_sig ~= raw then
+        coordinator_group.pending_sig = raw
+        coordinator_group.pending_since = now
+        return coordinator_group.settled_sig
+    end
+    if (now - (tonumber(coordinator_group.pending_since) or 0)) < settle then
+        return coordinator_group.settled_sig
+    end
+    coordinator_group.settled_sig = raw
+    coordinator_group.pending_sig = ""
+    coordinator_group.pending_since = 0
+    return raw
+end
+
+local function coordinator_ttl()
+    return tonumber(CFG.announce_coordinator_ttl_s) or 90
+end
+
+local function coordinator_status_label()
+    local now = os.time()
+    local ttl = coordinator_ttl()
+    local group_sig = settled_group_sig()
+    local defer, reason, holder = rules.should_defer_announce({
+        is_bg = state.bg == true,
+        me_name = me_name(),
+        group_sig = group_sig,
+        now = now,
+        ttl_s = ttl,
+        coordinators = SharedSettings.announceCoordinators,
+        legacy_seen_at = SharedSettings.announceCoordinatorSeenAt,
+    })
+    if state.bg == true then
+        if defer then
+            return holder ~= "" and ("deferring to " .. holder) or "deferring to driver"
+        end
+        return "announcing (no driver beacon)"
+    end
+    if SharedSettings.bisAnnounceEnabled == false or passive then return "off" end
+    if defer then
+        return holder ~= "" and ("deferring to " .. holder) or "deferring"
+    end
+    if group_sig == "" then return "announce driver (ungrouped)" end
+    return "announce driver (this group)"
+end
 
 local function tick_coordinator_beacon()
     if state.bg == true or passive then return end
     if SharedSettings.bisAnnounceEnabled == false then return end
-    local now = os.clock()
-    if now < coordinator_beacon_next then return end
-    coordinator_beacon_next = now + math.max(10, tonumber(CFG.announce_coordinator_beacon_s) or 30)
-    SharedSettings.announceCoordinatorSeenAt = os.time()
-    pcall(function()
-        if cfg.SaveSharedSettings then cfg.SaveSharedSettings() end
-    end)
+    local now_clock = os.clock()
+    if now_clock < coordinator_beacon_next then return end
+    coordinator_beacon_next = now_clock + math.max(10, tonumber(CFG.announce_coordinator_beacon_s) or 30)
+
+    local group_sig = settled_group_sig()
+    local now = os.time()
+    local ttl = coordinator_ttl()
+    local me = me_name()
+    if type(SharedSettings.announceCoordinators) ~= "table" then
+        SharedSettings.announceCoordinators = {}
+    end
+    local pruned, pruned_changed = rules.prune_coordinators(
+        SharedSettings.announceCoordinators, now, ttl)
+    if pruned_changed then SharedSettings.announceCoordinators = pruned end
+
+    local action = select(1, rules.coordinator_claim_decision({
+        me_name = me,
+        group_sig = group_sig,
+        now = now,
+        ttl_s = ttl,
+        coordinators = SharedSettings.announceCoordinators,
+        force_claim = coordinator_force_claim,
+    }))
+    coordinator_force_claim = false
+    if action ~= "claim" and action ~= "refresh" then return end
+
+    local coords, changed = rules.apply_coordinator_stamp(
+        SharedSettings.announceCoordinators, group_sig, me, now)
+    SharedSettings.announceCoordinators = coords
+    -- Dual-write legacy stamp so older boxes still defer coarsely.
+    local legacy_changed = (tonumber(SharedSettings.announceCoordinatorSeenAt) or 0) ~= now
+    SharedSettings.announceCoordinatorSeenAt = now
+    if changed or legacy_changed or pruned_changed then
+        pcall(function()
+            if cfg.SaveSharedSettings then cfg.SaveSharedSettings() end
+        end)
+    end
 end
 
-local function coordinator_active()
-    if state.bg ~= true then return false end
-    return rules.beacon_fresh(
-        SharedSettings.announceCoordinatorSeenAt,
-        os.time(),
-        tonumber(CFG.announce_coordinator_ttl_s) or 90)
+local function should_defer_chat_announce()
+    local defer = rules.should_defer_announce({
+        is_bg = state.bg == true,
+        me_name = me_name(),
+        group_sig = settled_group_sig(),
+        now = os.time(),
+        ttl_s = coordinator_ttl(),
+        coordinators = SharedSettings.announceCoordinators,
+        legacy_seen_at = SharedSettings.announceCoordinatorSeenAt,
+    })
+    return defer == true
+end
+
+function M.become_announce_driver()
+    coordinator_force_claim = true
+    coordinator_beacon_next = 0
+    tick_coordinator_beacon()
+    return coordinator_status_label()
+end
+
+function M.coordinator_label()
+    return coordinator_status_label()
 end
 
 -- The dedupe maps only ever gained keys; prune entries that are far past
@@ -1926,11 +2057,10 @@ local function try_process_chat(line, allow_queue, opts)
     if #links > 0 and not opts.replay and is_player_link_chat_line(line) then
         remember_recent_replay(line, links, "chat")
     end
-    -- Driver-first: while a driver UI is announce-active (fresh beacon), bg
-    -- responders stay quiet for chat-triggered needs - the driver's cache scan
-    -- covers every character. Link capture, replay memory, and [TG] dedupe
-    -- recording above still ran, so nothing else degrades.
-    if state.bg == true and coordinator_active() then
+    -- Sticky per-group driver-first: same-group non-holders (UI or bg) stay
+    -- quiet for chat-triggered needs. Link capture / replay / [TG] dedupe above
+    -- still ran.
+    if should_defer_chat_announce() then
         runtime.last_chat_note = "driver coordinator"
         return false
     end
@@ -2486,12 +2616,7 @@ function M.status()
             if ok and type(st) == "table" then return st end
             return { ready = false, chars = 0, items = 0, queued = 0, rebuilds = 0, age_s = -1 }
         end)(),
-        coordinator = (function()
-            if state.bg ~= true then
-                return SharedSettings.bisAnnounceEnabled ~= false and not passive and "driver" or "off"
-            end
-            return coordinator_active() and "deferring to driver" or "announcing (no driver beacon)"
-        end)(),
+        coordinator = coordinator_status_label(),
         link_capture = (function()
             local seen = 0
             for _ in pairs(announce_seen) do seen = seen + 1 end
@@ -2558,9 +2683,9 @@ function M.tick()
         end
 
         -- Single per-frame work budget (P5): the background build steps below
-        -- (catalog warm + needs-index) draw down from ONE deadline so their
-        -- individually-small budgets can't sum into a visible frame spike. The
-        -- time-sensitive announce drains further down are NOT gated by this.
+        -- (catalog warm + needs-index + item-index) draw down from ONE deadline
+        -- so their individually-small budgets can't sum into a visible frame
+        -- spike. Time-sensitive announce drains further down are NOT gated.
         local frame_budget_ms
         local oldest_queue_s = 0
         if index_enabled then
@@ -2568,16 +2693,23 @@ function M.tick()
             if ok_age then oldest_queue_s = tonumber(age) or 0 end
         end
         local stale_s = tonumber(CFG.needs_index_stale_queue_s) or 60
+        local ramp_s = math.max(1, tonumber(CFG.needs_index_stale_ramp_s) or 60)
         local index_stale = oldest_queue_s >= stale_s
+        -- Soft-ramp: lean -> stale budget over [stale_s, stale_s+ramp_s] instead
+        -- of jumping 6ms -> 30ms the moment the queue ages past stale_s.
+        local stale_t = 0
+        if index_stale then
+            stale_t = math.min(1, (oldest_queue_s - stale_s) / ramp_s)
+        end
+        local lean_frame = tonumber(CFG.frame_work_budget_lean_ms) or 6
+        local stale_frame = tonumber(CFG.frame_work_budget_stale_ms)
+            or tonumber(CFG.frame_work_budget_ms) or 30
         if state.bg then
             frame_budget_ms = tonumber(CFG.frame_work_budget_bg_ms) or 40
         elseif index_stale then
-            -- Announce driver is lean/minimized but the needs queue is aging:
-            -- temporarily spend like a light bg tick so warm-up finishes.
-            frame_budget_ms = tonumber(CFG.frame_work_budget_stale_ms)
-                or tonumber(CFG.frame_work_budget_ms) or 30
+            frame_budget_ms = lean_frame + (stale_frame - lean_frame) * stale_t
         elseif state.lean and state.lean() then
-            frame_budget_ms = tonumber(CFG.frame_work_budget_lean_ms) or 6
+            frame_budget_ms = lean_frame
         else
             frame_budget_ms = tonumber(CFG.frame_work_budget_ms) or 10
         end
@@ -2611,7 +2743,10 @@ function M.tick()
             if state.bg then
                 idx_budget = tonumber(CFG.needs_index_budget_bg_ms) or 25
             elseif index_stale then
-                idx_budget = tonumber(CFG.needs_index_budget_stale_ms) or 20
+                local lean_idx = tonumber(CFG.needs_index_budget_lean_ms)
+                    or tonumber(CFG.needs_index_budget_ms) or 4
+                local stale_idx = tonumber(CFG.needs_index_budget_stale_ms) or 20
+                idx_budget = lean_idx + (stale_idx - lean_idx) * stale_t
             elseif state.lean and state.lean() then
                 idx_budget = tonumber(CFG.needs_index_budget_lean_ms) or tonumber(CFG.needs_index_budget_ms) or 4
             else
@@ -2624,6 +2759,25 @@ function M.tick()
             if remaining_ms < idx_budget then idx_budget = remaining_ms end
             if idx_budget >= 1 then
                 needs_index.tick(idx_budget, { allow_peers = allow_peer_index })
+            end
+        end
+        -- Fleet item-index (Focus/Stats/Search): budgeted peer walks; UI serves
+        -- last-good rows until tick finishes a generation.
+        do
+            local ii_budget
+            if state.bg then
+                ii_budget = tonumber(CFG.item_index_budget_bg_ms) or 20
+            elseif state.lean and state.lean() then
+                ii_budget = tonumber(CFG.item_index_budget_lean_ms) or 2
+            else
+                ii_budget = tonumber(CFG.item_index_budget_ms) or 4
+            end
+            local remaining_ms = (frame_deadline - os.clock()) * 1000
+            if remaining_ms < ii_budget then ii_budget = remaining_ms end
+            if ii_budget >= 0.5 then
+                diag.time("item_index.tick", function()
+                    item_index.tick(ii_budget)
+                end)
             end
         end
         diag.time("announce.pending", function()

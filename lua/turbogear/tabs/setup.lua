@@ -351,6 +351,18 @@ local function draw_turbobis_settings()
         end
         ImGui.EndCombo()
     end
+    if themed_button("Become announce driver##setup_become_coord", Theme.purple) then
+        local label = announcer.become_announce_driver and announcer.become_announce_driver() or "?"
+        ul_status = "Announce driver: " .. tostring(label)
+    end
+    if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
+        ImGui.SetTooltip("Claim sticky [TG] announce driver for your current EQ group. Other same-group TurboGear UIs defer while you hold it.")
+    end
+    do
+        local coord = announcer.coordinator_label and announcer.coordinator_label() or "?"
+        col_text(Theme.dim, "Announce driver: " .. tostring(coord))
+        col_text(Theme.dim, "Needer names follow BiS Characters Source + columns. Selected List pill is viewing only; [TG] uses all announce-enabled lists.")
+    end
     if BIS_ANNOUNCE_PRESETS[SharedSettings.bisAnnounceIdx or 2] and BIS_ANNOUNCE_PRESETS[SharedSettings.bisAnnounceIdx or 2].cmd == nil then
         ImGui.SameLine(); ImGui.SetNextItemWidth(140.0)
         local nv = ImGui.InputText("##setup_bisannouncecustom", SharedSettings.bisAnnounceCustom or "/g") or "/g"
@@ -1071,7 +1083,8 @@ function M.draw()
     ImGui.Spacing()
     if theme.sync_button("Sync Now") then
         if runtime_state.engine_claim_disabled then
-            mq.cmd(cfg.soft_start_bg_command())
+            local bg_name = tostring((cfg.CFG and cfg.CFG.bg_lua_name) or 'turbogear_bg')
+            mq.cmd('/squelch /lua run ' .. bg_name)
             mq.cmd('/timed 5 /squelch /tgearbg sync')
             ul_status = "Sync requested through the local TurboGear bg responder."
         else
@@ -1079,14 +1092,13 @@ function M.draw()
             lockouts.invalidate_cache()
             Engine.publish(true, "full")
             Engine.request_all(true)
-            if cfg.Settings.autoLaunch then cfg.launch_peers() end
-            if cfg.Settings.autoAddOnlinePeers ~= false then cfg.launch_all_online_peers() end
         end
     end
     ImGui.SameLine()
     if themed_button("Sync Banks", Theme.purple) then
         if runtime_state.engine_claim_disabled then
-            mq.cmd(cfg.soft_start_bg_command())
+            local bg_name = tostring((cfg.CFG and cfg.CFG.bg_lua_name) or 'turbogear_bg')
+            mq.cmd('/squelch /lua run ' .. bg_name)
             mq.cmd('/timed 5 /squelch /tgearbg sync')
             ul_status = "Bank sync requested through the local TurboGear bg responder."
         else
@@ -1178,14 +1190,14 @@ function M.draw()
             Settings.autoLaunch = not Settings.autoLaunch; SaveSettings()
         end
         if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
-            ImGui.SetTooltip("When TurboGear UI starts and on Sync Now, ask grouped peers to run the bg responder. New group members get a private /e3bct autostart (not repeated group spam).")
+            ImGui.SetTooltip("When TurboGear UI starts, ask grouped peers to run the bg responder once. New group members get a private /e3bct autostart. Sync Now does not rebroadcast launches.")
         end
         ImGui.SameLine()
         if toggle_button(Settings.autoAddOnlinePeers ~= false and "Auto-add online peers: ON" or "Auto-add online peers: OFF", Settings.autoAddOnlinePeers ~= false) then
             Settings.autoAddOnlinePeers = not (Settings.autoAddOnlinePeers ~= false); SaveSettings()
         end
         if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
-            ImGui.SetTooltip("Uses the selected All transport to ask online clients to run turbogear_autostart on startup and Sync Now.")
+            ImGui.SetTooltip("When ON, peer discovery can soft-start newly seen online clients via /e3bct. All-online broadcast is Launch All Online only (not Sync Now / UI startup).")
         end
         ImGui.SameLine()
         if toggle_button(Settings.peerDiscoveryEnabled ~= false and "Detect logins: ON" or "Detect logins: OFF", Settings.peerDiscoveryEnabled ~= false) then

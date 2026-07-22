@@ -15,6 +15,9 @@ local state = {
     last_set = {},
     request_at = 0,
     last_status = "idle",
+    -- Flap guard: ConnectedClients can briefly go empty under load; clearing
+    -- last_set then makes everyone look "new" and re-storms soft-starts.
+    empty_since = 0,
 }
 
 local function trim(s)
@@ -123,6 +126,19 @@ function M.tick(Engine)
     local names = provider.names()
     local sig = names_signature(names)
     local current = names_set(names)
+
+    -- Ignore empty / near-empty polls until stable so a flap does not wipe last_set.
+    local empty_hold = tonumber(cfg.CFG and cfg.CFG.peer_discovery_empty_hold_s) or 20.0
+    if #names == 0 then
+        if state.empty_since <= 0 then state.empty_since = now end
+        if (now - state.empty_since) < empty_hold then
+            state.last_status = string.format("%s: empty poll held (flap guard)", provider.label)
+            return
+        end
+    else
+        state.empty_since = 0
+    end
+
     local new_names = {}
     for _, name in ipairs(names) do
         Store.discover_peer(name, providerName)

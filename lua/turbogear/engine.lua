@@ -819,10 +819,6 @@ function Engine.sync_banks_network()
         Engine.publish(true, "full", { reason = "network_bank_sync" })
         Engine.last_bank_capture = os.clock()
     end
-    pcall(function()
-        if cfg.Settings.autoLaunch then cfg.launch_peers() end
-        if cfg.Settings.autoAddOnlinePeers ~= false then cfg.launch_all_online_peers() end
-    end)
     Engine.request_all(true, { depth = "full" })
     Engine.begin_startup_sync(8.0)
     set_sync_hint(local_open and "Bank synced; requesting peer banks..." or "Requesting peer banks. Open bank on the owner first.", 4.0)

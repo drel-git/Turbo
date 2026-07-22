@@ -236,7 +236,7 @@ end
 local adapters = {
     bis = make_roster_adapter(
         "bisRosterScope", "bisViewKey", "bisViewSelectedChars", "bis",
-        {}, "Source + columns + teams drive this BiS roster"),
+        {}, "Source + columns + teams drive this BiS roster and [TG] needer names"),
     -- Live Peers / All Known: never set include_offline_cache on these adapters.
     -- That flag forces offline cache rows into the "online" (Live Peers) scope,
     -- making Live Peers identical to All Known. All Known already includes
