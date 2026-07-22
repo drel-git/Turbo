@@ -202,6 +202,136 @@ local function gather_live_stats()
     return stats
 end
 
+--- Wallet / DoN totals: alt-currency + matching bag stacks (FindItemCount only).
+local function fill_wallet_fields(snap)
+    if type(snap) ~= "table" then return snap end
+    pcall(function()
+        local e = mq.TLO.Me.EbonCrystals()
+        if e ~= nil then snap.ebon_crystals = tonumber(e) end
+    end)
+    pcall(function()
+        local p = mq.TLO.Me.Platinum()
+        if p ~= nil then snap.platinum = tonumber(p) end
+    end)
+    pcall(function()
+        local t = mq.TLO.Me.AltCurrency('Diamond Coins')
+        local n = t and t() or nil
+        if n == nil then
+            t = mq.TLO.Me.AltCurrency(20)
+            n = t and t() or nil
+        end
+        local alt = n ~= nil and tonumber(n) or nil
+        local bag = tonumber(mq.TLO.FindItemCount('=Diamond Coin')()) or 0
+        if alt ~= nil then
+            snap.diamond_coins = alt + bag
+        elseif bag > 0 then
+            snap.diamond_coins = bag
+        end
+    end)
+    pcall(function()
+        local f = mq.TLO.Me.CurrentFavor()
+        if f ~= nil then snap.tribute_favor = tonumber(f) end
+    end)
+    pcall(function()
+        local t = mq.TLO.Me.AltCurrency('Celestial Crests')
+        local n = t and t() or nil
+        if n == nil then
+            t = mq.TLO.Me.AltCurrency('Celestial Crest')
+            n = t and t() or nil
+        end
+        local alt = n ~= nil and tonumber(n) or nil
+        local bag = tonumber(mq.TLO.FindItemCount('=Celestial Crest')()) or 0
+        if alt ~= nil then
+            snap.celestial_crests = alt + bag
+        elseif bag > 0 then
+            snap.celestial_crests = bag
+        end
+    end)
+    pcall(function()
+        local alt = mq.TLO.Me.RadiantCrystals()
+        local altN = alt ~= nil and tonumber(alt) or nil
+        local bag = tonumber(mq.TLO.FindItemCount('=Radiant Crystal')()) or 0
+        if altN ~= nil then
+            snap.radiant_crystals = altN + bag
+        elseif bag > 0 then
+            snap.radiant_crystals = bag
+        end
+    end)
+    pcall(function()
+        local a = mq.TLO.Me.AAPoints()
+        if a ~= nil then snap.aa_unspent = tonumber(a) end
+    end)
+    return snap
+end
+
+function M.wallet_signature(snap)
+    if type(snap) ~= "table" then return "" end
+    return table.concat({
+        tostring(snap.platinum or ""),
+        tostring(snap.diamond_coins or ""),
+        tostring(snap.radiant_crystals or ""),
+        tostring(snap.ebon_crystals or ""),
+        tostring(snap.tribute_favor or ""),
+        tostring(snap.celestial_crests or ""),
+        tostring(snap.aa_unspent or ""),
+    }, "|")
+end
+
+--- Cheap wallet-only gather (no inventory walk). For Fleet $ live refresh.
+function M.gather_wallet()
+    local snap = {
+        name = mq.TLO.Me.CleanName() or "?",
+        server = mq.TLO.MacroQuest.Server() or "?",
+        class = mq.TLO.Me.Class.Name() or "?",
+        level = mq.TLO.Me.Level() or 0,
+        updated = os.time(),
+        depth = "wallet",
+        proto = CFG.proto,
+    }
+    fill_wallet_fields(snap)
+    return snap
+end
+
+--- Compact E3 var payload: t<unix>:p:d:r:f:c:a  (no spaces/pipes)
+function M.encode_wallet_e3(snap)
+    if type(snap) ~= "table" then return "" end
+    local function n(v)
+        if v == nil then return "" end
+        return tostring(math.floor(tonumber(v) or 0))
+    end
+    return string.format("t%d:p%s:d%s:r%s:f%s:c%s:a%s",
+        tonumber(snap.updated) or os.time(),
+        n(snap.platinum), n(snap.diamond_coins), n(snap.radiant_crystals),
+        n(snap.tribute_favor), n(snap.celestial_crests), n(snap.aa_unspent))
+end
+
+function M.decode_wallet_e3(text)
+    text = tostring(text or "")
+    if text == "" or text == "NULL" then return nil end
+    local map = {}
+    for piece in string.gmatch(text, "[^:]+") do
+        local k, v = piece:match("^(%a)(.*)$")
+        if k then map[k] = v end
+    end
+    local function num(v)
+        if v == nil or v == "" then return nil end
+        return tonumber(v)
+    end
+    local p, d, r, f, c, a = num(map.p), num(map.d), num(map.r), num(map.f), num(map.c), num(map.a)
+    if p == nil and d == nil and r == nil and f == nil and c == nil and a == nil then
+        return nil
+    end
+    return {
+        updated = num(map.t),
+        plat = p,
+        dc = d,
+        rc = r,
+        favor = f,
+        crests = c,
+        aa = a,
+    }
+end
+
 local function build_snap(depth, opts)
     opts = opts or {}
     local now = os.time()
@@ -226,15 +356,8 @@ local function build_snap(depth, opts)
         bankCapturedAt = bank_open and now or nil,
         bankReason = bank_open and "live" or "bank window closed; cached bank preserved if available",
     }
-    -- DoN header extras (crystals): nil means unknown — never invent 0 on TLO failure.
-    pcall(function()
-        local r = mq.TLO.Me.RadiantCrystals()
-        if r ~= nil then snap.radiant_crystals = tonumber(r) end
-    end)
-    pcall(function()
-        local e = mq.TLO.Me.EbonCrystals()
-        if e ~= nil then snap.ebon_crystals = tonumber(e) end
-    end)
+    -- Wallet extras (cheap TLOs + FindItemCount; not a bag walk).
+    fill_wallet_fields(snap)
     pcall(function()
         diag.context("snapshot.inventory", string.format("depth=%s bankOpen=%s scanBank=%s",
             tostring(depth), tostring(bank_open == true), tostring(bank_open == true)))

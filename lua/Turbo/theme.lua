@@ -327,6 +327,13 @@ M.component = {
         hover = {155,120,60,255},
         text = {255,226,145,255},
     },
+    -- Fleet wallet `$` chrome: teal (Conversions / TurboKey family), not amber
+    -- (amber is minimize `-` and Currency gold).
+    walletButton = {
+        base = {45,115,125,255},
+        hover = {65,145,155,255},
+        text = {210,245,250,255},
+    },
     windowToggleButton = {
         base = {116,84,42,220},
         hover = {145,108,58,245},

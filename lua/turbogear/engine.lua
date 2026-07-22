@@ -36,6 +36,7 @@ local MSG = {
     REQUEST = 'request',
     SNAPSHOT = 'snapshot',
     SNAPSHOT_DELTA = 'snapshot_delta',
+    WALLET = 'wallet',
     HEARTBEAT = 'heartbeat',
     LIST_SHARE = 'list_share',
     LIST_REQUEST = 'list_request',
@@ -306,6 +307,10 @@ local function on_message(message)
                 Engine.request_source(key, true, { fastInventory = true })
             end)
         end
+    elseif c.type == MSG.WALLET and c.snap then
+        Engine.stats.rx_wallet = (Engine.stats.rx_wallet or 0) + 1
+        dprint("rx WALLET from %s/%s", tostring(c.snap.name), tostring(c.snap.server))
+        pcall(function() Store.put_wallet(c.snap, c.kind or 'client') end)
     elseif c.type == MSG.HEARTBEAT and c.snap then
         dprint("rx HEARTBEAT from %s/%s", tostring(c.snap.name), tostring(c.snap.server))
         Store.touch(c.snap, c.kind)
@@ -591,7 +596,14 @@ function Engine.publish(force, depth, opts)
     end
 
     local sig = snapshot.lite_signature(snap)
+    local wsig = snapshot.wallet_signature and snapshot.wallet_signature(snap) or ""
     if not force and sig == Engine.last_publish_sig then
+        -- Inventory unchanged: still ship wallet-only if currency moved (PP/CC/etc).
+        if wsig ~= "" and wsig ~= tostring(Engine.last_wallet_sig or "") then
+            if Engine.publish_wallet then
+                return Engine.publish_wallet(snap, { reason = publish_reason .. "_wallet" })
+            end
+        end
         Engine.last_publish = os.clock()
         schedule_next_publish(Engine.last_publish)
         Engine.stats.tx_skip = (Engine.stats.tx_skip or 0) + 1
@@ -610,6 +622,7 @@ function Engine.publish(force, depth, opts)
     end
 
     Engine.last_publish_sig = sig
+    Engine.last_wallet_sig = wsig
     Engine.last_publish = os.clock()
     schedule_next_publish(Engine.last_publish)
     Engine.stats.tx_snap = Engine.stats.tx_snap + 1
@@ -628,12 +641,60 @@ function Engine.publish(force, depth, opts)
     pcall(function() require('inventory_watch').note_published_snapshot(snap) end)
     if opts.saveNow == true then
         Store.save()
+    else
+        pcall(function() Store.flush_wallet_sidecar() end)
     end
     diag.event("engine.publish", string.format("sent reason=%s force=%s depth=%s eq=%d bag=%d bank=%d save=%s",
         publish_reason, tostring(force), tostring(depth), #(snap.equipped or {}), #(snap.bags or {}), #(snap.bank or {}),
         tostring(opts.saveNow == true)))
     return true
     end)
+end
+
+--- Tiny wallet-only publish (no bag walk). Also sets E3 TurboFW for Fleet live reads.
+function Engine.publish_wallet(snap, opts)
+    opts = type(opts) == "table" and opts or {}
+    if type(snap) ~= "table" or not snap.name or snap.name == "?" then
+        snap = snapshot.gather_wallet and snapshot.gather_wallet() or nil
+    end
+    if type(snap) ~= "table" or not snap.name or snap.name == "?" then return false end
+    local wsig = snapshot.wallet_signature and snapshot.wallet_signature(snap) or ""
+    if opts.force ~= true and wsig ~= "" and wsig == tostring(Engine.last_wallet_sig or "") then
+        return false
+    end
+    Engine.last_wallet_sig = wsig
+    Engine.stats.tx_wallet = (Engine.stats.tx_wallet or 0) + 1
+    -- Live E3 var for Fleet $ (remote Mono query; no sidecar wait).
+    pcall(function()
+        local enc = snapshot.encode_wallet_e3 and snapshot.encode_wallet_e3(snap) or ""
+        if enc ~= "" then mq.cmdf('/squelch /e3varset TurboFW %s', enc) end
+    end)
+    if Engine.ok then
+        send_mail("wallet", {
+            type = MSG.WALLET,
+            proto = CFG.proto,
+            kind = 'client',
+            snap = {
+                name = snap.name,
+                server = snap.server,
+                class = snap.class,
+                level = snap.level,
+                updated = snap.updated or os.time(),
+                depth = 'wallet',
+                platinum = snap.platinum,
+                diamond_coins = snap.diamond_coins,
+                radiant_crystals = snap.radiant_crystals,
+                ebon_crystals = snap.ebon_crystals,
+                tribute_favor = snap.tribute_favor,
+                celestial_crests = snap.celestial_crests,
+                aa_unspent = snap.aa_unspent,
+            },
+        })
+    end
+    pcall(function() Store.put_wallet(snap, 'client') end)
+    diag.event("engine.publish_wallet", string.format("reason=%s name=%s",
+        tostring(opts.reason or "wallet"), tostring(snap.name)))
+    return true
 end
 
 -- Publish a snapshot the caller already gathered. Inventory-watch uses this to
@@ -661,7 +722,11 @@ function Engine.publish_snapshot(snap, opts)
             tostring(state.bg == true), tostring(state.lean and state.lean() or false)))
 
         local sig = snapshot.lite_signature(snap)
+        local wsig = snapshot.wallet_signature and snapshot.wallet_signature(snap) or ""
         if opts.force ~= true and sig == Engine.last_publish_sig then
+            if wsig ~= "" and wsig ~= tostring(Engine.last_wallet_sig or "") then
+                return Engine.publish_wallet(snap, { reason = publish_reason .. "_wallet" })
+            end
             Engine.last_publish = os.clock()
             schedule_next_publish(Engine.last_publish)
             Engine.stats.tx_skip = (Engine.stats.tx_skip or 0) + 1
@@ -679,6 +744,7 @@ function Engine.publish_snapshot(snap, opts)
         end
 
         Engine.last_publish_sig = sig
+        Engine.last_wallet_sig = wsig
         Engine.last_publish = os.clock()
         schedule_next_publish(Engine.last_publish)
         Engine.stats.tx_snap = Engine.stats.tx_snap + 1
@@ -694,6 +760,8 @@ function Engine.publish_snapshot(snap, opts)
         pcall(function() require('inventory_watch').note_published_snapshot(snap) end)
         if opts.saveNow == true then
             Store.save()
+        else
+            pcall(function() Store.flush_wallet_sidecar() end)
         end
         diag.event("engine.publish_snapshot", string.format("sent reason=%s depth=%s eq=%d bag=%d bank=%d save=%s",
             publish_reason, tostring(snap.depth or ""), #(snap.equipped or {}), #(snap.bags or {}), #(snap.bank or {}),

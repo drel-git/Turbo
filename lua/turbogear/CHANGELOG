@@ -1,3 +1,19 @@
+1.2.69
+- Fleet wallet: teal $ chrome opens a sticky peer currency panel (gold Turbo
+  outline). Stays open when Turbo is Mini. Scope Group / E3 / Live / Picks;
+  currency PP / DC / RC / CC; columns PP / DC / RC / Fav / CC / AA (Columns
+  toggles, Picks editor only in Picks scope).
+- Live peer amounts via turbo_wallet_ping files while open. Self is live TLOs
+  (alt + bag for DC/RC/CC). Peers refresh on open / Refresh / Get·Send·Collect·
+  Pool, and after trade or merchant close (wallet-only changes republish).
+- Ops: per-row Get / Send; footer Collect / Pool to selected. Shared Amount All
+  or a number applies to Get, Send, Collect, and Pool. Settings persist scope,
+  currency, picks, columns, and amount.
+- Collectors and TurboGive: turbo_collect_rc / turbo_collect_crests with amount
+  caps; cash/DC collectors honor amount; send modes for PP/DC/RC/CC.
+- TurboGear: snapshot and cache keep wallet fields (plat, DC, RC, favor, crests,
+  AA) so peer sidecar data is not stripped on save.
+
 1.2.68
 - Autostart safeguards: Sync / Sync Now / bank sync no longer broadcast
   turbogear_autostart. UI open group soft-wakes once; all-online is Launch All

@@ -569,6 +569,24 @@ local function tgear_command(...)
             inventory_watch.note_change(true, full)
             print(full and "[TurboGear] note: urgent full dirty marked" or "[TurboGear] note: urgent lite dirty marked")
         end
+    elseif arg == "wallet" then
+        -- Fleet $ live path: cheap TLO wallet gather + E3 TurboFW + actor WALLET.
+        -- No inventory bag walk. Safe to poke while Fleet wallet is open.
+        if not state.bg then
+            request_local_bg_start("wallet command")
+            mq.cmd('/timed 1 /squelch /tgearbg wallet')
+            -- Still set E3 var from UI process so Mono query works immediately.
+            pcall(function()
+                local snap = require('snapshot').gather_wallet()
+                local enc = require('snapshot').encode_wallet_e3(snap)
+                if enc and enc ~= "" then mq.cmdf('/squelch /e3varset TurboFW %s', enc) end
+                require('store').Store.put_wallet(snap, 'client')
+            end)
+            print("[TurboGear] wallet: published local E3 TurboFW + delegated bg actor")
+        else
+            local ok = Engine.publish_wallet(nil, { reason = "manual_wallet", force = true })
+            print(ok and "[TurboGear] wallet: published" or "[TurboGear] wallet: unchanged/skip")
+        end
     elseif arg == "spellsync" then
         -- Spell-book round trip. The Spells tab delegates here because the UI
         -- never owns the actor mailbox (static roles).

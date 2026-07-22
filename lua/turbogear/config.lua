@@ -35,7 +35,7 @@ M.CFG = {
     script_name  = 'TurboGear',    -- display/settings/cache name
     lua_name     = 'turbogear',     -- folder/module name used by /lua run and /lua stop
     bg_lua_name  = 'turbogear_bg',  -- wrapper responder name; leaves /lua run turbogear free for UI
-    version      = '1.2.68',
+    version      = '1.2.69',
     mailbox      = 'turbogear',     -- shared actor mailbox name across all boxes
     proto        = 1,              -- snapshot protocol version (guards mismatched boxes)
     frame_round  = 5.0,
@@ -65,7 +65,7 @@ M.CFG = {
         "turbogear", "turbogear_bg", "turbogear_autostart",
         "TurboMobs", "turbomobs_logic", "TurboRolls",
         "ToggleTurboLoot", "ToggleMeleeDist",
-        "turbo_bank_all", "turbo_collect_cash", "turbo_collect_dc", "turbo_reclaim_lotto",
+        "turbo_bank_all", "turbo_collect_cash", "turbo_collect_dc", "turbo_collect_rc", "turbo_collect_crests", "turbo_reclaim_lotto",
     },
     save_every_bg_s = 30.0,        -- debounce bg cache writes; actors carry live updates without disk stalls
     -- After inventory content_version bumps (put/delta), flush sooner so the UI
@@ -144,6 +144,7 @@ M.CFG = {
 local me = mq.TLO.Me.CleanName() or "char"
 M.SettingsFile = string.format("%s/%s_%s.lua", mq.configDir, M.CFG.script_name, me)
 M.CacheFile    = string.format("%s/%s_cache.lua", mq.configDir, M.CFG.script_name)
+M.WalletFile   = string.format("%s/%s_wallet.lua", mq.configDir, M.CFG.script_name) -- lean fleet-wallet sidecar
 M.DbFile       = string.format("%s/%s_cache.db", mq.configDir, M.CFG.script_name)  -- Phase 3 SQLite backend
 M.BgReadyFile  = string.format("%s/%s_bgready", mq.configDir, M.CFG.script_name)   -- R5 bg-responder readiness ack
 M.PatchLockFile = string.format("%s/turbo_patch.lock", mq.configDir)              -- patcher writes this to stop Turbo before updating

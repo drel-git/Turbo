@@ -167,6 +167,13 @@ local TG = {
     confirmSingleReviewRules = true,
     showReviewModeButtons = true,
     showQuickStartButton = true,
+    --- Fleet wallet `$` popup: group | e3 | live | picks
+    fleetWalletScope = 'group',
+    fleetWalletCurrency = 'rc',
+    fleetWalletPicks = {},
+    fleetWalletForgotten = {},
+    fleetWalletColumns = { pp = true, dc = true, rc = true, fav = true, cc = true, aa = true },
+    fleetWalletAmount = '',
     quickStartDismissed = false,
     --- Suite update check (remote CHANGELOG); default on. Throttled in Turbo.update_check.
     checkForUpdates = true,
@@ -1478,6 +1485,29 @@ saveSettings = function()
     f:write(string.format('  confirmSingleReviewRules = %s,\n', tostring(TG.confirmSingleReviewRules ~= false)))
     f:write(string.format('  showReviewModeButtons = %s,\n', tostring(TG.showReviewModeButtons ~= false)))
     f:write(string.format('  showQuickStartButton = %s,\n', tostring(TG.showQuickStartButton ~= false)))
+    f:write(string.format('  fleetWalletScope = %q,\n', tostring(TG.fleetWalletScope or 'group')))
+    f:write(string.format('  fleetWalletCurrency = %q,\n', tostring(TG.fleetWalletCurrency or 'rc')))
+    f:write('  fleetWalletPicks = {\n')
+    for k, v in pairs(TG.fleetWalletPicks or {}) do
+        if v then f:write(string.format('    [%q] = true,\n', tostring(k))) end
+    end
+    f:write('  },\n')
+    f:write('  fleetWalletForgotten = {\n')
+    for k, v in pairs(TG.fleetWalletForgotten or {}) do
+        if v then f:write(string.format('    [%q] = true,\n', tostring(k))) end
+    end
+    f:write('  },\n')
+    f:write('  fleetWalletColumns = {\n')
+    do
+        local cols = TG.fleetWalletColumns or {}
+        for _, key in ipairs({ 'pp', 'dc', 'rc', 'fav', 'cc', 'aa' }) do
+            local on = cols[key]
+            if on == nil then on = true end
+            f:write(string.format('    %s = %s,\n', key, tostring(on == true)))
+        end
+    end
+    f:write('  },\n')
+    f:write(string.format('  fleetWalletAmount = %q,\n', tostring(TG.fleetWalletAmount or '')))
     f:write(string.format('  quickStartDismissed = %s,\n', tostring(TG.quickStartDismissed == true)))
     f:write(string.format('  quickStartSeen = %s,\n', tostring(TG.quickStartSeen == true)))
     f:write(string.format('  checkForUpdates = %s,\n', tostring(TG.checkForUpdates ~= false)))
@@ -1605,6 +1635,27 @@ local function applySettingsTable(tbl)
     if tbl.confirmSingleReviewRules ~= nil then TG.confirmSingleReviewRules = tbl.confirmSingleReviewRules ~= false end
     if tbl.showReviewModeButtons ~= nil then TG.showReviewModeButtons = tbl.showReviewModeButtons ~= false end
     if tbl.showQuickStartButton ~= nil then TG.showQuickStartButton = tbl.showQuickStartButton ~= false end
+    if type(tbl.fleetWalletScope) == 'string' and tbl.fleetWalletScope ~= '' then
+        TG.fleetWalletScope = tbl.fleetWalletScope
+    end
+    if type(tbl.fleetWalletCurrency) == 'string' and tbl.fleetWalletCurrency ~= '' then
+        TG.fleetWalletCurrency = tbl.fleetWalletCurrency
+    end
+    if type(tbl.fleetWalletPicks) == 'table' then TG.fleetWalletPicks = tbl.fleetWalletPicks end
+    if type(tbl.fleetWalletForgotten) == 'table' then TG.fleetWalletForgotten = tbl.fleetWalletForgotten end
+    if type(tbl.fleetWalletColumns) == 'table' then
+        TG.fleetWalletColumns = {
+            pp = tbl.fleetWalletColumns.pp ~= false,
+            dc = tbl.fleetWalletColumns.dc ~= false,
+            rc = tbl.fleetWalletColumns.rc ~= false,
+            fav = tbl.fleetWalletColumns.fav ~= false,
+            cc = tbl.fleetWalletColumns.cc ~= false,
+            aa = tbl.fleetWalletColumns.aa ~= false,
+        }
+    end
+    if type(tbl.fleetWalletAmount) == 'string' then
+        TG.fleetWalletAmount = tbl.fleetWalletAmount:gsub('%D', '')
+    end
     if tbl.quickStartDismissed ~= nil then TG.quickStartDismissed = tbl.quickStartDismissed == true end
     if tbl.quickStartSeen ~= nil then TG.quickStartSeen = tbl.quickStartSeen == true end
     if tbl.checkForUpdates ~= nil then TG.checkForUpdates = tbl.checkForUpdates ~= false end
@@ -5854,14 +5905,22 @@ end
 
 --- Footer (Full + Slim): Tools menu + Wallet panel.
 local TURBO_FOOTER_TOOLS_POPUP = 'TurboFooterTools##popup'
-local TURBO_FOOTER_WALLET_POPUP = 'TurboFooterWallet##popup'
 TG.TURBO_FOOTER_HELP_POPUP = 'TurboFooterHelp##popup'
 
 --- Cached wallet values — refreshed on AUTO_REFRESH_MS timer alongside collectGroupMembers.
 --- Avoids per-frame TLO calls when wallet strip is always visible.
-local cachedWallet = { plat=0, aa=0, dc=0, favor=0, lastUpdateMS=0 }
+local cachedWallet = { plat=0, aa=0, dc=0, favor=0, rc=0, crests=0, lastUpdateMS=0 }
+
+local function walletBagCount(itemName)
+    -- Exact-name bag count only (single TLO; not a bag walk).
+    local ok, n = pcall(function()
+        return tonumber(mq.TLO.FindItemCount('=' .. itemName)()) or 0
+    end)
+    return (ok and n) or 0
+end
 
 local function refreshWalletCache()
+    -- Spendable totals = alt-currency window + matching bag stacks (create/reclaim items).
     cachedWallet.plat  = tonumber(mq.TLO.Me.Platinum() or 0) or 0
     cachedWallet.aa    = tonumber(mq.TLO.Me.AAPoints() or 0) or 0
     cachedWallet.dc    = 0
@@ -5869,68 +5928,37 @@ local function refreshWalletCache()
         local t = mq.TLO.Me.AltCurrency('Diamond Coins')
         return t and tonumber(t()) or 0
     end)
-    if ok then cachedWallet.dc = dc end
+    if ok then cachedWallet.dc = dc + walletBagCount('Diamond Coin') end
     local ok2, fav = pcall(function()
         return tonumber(mq.TLO.Me.CurrentFavor() or 0) or 0
     end)
     cachedWallet.favor = ok2 and fav or 0
+    local ok3, rc = pcall(function()
+        return tonumber(mq.TLO.Me.RadiantCrystals() or 0) or 0
+    end)
+    if ok3 then cachedWallet.rc = rc + walletBagCount('Radiant Crystal') end
+    local ok4, crests = pcall(function()
+        local t = mq.TLO.Me.AltCurrency('Celestial Crests')
+        local n = t and tonumber(t()) or nil
+        if n == nil then
+            t = mq.TLO.Me.AltCurrency('Celestial Crest')
+            n = t and tonumber(t()) or nil
+        end
+        return n or 0
+    end)
+    if ok4 then cachedWallet.crests = crests + walletBagCount('Celestial Crest') end
     cachedWallet.lastUpdateMS = mq.gettime()
 end
 
-local function readAltCurrencyAmount(name)
-    local ok, v = pcall(function()
-        local t = mq.TLO.Me.AltCurrency(name)
-        if not t then return nil end
-        local n = t()
-        if n == nil then return nil end
-        return tonumber(n) or 0
-    end)
-    if ok and type(v) == 'number' then return v end
-    return 0
-end
-
-local function readTributeFavor()
-    local ok, v = pcall(function()
-        local n = mq.TLO.Me.CurrentFavor()
-        if n == nil then return 0 end
-        return tonumber(n) or 0
-    end)
-    if ok and type(v) == 'number' then return v end
-    return 0
-end
-
-local function imguiWalletValueLines()
-    local plat = mq.TLO.Me.Platinum() or 0
-    local aa = mq.TLO.Me.AAPoints() or 0
-    local dc = readAltCurrencyAmount('Diamond Coins')
-    local favor = readTributeFavor()
-    ImGui.TextColored(Colors.plat[1], Colors.plat[2], Colors.plat[3], 1.0, string.format('Plat: %s', tostring(plat)))
-    ImGui.TextColored(Colors.aa[1], Colors.aa[2], Colors.aa[3], 1.0, string.format('AA: %s', tostring(aa)))
-    ImGui.TextColored(0.72, 0.80, 0.95, 1.0, string.format('Diamond Coins: %s', tostring(dc)))
-    ImGui.TextColored(0.82, 0.70, 0.95, 1.0, string.format('Tribute favor: %s', tostring(favor)))
-end
-
---- Hover hint on Wallet button (values live in the Wallet popup).
-local function tooltipWalletSummaryOnHover()
-    if not ImGui.IsItemHovered() then return end
-    ImGui.BeginTooltip()
-    ImGui.PushTextWrapPos(ImGui.GetFontSize() * 30.0)
-    ImGui.Text('Plat, AA, Diamond Coins, tribute favor — click for live panel.')
-    ImGui.PopTextWrapPos()
-    ImGui.EndTooltip()
-end
-
-local function drawWalletPopupPanel()
-    ImGui.PushTextWrapPos(ImGui.GetFontSize() * 36.0)
-    ImGui.TextColored(0.55, 0.58, 0.68, 1.0, 'Character wallet & tribute')
-    ImGui.TextColored(0.45, 0.48, 0.52, 1, 'Plat, AA, Diamond Coins (alt currency), CurrentFavor.')
-    ImGui.Spacing()
-    imguiWalletValueLines()
-    ImGui.Spacing()
-    ImGui.Separator()
-    ImGui.TextColored(0.42, 0.45, 0.52, 1, 'Values refresh while this menu is open.')
-    ImGui.PopTextWrapPos()
-end
+-- Fleet wallet lives in its own chunk (Lua main-chunk 200-local limit).
+TG.FleetWallet = require('Turbo.fleet_wallet').init({
+    TG = TG,
+    mq = mq,
+    ImGui = ImGui,
+    Ui = Ui,
+    cachedWallet = cachedWallet,
+    refreshWalletCache = refreshWalletCache,
+})
 
 local function toggleSwitch(id, isOn, width, height)
     return Ui.toggleChip(id, isOn, {
@@ -6275,6 +6303,20 @@ local function printTurboDoctor()
     else
         missingCount = missingCount + 1
         printf('%s   \awCollect DC helper:\ax \aylua\\turbo_collect_dc.lua\ax \arMISSING\ax', tag)
+    end
+    local collectRcLuaPath = mqPath .. '\\lua\\turbo_collect_rc.lua'
+    if fileExists(collectRcLuaPath) then
+        printf('%s   \awCollect RC helper:\ax \aylua\\turbo_collect_rc.lua\ax \agOK\ax \at%s\ax', tag, versionText(collectRcLuaPath))
+    else
+        missingCount = missingCount + 1
+        printf('%s   \awCollect RC helper:\ax \aylua\\turbo_collect_rc.lua\ax \arMISSING\ax', tag)
+    end
+    local collectCrestLuaPath = mqPath .. '\\lua\\turbo_collect_crests.lua'
+    if fileExists(collectCrestLuaPath) then
+        printf('%s   \awCollect Crest helper:\ax \aylua\\turbo_collect_crests.lua\ax \agOK\ax \at%s\ax', tag, versionText(collectCrestLuaPath))
+    else
+        missingCount = missingCount + 1
+        printf('%s   \awCollect Crest helper:\ax \aylua\\turbo_collect_crests.lua\ax \arMISSING\ax', tag)
     end
     local skipLogPath = mqPath .. '\\lua\\Turbo\\skip_log.lua'
     if fileExists(skipLogPath) then
@@ -7754,10 +7796,11 @@ local function renderTopBar(g, viewState)
         compactHeader and 'C' or 'Combat')
     ImGui.EndGroup()
 
-    -- ── Wallet + Loot + Collapse (right side) ──────────────────
+    -- ── Wallet + help + Stop + Loot + Collapse (right side) ────
+    -- Order: $ ? Stop Loot -. Drop when tight: ? then $ then Stop then Loot.
     local stopBtnW = (TG.showStopAllButton ~= false) and 32 or 0
     local helpBtnW = (TG.showQuickStartButton ~= false) and 26 or 0
-    local walletBtnW = 0
+    local walletBtnW = 26
     local lootTopW = 92
     local spTop = ImGui.GetStyle().ItemSpacing.x
     local compactTop = topAvailX() < 420
@@ -7765,7 +7808,7 @@ local function renderTopBar(g, viewState)
     if compactTop then
         lootTopW = 64
         if TG.showQuickStartButton ~= false then helpBtnW = 24 end
-        walletBtnW = 0
+        walletBtnW = 24
         if TG.showStopAllButton ~= false then stopBtnW = 26 end
     end
     local availTop = topAvailX()
@@ -7779,6 +7822,7 @@ local function renderTopBar(g, viewState)
     end
     local rightTopW = rightWidth()
     if rightTopW > availTop and helpBtnW > 0 then helpBtnW = 0 ; rightTopW = rightWidth() end
+    if rightTopW > availTop and walletBtnW > 0 then walletBtnW = 0 ; rightTopW = rightWidth() end
     if rightTopW > availTop and stopBtnW > 0 then stopBtnW = 0 ; rightTopW = rightWidth() end
     if rightTopW > availTop and lootTopW > 0 then
         lootTopW = math.max(50, math.min(lootTopW, availTop - collapseActualW - spTop))
@@ -7790,8 +7834,10 @@ local function renderTopBar(g, viewState)
     ImGui.SetCursorPosX(ImGui.GetCursorPosX() + math.max(0, topAvailX() - rightTopW))
 
     ImGui.BeginGroup()
-    --- Order reads: help, stop (optional), Loot, $, collapse. Collapse stays on the far right
-    --- to match Mini's edge-positioned expand button.
+    if walletBtnW > 0 and TG.FleetWallet and TG.FleetWallet.drawChrome then
+        TG.FleetWallet.drawChrome(walletBtnW, LAYOUT_MODE_BTN_H)
+    end
+
     if helpBtnW > 0 then
         if Ui.buttonVariant('?##top_quick_start', 'utilityButton', helpBtnW, LAYOUT_MODE_BTN_H) then
             TG.toggleQuickStartWindow()
@@ -7832,22 +7878,6 @@ local function renderTopBar(g, viewState)
         ImGui.SameLine()
     end
 
-    if walletBtnW > 0 then
-        if Ui.buttonVariant('$##topwalletbtn', 'amberButton', walletBtnW, LAYOUT_MODE_BTN_H) then
-            ImGui.OpenPopup(viewState.popupIds.wallet)
-        end
-        if TG.turboChromeDragAddLastItem then TG.turboChromeDragAddLastItem() end
-        if ImGui.IsItemHovered() then
-            ImGui.BeginTooltip()
-            ImGui.TextColored(0.88, 0.80, 0.35, 1.0, string.format('%12s pp', tostring(cachedWallet.plat)))
-            ImGui.TextColored(0.55, 0.72, 0.90, 1.0, string.format('%12s aa', tostring(cachedWallet.aa)))
-            ImGui.TextColored(0.45, 0.78, 0.82, 1.0, string.format('%12s dc', tostring(cachedWallet.dc)))
-            ImGui.TextColored(0.72, 0.55, 0.88, 1.0, string.format('%12s tribute', tostring(cachedWallet.favor)))
-            ImGui.EndTooltip()
-        end
-        ImGui.SameLine()
-    end
-
     if Ui.buttonVariant('-##collapsemini', 'windowToggleButton', collapseActualW, LAYOUT_MODE_BTN_H) then
         g.slimWhenExpanded = false
         g.slimGUI = false
@@ -7857,10 +7887,6 @@ local function renderTopBar(g, viewState)
     if TG.turboChromeDragAddLastItem then TG.turboChromeDragAddLastItem() end
     tip('Collapse back to the Mini bar.')
     ImGui.EndGroup()
-    if ImGui.BeginPopup(viewState.popupIds.wallet) then
-        drawWalletPopupPanel()
-        ImGui.EndPopup()
-    end
 
     if summary.showNoGroupWarning then
         ImGui.Dummy(0, 4)
@@ -10645,7 +10671,6 @@ function TG.renderWindow()
     viewState.popupIds = {
         tools = TURBO_FOOTER_TOOLS_POPUP,
         help = TG.TURBO_FOOTER_HELP_POPUP,
-        wallet = TURBO_FOOTER_WALLET_POPUP,
     }
     g.layoutState = viewState.layoutState
     g.navState = viewState.navState
@@ -11120,6 +11145,10 @@ function TG.renderWindow()
         renderTimedChallengeOverlay()
         renderGainsWindow()
         renderWaresWindow()
+        -- Fleet wallet is independent of Mini/Full; keep drawing while open.
+        if TG.FleetWallet and TG.FleetWallet.drawWindow then
+            pcall(TG.FleetWallet.drawWindow)
+        end
         ImGui.PopStyleColor(12)
         ImGui.PopStyleVar(6)
         return
@@ -12588,6 +12617,9 @@ function TG.renderWindow()
     renderTimedChallengeOverlay()
     renderGainsWindow()
     renderWaresWindow()
+    if TG.FleetWallet and TG.FleetWallet.drawWindow then
+        pcall(TG.FleetWallet.drawWindow)
+    end
 
     if g.reviewWindowOpen then
         pcall(function()
@@ -12989,6 +13021,9 @@ while TG.windowOpen do
     -- Do not mq.doevents() here: it can interrupt TurboLoot GO while a mac is
     -- running. Review dismiss uses /turboreviewgoloot (bind) instead.
     require('Turbo.wares').processPendingActions(TG)
+    if TG.FleetWallet and TG.FleetWallet.tick then
+        pcall(TG.FleetWallet.tick)
+    end
     -- Patcher shutdown hook: TurboPatcher drops turbo_patch.lock in the shared
     -- config dir before replacing files. TurboGear stops the rest of the suite;
     -- the hub only needs to end any running macro and close itself.

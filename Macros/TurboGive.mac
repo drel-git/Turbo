@@ -7,7 +7,7 @@
 |                            \/              \/              \/
 |              https://www.github.com/drel-git/TurboLoot
 |                       TurboGive.mac v1.9.5 for TurboLoot 3.8
-| @version TurboGive.mac 1.10.0
+| @version TurboGive.mac 1.11.0
 | Companion to TurboLoot - item redistribution between characters
 |
 | =========================================================================================
@@ -26,6 +26,8 @@
 |        /mac TurboGive collect raid     (collect from all e3 bots)
 |        /mac TurboGive collect cash [#] [all]  (collect plat from group; omit or 0 = all plat+gp+sp+cp; aliases: plat, pp)
 |        /mac TurboGive collect dc [#] [all]    (collect Diamond Coin from group)
+|        /mac TurboGive _sendrc CHAR [#]        (internal: send Radiant Crystals to CHAR)
+|        /mac TurboGive _sendcrest CHAR [#]     (internal: send Celestial Crests to CHAR)
 |        /mac TurboGive bank             (tell group to pull from bank; runner does not pull)
 |        /mac TurboGive bank solo        (pull my own items from bank only)
 |        /mac TurboGive bank all         (tell all e3 bots to pull; runner does not pull)
@@ -764,6 +766,12 @@ Sub PickupExactItemCount(string itemName, int wantCount)
 | in 1.8.2 if diagnostic echoes show that pattern.
 | =====================================================================
 Sub FillAndFinalizeDCTrade(string targetName, int maxThisSession)
+    /call FillAndFinalizeStackTrade "${targetName}" ${maxThisSession} "Diamond Coin"
+    /declare fftDcRet int local ${Macro.Return}
+/return ${fftDcRet}
+
+| Generic stack-currency trade fill (Diamond Coin, Radiant Crystal, ...).
+Sub FillAndFinalizeStackTrade(string targetName, int maxThisSession, string stackItemName)
     /if (!${Defined[_dcTradeAborted]}) {
         /declare _dcTradeAborted bool outer FALSE
     } else {
@@ -774,6 +782,9 @@ Sub FillAndFinalizeDCTrade(string targetName, int maxThisSession)
     } else {
         /varset _dcAbortReceiverFull FALSE
     }
+
+    /declare fftItem string local ${stackItemName}
+    /if (!${fftItem.Length} || ${fftItem.Equal[NULL]}) /varset fftItem Diamond Coin
 
     /declare fftSlotsUsed int local 0
     /declare fftTraded int local 0
@@ -787,18 +798,18 @@ Sub FillAndFinalizeDCTrade(string targetName, int maxThisSession)
 
     :fftFillLoop
     /if (${fftSlotsUsed} >= ${fftSlotsCap}) /goto :fftFinalize
-    /if (${FindItemCount[=Diamond Coin]} <= 0) /goto :fftFinalize
+    /if (${FindItemCount[=${fftItem}]} <= 0) /goto :fftFinalize
     /if (${maxThisSession} > 0 && ${fftTraded} >= ${maxThisSession}) /goto :fftFinalize
 
-    | Locate next DC stack — re-read every iteration (state changes)
-    /varset fftPack ${Math.Calc[${FindItem[=Diamond Coin].ItemSlot}-22].Int}
-    /varset fftSlot ${Math.Calc[${FindItem[=Diamond Coin].ItemSlot2}+1].Int}
+    | Locate next stack — re-read every iteration (state changes)
+    /varset fftPack ${Math.Calc[${FindItem[=${fftItem}].ItemSlot}-22].Int}
+    /varset fftSlot ${Math.Calc[${FindItem[=${fftItem}].ItemSlot2}+1].Int}
     /if (${fftPack} <= 0 || ${fftSlot} <= 0) {
-        /if (${showDebug}) /echo ${tgTag} \ay[DC TRADE DEBUG]\aw Invalid slot coords (ItemSlot=${FindItem[=Diamond Coin].ItemSlot} ItemSlot2=${FindItem[=Diamond Coin].ItemSlot2}) - stopping fill.
+        /if (${showDebug}) /echo ${tgTag} \ay[STACK TRADE DEBUG]\aw Invalid slot coords for ${fftItem} (ItemSlot=${FindItem[=${fftItem}].ItemSlot} ItemSlot2=${FindItem[=${fftItem}].ItemSlot2}) - stopping fill.
         /goto :fftFinalize
     }
 
-    /varset fftThisStack ${FindItem[=Diamond Coin].Stack}
+    /varset fftThisStack ${FindItem[=${fftItem}].Stack}
     /if (${fftThisStack} <= 0) /varset fftThisStack 1
 
     | v1.8.3: when maxThisSession caps us below stack size, pick partial
@@ -833,7 +844,7 @@ Sub FillAndFinalizeDCTrade(string targetName, int maxThisSession)
         }
 
         /if (!${Cursor.ID}) {
-            /if (${showDebug}) /echo ${tgTag} \ay[DC TRADE DEBUG]\aw Partial pickup of ${fftWantThisPick} from pack${fftPack} slot${fftSlot} failed.
+            /if (${showDebug}) /echo ${tgTag} \ay[STACK TRADE DEBUG]\aw Partial pickup of ${fftWantThisPick} ${fftItem} from pack${fftPack} slot${fftSlot} failed.
             /goto :fftFinalize
         }
         | Record actual amount picked (cursor stack is truth)
@@ -843,7 +854,7 @@ Sub FillAndFinalizeDCTrade(string targetName, int maxThisSession)
         /nomodkey /shift /itemnotify in pack${fftPack} ${fftSlot} leftmouseup
         /delay 10 ${Cursor.ID}
         /if (!${Cursor.ID}) {
-            /if (${showDebug}) /echo ${tgTag} \ay[DC TRADE DEBUG]\aw Shift-click pack${fftPack} slot${fftSlot} failed to put DC on cursor.
+            /if (${showDebug}) /echo ${tgTag} \ay[STACK TRADE DEBUG]\aw Shift-click pack${fftPack} slot${fftSlot} failed to put ${fftItem} on cursor.
             /goto :fftFinalize
         }
     }
@@ -851,7 +862,7 @@ Sub FillAndFinalizeDCTrade(string targetName, int maxThisSession)
     | Drift guard before each click-to-target
     /call VerifyTradeTarget "${targetName}"
     /if (!${Macro.Return.Equal[TRUE]}) {
-        /echo ${tgTag} \ar[DC TRADE]\ay [SAFETY]\aw Target drift mid-session - returning stack.
+        /echo ${tgTag} \ar[STACK TRADE]\ay [SAFETY]\aw Target drift mid-session - returning stack.
         /autoinventory
         /delay 5 !${Cursor.ID}
         /if (${Cursor.ID}) /call ForceClearCursor
@@ -867,7 +878,7 @@ Sub FillAndFinalizeDCTrade(string targetName, int maxThisSession)
     | After first click, confirm trade window actually opened
     /if (!${fftTradeOpened}) {
         /if (!${Window[TradeWnd].Open}) {
-            /echo ${tgTag} \ar[DC TRADE]\aw Trade window did not open after first click - aborting.
+            /echo ${tgTag} \ar[STACK TRADE]\aw Trade window did not open after first click - aborting.
             /if (${Cursor.ID}) {
                 /autoinventory
                 /delay 5 !${Cursor.ID}
@@ -881,14 +892,14 @@ Sub FillAndFinalizeDCTrade(string targetName, int maxThisSession)
     }
 
     | Cursor must clear to confirm stack landed in trade window.
-    | If cursor still holds DC, target's bags/trade window is full.
+    | If cursor still holds the item, target's bags/trade window is full.
     /if (${Cursor.ID}) {
-        /echo ${tgTag} \ay[DC TRADE]\aw Target bags/trade full - finalizing with ${fftSlotsUsed} stack(s) delivered.
+        /echo ${tgTag} \ay[STACK TRADE]\aw Target bags/trade full - finalizing with ${fftSlotsUsed} stack(s) delivered.
         /autoinventory
         /delay 5 !${Cursor.ID}
         /if (${Cursor.ID}) /call ForceClearCursor
         /if (${Cursor.ID}) {
-            /echo ${tgTag} \ar[DC TRADE]\aw Diamond Coin is still on cursor and could not be returned to inventory. Stopping DC trade before more sessions.
+            /echo ${tgTag} \ar[STACK TRADE]\aw ${fftItem} is still on cursor and could not be returned to inventory. Stopping trade before more sessions.
         }
         /varset _dcAbortReceiverFull TRUE
         /varset _dcTradeAborted TRUE
@@ -1420,6 +1431,24 @@ Sub Main(string modeIn, string argIn)
         /declare sendDcAmt int local 0
         /if (${Param2.Length} && ${Int[${Param2}]} > 0) /varset sendDcAmt ${Int[${Param2}]}
         /call SendMyDC "${arg}" ${sendDcAmt}
+        /call SendDoneToOrchestrator
+        /return
+    }
+
+    | ---- INTERNAL: _SENDRC (broadcast target sends Radiant Crystals to collector) ----
+    /if (${modeUpper.Equal[_SENDRC]}) {
+        /declare sendRcAmt int local 0
+        /if (${Param2.Length} && ${Int[${Param2}]} > 0) /varset sendRcAmt ${Int[${Param2}]}
+        /call SendMyRC "${arg}" ${sendRcAmt}
+        /call SendDoneToOrchestrator
+        /return
+    }
+
+    | ---- INTERNAL: _SENDCREST (broadcast target sends Celestial Crests to collector) ----
+    /if (${modeUpper.Equal[_SENDCREST]}) {
+        /declare sendCrestAmt int local 0
+        /if (${Param2.Length} && ${Int[${Param2}]} > 0) /varset sendCrestAmt ${Int[${Param2}]}
+        /call SendMyCrest "${arg}" ${sendCrestAmt}
         /call SendDoneToOrchestrator
         /return
     }
@@ -5200,6 +5229,467 @@ Sub SendMyDC(string collectorName, int maxAmount)
     :SendDCDone
     /echo ${tgTag} \ao[SEND DC]\aw Sent ${dcTraded} Diamond Coin to ${collectorName} in ${outerSess} session(s).
     /if (${wasFollowingSD}) /squelch /afollow unpause
+/return
+
+| =====================================================================
+| CURRENCY: SEND MY RADIANT CRYSTALS (internal — bot sends RC to collector)
+| Creates inventory "Radiant Crystal" from alt currency (Me.RadiantCrystals),
+| then uses the shared stack trade helper.
+| =====================================================================
+Sub SendMyRC(string collectorName, int maxAmount)
+    /if (${collectorName.Equal[${Me.Name}]}) /return
+
+    /declare rcInv int local ${FindItemCount[=Radiant Crystal]}
+    /declare rcAlt int local ${Me.RadiantCrystals}
+    /if (${rcInv} <= 0 && ${rcAlt} > 0) {
+        /if (!${Me.FreeInventory}) {
+            /echo ${tgTag} \ay[SEND RC]\aw No open inventory slots to create Radiant Crystal. Free bag space and re-run.
+            /return
+        }
+        /call ConvertAltRC2Currency ${If[${maxAmount}>0 && ${maxAmount}<7000,${maxAmount},7000]}
+        /varset rcInv ${FindItemCount[=Radiant Crystal]}
+    }
+    /if (${rcInv} <= 0) {
+        /echo ${tgTag} \awNo Radiant Crystal to send.
+        /return
+    }
+
+    /declare wasFollowingSR bool local FALSE
+    /if (${AdvPath.Following}) {
+        /varset wasFollowingSR TRUE
+        /squelch /afollow pause
+    }
+
+    /call AcquireTradeTarget "${collectorName}"
+    /if (!${_tradeTargetID}) {
+        /echo ${tgTag} \ar[SEND RC]\aw Cannot target ${collectorName} as a PC.
+        /if (${wasFollowingSR}) /squelch /afollow unpause
+        /return
+    }
+
+    /if (${Target.Distance} > 15) {
+        /call NavToIDWithDoorsAndNudges ${_tradeTargetID} 10 300
+    }
+    /face fast
+    /delay 3
+
+    /declare rcTraded int local 0
+    /declare outerSessRC int local 0
+    /declare outerCapRC int local 400
+    /declare sessTradedRC int local 0
+    /declare remainingCapRC int local 0
+
+    :SendMoreRC
+    /varcalc outerSessRC ${outerSessRC}+1
+    /if (${outerSessRC} > ${outerCapRC}) {
+        /echo ${tgTag} \ar[SEND RC]\ay [SAFETY]\aw Hard cap hit after ${outerCapRC} sessions - re-run for remaining RC.
+        /goto :SendRCDone
+    }
+    /if (${maxAmount} > 0 && ${rcTraded} >= ${maxAmount}) /goto :SendRCDone
+    /varset remainingCapRC ${If[${maxAmount}>0,${Math.Calc[${maxAmount}-${rcTraded}].Int},0]}
+    /if (${FindItemCount[=Radiant Crystal]} <= 0 && ${Me.RadiantCrystals} > 0) {
+        /if (!${Me.FreeInventory}) {
+            /echo ${tgTag} \ay[SEND RC]\aw No open inventory slots to create more Radiant Crystal. Stopping after ${rcTraded} sent.
+            /goto :SendRCDone
+        }
+        /call ConvertAltRC2Currency ${If[${remainingCapRC}>0 && ${remainingCapRC}<7000,${remainingCapRC},7000]}
+    }
+    /if (${FindItemCount[=Radiant Crystal]} <= 0) /goto :SendRCDone
+
+    /varset remainingCapRC ${If[${maxAmount}>0,${Math.Calc[${maxAmount}-${rcTraded}].Int},0]}
+
+    /call FillAndFinalizeStackTrade "${collectorName}" ${remainingCapRC} "Radiant Crystal"
+    /varset sessTradedRC ${Macro.Return}
+    /varcalc rcTraded ${rcTraded}+${sessTradedRC}
+
+    /if (${_dcAbortReceiverFull}) {
+        /echo ${tgTag} \ay[SEND RC]\aw ${collectorName}'s bags/trade slots are full - stopping. Free inventory space on ${collectorName}, then re-run for remaining RC.
+        /goto :SendRCDone
+    }
+    /if (${_dcTradeAborted}) /goto :SendRCDone
+    /if (${sessTradedRC} <= 0) /goto :SendRCDone
+
+    /delay 5
+    /goto :SendMoreRC
+
+    :SendRCDone
+    /echo ${tgTag} \ao[SEND RC]\aw Sent ${rcTraded} Radiant Crystal to ${collectorName} in ${outerSessRC} session(s).
+    /if (${wasFollowingSR}) /squelch /afollow unpause
+/return
+
+Sub SelectRadiantCrystalAltCurrency(string contextTag)
+    /declare rcListID int local 0
+    /declare ctx string local ${contextTag}
+    /if (!${ctx.Length} || ${ctx.Equal[NULL]}) /varset ctx EXCHANGE
+
+    /if (!${Window[InventoryWindow].Open}) {
+        /echo ${tgTag} \ar[${ctx}]\aw Inventory window is not open; cannot select Radiant Crystals.
+        /return 0
+    }
+
+    /notify InventoryWindow IW_Subwindows tabselect 5
+    /delay 5
+
+    /varset rcListID ${Window[InventoryWindow].Child[IW_AltCurr_PointList].List[=Radiant Crystals,2]}
+    /if (${rcListID} <= 0) /varset rcListID ${Window[InventoryWindow].Child[IW_AltCurr_PointList].List[=Radiant Crystal,2]}
+    /if (${rcListID} <= 0) {
+        /echo ${tgTag} \ar[${ctx}]\aw Could not find Radiant Crystals in the Alt Currency list. Open Inventory -> Alt Currency and confirm the row name.
+        /return 0
+    }
+
+    /notify InventoryWindow IW_AltCurr_PointList listselect ${rcListID} leftmouseup
+    /delay 3
+/return ${rcListID}
+
+Sub ConvertAltRC2Currency(int maxAmount)
+    /declare altRC int local ${Me.RadiantCrystals}
+    /if (${altRC} <= 0) {
+        /echo ${tgTag} \awNo alt-currency Radiant Crystals to convert.
+        /return
+    }
+    /declare rcCreateStackMax int local 200
+    /declare convertLimit int local ${maxAmount}
+    /if (${convertLimit} <= 0 || ${convertLimit} > ${altRC}) /varset convertLimit ${altRC}
+    /declare convertedRC int local 0
+    /declare beforeAltRC int local 0
+    /declare afterAltRC int local 0
+    /declare madeRC int local 0
+    /declare beforeInvRC int local 0
+    /declare afterInvRC int local 0
+    /declare madeInvRC int local 0
+    /declare createThis int local 0
+
+    /echo ${tgTag} \am[EXCHANGE]\aw Converting up to ${convertLimit} Radiant Crystals to inventory...
+
+    /call OpenInventoryWindowForTrade
+    /if (!${Macro.Return}) {
+        /echo ${tgTag} \ar[EXCHANGE]\aw Could not open inventory window. (Check keybind: Options -> Keys -> Inventory)
+        /return
+    }
+
+    /call SelectRadiantCrystalAltCurrency EXCHANGE
+    /if (${Macro.Return} <= 0) /goto :DoneCreateRC
+
+    :CreateMoreRC
+    /if (${convertedRC} >= ${convertLimit}) /goto :DoneCreateRC
+    /if (${Me.RadiantCrystals} <= 0) /goto :DoneCreateRC
+    /if (!${Me.FreeInventory} && ${FindItemCount[=Radiant Crystal]} <= 0) {
+        /echo ${tgTag} \ay[EXCHANGE]\aw No open inventory slots for Radiant Crystal. Free bag space and re-run.
+        /goto :DoneCreateRC
+    }
+
+    /varset beforeAltRC ${Me.RadiantCrystals}
+    /varset beforeInvRC ${FindItemCount[=Radiant Crystal]}
+    /varset createThis ${Math.Calc[${convertLimit}-${convertedRC}].Int}
+    /if (${createThis} > ${beforeAltRC}) /varset createThis ${beforeAltRC}
+    /if (${createThis} > ${rcCreateStackMax}) /varset createThis ${rcCreateStackMax}
+
+    /nomodkey /notify InventoryWindow AltCurr_CreateItemButton LeftMouseUp
+    /delay 5
+
+    /if (${Window[QuantityWnd].Open}) {
+        /if (${createThis} < ${rcCreateStackMax}) {
+            /call SetQuantityWndValue ${createThis}
+        }
+        /nomodkey /notify QuantityWnd QTYW_Accept_Button LeftMouseUp
+        /delay 5
+    }
+
+    /if (${Cursor.ID}) {
+        /autoinventory
+        /delay 5 !${Cursor.ID}
+        /if (${Cursor.ID}) {
+            /autoi
+            /delay 5 !${Cursor.ID}
+        }
+    }
+    /if (${Cursor.ID}) {
+        /echo ${tgTag} \ay[EXCHANGE]\aw Inventory is full; could not place ${Cursor.Name}. Stopping conversion.
+        /call ForceClearCursor
+        /goto :DoneCreateRC
+    }
+
+    /varset afterAltRC ${Me.RadiantCrystals}
+    /varset afterInvRC ${FindItemCount[=Radiant Crystal]}
+    /varset madeRC ${Math.Calc[${beforeAltRC}-${afterAltRC}].Int}
+    /varset madeInvRC ${Math.Calc[${afterInvRC}-${beforeInvRC}].Int}
+    /if (${madeRC} <= 0 && ${madeInvRC} > 0) /varset madeRC ${madeInvRC}
+    /if (${madeRC} <= 0 && ${madeInvRC} <= 0) {
+        /echo ${tgTag} \ay[EXCHANGE]\aw No Radiant Crystal was created this click. Stopping conversion.
+        /goto :DoneCreateRC
+    }
+    /varcalc convertedRC ${convertedRC}+${madeRC}
+    /goto :CreateMoreRC
+
+    :DoneCreateRC
+    /if (${Window[InventoryWindow].Open}) /nomodkey /notify InventoryWindow DoneButton leftmouseup
+    /echo ${tgTag} \am[EXCHANGE]\aw Done. Inventory Radiant Crystal: ${FindItemCount[=Radiant Crystal]}
+/return
+
+Sub ReclaimAltRC
+    /declare invRC int local ${FindItemCount[=Radiant Crystal]}
+    /if (${invRC} <= 0) /return
+
+    /echo ${tgTag} \am[RECLAIM]\aw Reclaiming ${invRC} inventory Radiant Crystal to alt-currency...
+
+    /call OpenInventoryWindowForTrade
+    /if (!${Macro.Return}) {
+        /echo ${tgTag} \ar[RECLAIM]\aw Could not open inventory window.
+        /return
+    }
+
+    /call SelectRadiantCrystalAltCurrency RECLAIM
+    /if (${Macro.Return} <= 0) {
+        /if (${Window[InventoryWindow].Open}) /nomodkey /notify InventoryWindow DoneButton leftmouseup
+        /return
+    }
+
+    /declare beforeInvRC2 int local ${FindItemCount[=Radiant Crystal]}
+    /nomodkey /notify InventoryWindow AltCurr_ReclaimButton leftmouseup
+    /delay 10
+    /if (${FindItemCount[=Radiant Crystal]} >= ${beforeInvRC2}) {
+        /nomodkey /notify InventoryWindow IW_AltCurr_Reclaimbutton leftmouseup
+        /delay 10
+    }
+    /if (${Window[InventoryWindow].Open}) /nomodkey /notify InventoryWindow DoneButton leftmouseup
+    /echo ${tgTag} \am[RECLAIM]\aw Done. Radiant Crystals: ${Me.RadiantCrystals}
+/return
+
+| =====================================================================
+| CURRENCY: SEND MY CELESTIAL CRESTS (internal — bot sends Crests to collector)
+| Creates inventory "Celestial Crest" from alt currency, then stack-trades.
+| =====================================================================
+Sub CrestAltAmount
+    /declare ca int local ${Me.AltCurrency[Celestial Crests]}
+    /if (${ca} <= 0) /varset ca ${Me.AltCurrency[Celestial Crest]}
+/return ${ca}
+
+Sub SendMyCrest(string collectorName, int maxAmount)
+    /if (${collectorName.Equal[${Me.Name}]}) /return
+
+    /declare crestInv int local ${FindItemCount[=Celestial Crest]}
+    /call CrestAltAmount
+    /declare crestAlt int local ${Macro.Return}
+    /if (${crestInv} <= 0 && ${crestAlt} > 0) {
+        /if (!${Me.FreeInventory}) {
+            /echo ${tgTag} \ay[SEND CREST]\aw No open inventory slots to create Celestial Crest. Free bag space and re-run.
+            /return
+        }
+        /call ConvertAltCrest2Currency ${If[${maxAmount}>0 && ${maxAmount}<7000,${maxAmount},7000]}
+        /varset crestInv ${FindItemCount[=Celestial Crest]}
+    }
+    /if (${crestInv} <= 0) {
+        /echo ${tgTag} \awNo Celestial Crest to send.
+        /return
+    }
+
+    /declare wasFollowingSC bool local FALSE
+    /if (${AdvPath.Following}) {
+        /varset wasFollowingSC TRUE
+        /squelch /afollow pause
+    }
+
+    /call AcquireTradeTarget "${collectorName}"
+    /if (!${_tradeTargetID}) {
+        /echo ${tgTag} \ar[SEND CREST]\aw Cannot target ${collectorName} as a PC.
+        /if (${wasFollowingSC}) /squelch /afollow unpause
+        /return
+    }
+
+    /if (${Target.Distance} > 15) {
+        /call NavToIDWithDoorsAndNudges ${_tradeTargetID} 10 300
+    }
+    /face fast
+    /delay 3
+
+    /declare crestTraded int local 0
+    /declare outerSessSC int local 0
+    /declare outerCapSC int local 400
+    /declare sessTradedSC int local 0
+    /declare remainingCapSC int local 0
+
+    :SendMoreCrest
+    /varcalc outerSessSC ${outerSessSC}+1
+    /if (${outerSessSC} > ${outerCapSC}) {
+        /echo ${tgTag} \ar[SEND CREST]\ay [SAFETY]\aw Hard cap hit after ${outerCapSC} sessions - re-run for remaining Crests.
+        /goto :SendCrestDone
+    }
+    /if (${maxAmount} > 0 && ${crestTraded} >= ${maxAmount}) /goto :SendCrestDone
+    /varset remainingCapSC ${If[${maxAmount}>0,${Math.Calc[${maxAmount}-${crestTraded}].Int},0]}
+    /call CrestAltAmount
+    /varset crestAlt ${Macro.Return}
+    /if (${FindItemCount[=Celestial Crest]} <= 0 && ${crestAlt} > 0) {
+        /if (!${Me.FreeInventory}) {
+            /echo ${tgTag} \ay[SEND CREST]\aw No open inventory slots to create more Celestial Crest. Stopping after ${crestTraded} sent.
+            /goto :SendCrestDone
+        }
+        /call ConvertAltCrest2Currency ${If[${remainingCapSC}>0 && ${remainingCapSC}<7000,${remainingCapSC},7000]}
+    }
+    /if (${FindItemCount[=Celestial Crest]} <= 0) /goto :SendCrestDone
+
+    /varset remainingCapSC ${If[${maxAmount}>0,${Math.Calc[${maxAmount}-${crestTraded}].Int},0]}
+
+    /call FillAndFinalizeStackTrade "${collectorName}" ${remainingCapSC} "Celestial Crest"
+    /varset sessTradedSC ${Macro.Return}
+    /varcalc crestTraded ${crestTraded}+${sessTradedSC}
+
+    /if (${_dcAbortReceiverFull}) {
+        /echo ${tgTag} \ay[SEND CREST]\aw ${collectorName}'s bags/trade slots are full - stopping. Free inventory space on ${collectorName}, then re-run for remaining Crests.
+        /goto :SendCrestDone
+    }
+    /if (${_dcTradeAborted}) /goto :SendCrestDone
+    /if (${sessTradedSC} <= 0) /goto :SendCrestDone
+
+    /delay 5
+    /goto :SendMoreCrest
+
+    :SendCrestDone
+    /echo ${tgTag} \ao[SEND CREST]\aw Sent ${crestTraded} Celestial Crest to ${collectorName} in ${outerSessSC} session(s).
+    /if (${wasFollowingSC}) /squelch /afollow unpause
+/return
+
+Sub SelectCelestialCrestAltCurrency(string contextTag)
+    /declare crestListID int local 0
+    /declare ctx string local ${contextTag}
+    /if (!${ctx.Length} || ${ctx.Equal[NULL]}) /varset ctx EXCHANGE
+
+    /if (!${Window[InventoryWindow].Open}) {
+        /echo ${tgTag} \ar[${ctx}]\aw Inventory window is not open; cannot select Celestial Crests.
+        /return 0
+    }
+
+    /notify InventoryWindow IW_Subwindows tabselect 5
+    /delay 5
+
+    /varset crestListID ${Window[InventoryWindow].Child[IW_AltCurr_PointList].List[=Celestial Crests,2]}
+    /if (${crestListID} <= 0) /varset crestListID ${Window[InventoryWindow].Child[IW_AltCurr_PointList].List[=Celestial Crest,2]}
+    /if (${crestListID} <= 0) {
+        /echo ${tgTag} \ar[${ctx}]\aw Could not find Celestial Crests in the Alt Currency list. Open Inventory -> Alt Currency and confirm the row name.
+        /return 0
+    }
+
+    /notify InventoryWindow IW_AltCurr_PointList listselect ${crestListID} leftmouseup
+    /delay 3
+/return ${crestListID}
+
+Sub ConvertAltCrest2Currency(int maxAmount)
+    /call CrestAltAmount
+    /declare altCrest int local ${Macro.Return}
+    /if (${altCrest} <= 0) {
+        /echo ${tgTag} \awNo alt-currency Celestial Crests to convert.
+        /return
+    }
+    /declare crestCreateStackMax int local 200
+    /declare convertLimit int local ${maxAmount}
+    /if (${convertLimit} <= 0 || ${convertLimit} > ${altCrest}) /varset convertLimit ${altCrest}
+    /declare convertedCrest int local 0
+    /declare beforeAltCrest int local 0
+    /declare afterAltCrest int local 0
+    /declare madeCrest int local 0
+    /declare beforeInvCrest int local 0
+    /declare afterInvCrest int local 0
+    /declare madeInvCrest int local 0
+    /declare createThis int local 0
+
+    /echo ${tgTag} \am[EXCHANGE]\aw Converting up to ${convertLimit} Celestial Crests to inventory...
+
+    /call OpenInventoryWindowForTrade
+    /if (!${Macro.Return}) {
+        /echo ${tgTag} \ar[EXCHANGE]\aw Could not open inventory window. (Check keybind: Options -> Keys -> Inventory)
+        /return
+    }
+
+    /call SelectCelestialCrestAltCurrency EXCHANGE
+    /if (${Macro.Return} <= 0) /goto :DoneCreateCrest
+
+    :CreateMoreCrest
+    /if (${convertedCrest} >= ${convertLimit}) /goto :DoneCreateCrest
+    /call CrestAltAmount
+    /varset altCrest ${Macro.Return}
+    /if (${altCrest} <= 0) /goto :DoneCreateCrest
+    /if (!${Me.FreeInventory} && ${FindItemCount[=Celestial Crest]} <= 0) {
+        /echo ${tgTag} \ay[EXCHANGE]\aw No open inventory slots for Celestial Crest. Free bag space and re-run.
+        /goto :DoneCreateCrest
+    }
+
+    /call CrestAltAmount
+    /varset beforeAltCrest ${Macro.Return}
+    /varset beforeInvCrest ${FindItemCount[=Celestial Crest]}
+    /varset createThis ${Math.Calc[${convertLimit}-${convertedCrest}].Int}
+    /if (${createThis} > ${beforeAltCrest}) /varset createThis ${beforeAltCrest}
+    /if (${createThis} > ${crestCreateStackMax}) /varset createThis ${crestCreateStackMax}
+
+    /nomodkey /notify InventoryWindow AltCurr_CreateItemButton LeftMouseUp
+    /delay 5
+
+    /if (${Window[QuantityWnd].Open}) {
+        /if (${createThis} < ${crestCreateStackMax}) {
+            /call SetQuantityWndValue ${createThis}
+        }
+        /nomodkey /notify QuantityWnd QTYW_Accept_Button LeftMouseUp
+        /delay 5
+    }
+
+    /if (${Cursor.ID}) {
+        /autoinventory
+        /delay 5 !${Cursor.ID}
+        /if (${Cursor.ID}) {
+            /autoi
+            /delay 5 !${Cursor.ID}
+        }
+    }
+    /if (${Cursor.ID}) {
+        /echo ${tgTag} \ay[EXCHANGE]\aw Inventory is full; could not place ${Cursor.Name}. Stopping conversion.
+        /call ForceClearCursor
+        /goto :DoneCreateCrest
+    }
+
+    /call CrestAltAmount
+    /varset afterAltCrest ${Macro.Return}
+    /varset afterInvCrest ${FindItemCount[=Celestial Crest]}
+    /varset madeCrest ${Math.Calc[${beforeAltCrest}-${afterAltCrest}].Int}
+    /varset madeInvCrest ${Math.Calc[${afterInvCrest}-${beforeInvCrest}].Int}
+    /if (${madeCrest} <= 0 && ${madeInvCrest} > 0) /varset madeCrest ${madeInvCrest}
+    /if (${madeCrest} <= 0 && ${madeInvCrest} <= 0) {
+        /echo ${tgTag} \ay[EXCHANGE]\aw No Celestial Crest was created this click. Stopping conversion.
+        /goto :DoneCreateCrest
+    }
+    /varcalc convertedCrest ${convertedCrest}+${madeCrest}
+    /goto :CreateMoreCrest
+
+    :DoneCreateCrest
+    /if (${Window[InventoryWindow].Open}) /nomodkey /notify InventoryWindow DoneButton leftmouseup
+    /echo ${tgTag} \am[EXCHANGE]\aw Done. Inventory Celestial Crest: ${FindItemCount[=Celestial Crest]}
+/return
+
+Sub ReclaimAltCrest
+    /declare invCrest int local ${FindItemCount[=Celestial Crest]}
+    /if (${invCrest} <= 0) /return
+
+    /echo ${tgTag} \am[RECLAIM]\aw Reclaiming ${invCrest} inventory Celestial Crest to alt-currency...
+
+    /call OpenInventoryWindowForTrade
+    /if (!${Macro.Return}) {
+        /echo ${tgTag} \ar[RECLAIM]\aw Could not open inventory window.
+        /return
+    }
+
+    /call SelectCelestialCrestAltCurrency RECLAIM
+    /if (${Macro.Return} <= 0) {
+        /if (${Window[InventoryWindow].Open}) /nomodkey /notify InventoryWindow DoneButton leftmouseup
+        /return
+    }
+
+    /declare beforeInvCrest2 int local ${FindItemCount[=Celestial Crest]}
+    /nomodkey /notify InventoryWindow AltCurr_ReclaimButton leftmouseup
+    /delay 10
+    /if (${FindItemCount[=Celestial Crest]} >= ${beforeInvCrest2}) {
+        /nomodkey /notify InventoryWindow IW_AltCurr_Reclaimbutton leftmouseup
+        /delay 10
+    }
+    /if (${Window[InventoryWindow].Open}) /nomodkey /notify InventoryWindow DoneButton leftmouseup
+    /call CrestAltAmount
+    /echo ${tgTag} \am[RECLAIM]\aw Done. Celestial Crests: ${Macro.Return}
 /return
 
 | =====================================================================

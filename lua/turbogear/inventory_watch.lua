@@ -124,10 +124,28 @@ local function publish_delta_if_small(snap)
     return false
 end
 
+local last_known_wallet_sig = nil
+
 local function publish_snap_if_changed(snap, now, depth, bypass_cooldown, publish_opts)
     if not snap then return false end
     local sig = snapshot.lite_signature(snap)
-    if sig == last_known_sig then return false end
+    local wsig = snapshot.wallet_signature and snapshot.wallet_signature(snap) or ""
+    if sig == last_known_sig then
+        -- Bags unchanged but PP/CC/etc moved: tiny wallet publish (no bag walk).
+        if wsig ~= "" and wsig ~= tostring(last_known_wallet_sig or "") then
+            local ok, Engine = pcall(function() return require('engine').Engine end)
+            if ok and Engine and Engine.publish_wallet and Engine.publish_wallet(snap, {
+                reason = "inventory_watch_wallet",
+                force = true,
+            }) then
+                last_known_wallet_sig = wsig
+                last_publish_at = now
+                diag.count("inventory_watch.wallet_publish")
+                return true
+            end
+        end
+        return false
+    end
     if not bypass_cooldown and (now - last_publish_at) < publish_cooldown_s() then
         dirty_at = now
         -- Full publish is throttled; get the changed slots out immediately.
@@ -135,6 +153,7 @@ local function publish_snap_if_changed(snap, now, depth, bypass_cooldown, publis
         return false
     end
     last_known_sig = sig
+    last_known_wallet_sig = wsig
     local ok, Engine = pcall(function() return require('engine').Engine end)
     if ok and Engine and Engine.ok then
         local sent

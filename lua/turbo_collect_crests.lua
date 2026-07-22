@@ -1,19 +1,17 @@
 --[[
-  turbo_collect_dc.lua - Lua coordinator for collecting Diamond Coins.
-  @version lua/turbo_collect_dc.lua 1.1.0
+  turbo_collect_crests.lua - Lua coordinator for Celestial Crest collect / give-to.
+  @version lua/turbo_collect_crests.lua 1.0.0
   Usage:
-    /lua run turbo_collect_dc              -- collect from group to me
-    /lua run turbo_collect_dc all          -- collect from E3 peers to me
-    /lua run turbo_collect_dc from Name    -- collect from one peer to me
-    /lua run turbo_collect_dc to Name      -- peers send all DC to Name
-    /lua run turbo_collect_dc from A to B  -- A sends DC to B
-    /lua run turbo_collect_dc all to Name
-    /lua run turbo_collect_dc 500
-    /lua run turbo_collect_dc all 500
+    /lua run turbo_collect_crests              -- collect from group to me
+    /lua run turbo_collect_crests all          -- collect from E3 peers to me
+    /lua run turbo_collect_crests from Name    -- collect from one peer to me
+    /lua run turbo_collect_crests to Name      -- peers send all Crests to Name
+    /lua run turbo_collect_crests from A to B  -- A sends Crests to B
+    /lua run turbo_collect_crests all to Name
 
-  First pass is intentionally hybrid: this collector script handles serialized
-  orchestration, trade acceptance, reclaiming, and summaries; sender boxes still
-  use TurboGive.mac _senddc for the hard-earned item pickup/trade-fill logic.
+  Orchestration + trade accept (collect-to-me) live here; senders use
+  TurboGive.mac _sendcrest for create-item + trade fill. Give-to relies on
+  sender e3bct trade-accept on the recipient.
 ]]
 
 local mq = require('mq')
@@ -26,15 +24,15 @@ do
 end
 local bot_pause = require('turbo_lib.bot_pause')
 
-local TAG = '\at[TurboDC]\ax'
+local TAG = '\at[TurboCrest]\ax'
 local DEFAULT_CHUNK = 7000
 local MAX_PASSES = 200
 local FIRST_ACTIVITY_TIMEOUT_MS = 45000
 local IDLE_AFTER_TRADE_MS = 12000
 local IDLE_AFTER_DONE_MS = 3000
+local ITEM_NAME = 'Celestial Crest'
 
 local args = { ... }
-
 local done = {}
 
 local function now_ms()
@@ -78,8 +76,20 @@ local function me_name()
         or '')
 end
 
-local function item_count(name)
-    return safe_num(function() return mq.TLO.FindItemCount('=' .. name)() end)
+local function item_count()
+    return safe_num(function() return mq.TLO.FindItemCount('=' .. ITEM_NAME)() end)
+end
+
+local function read_crests()
+    local n = safe_num(function()
+        local t = mq.TLO.Me.AltCurrency('Celestial Crests')
+        return t and t() or 0
+    end)
+    if n > 0 then return n end
+    return safe_num(function()
+        local t = mq.TLO.Me.AltCurrency('Celestial Crest')
+        return t and t() or 0
+    end)
 end
 
 local function free_inventory()
@@ -96,15 +106,6 @@ end
 
 local function window_open(name)
     return safe_bool(function() return mq.TLO.Window(name).Open() end)
-end
-
-local function read_alt_dc()
-    local n = safe_num(function()
-        local t = mq.TLO.Me.AltCurrency('Diamond Coins')
-        return t and t() or 0
-    end)
-    if n > 0 then return n end
-    return safe_num(function() return mq.TLO.Me.AltCurrency(20)() end)
 end
 
 local function clear_cursor(context, timeout_ms)
@@ -130,23 +131,21 @@ local function ensure_inventory_window()
     if window_open('InventoryWindow') then return true end
     safe_call(nil, function() return mq.TLO.Window('InventoryWindow').DoOpen() end)
     mq.delay(700, function() return window_open('InventoryWindow') end)
-    if window_open('InventoryWindow') then return true end
-    out('\arWARNING:\ax could not open InventoryWindow.')
-    return false
+    return window_open('InventoryWindow')
 end
 
 local function alt_currency_list_id()
     local id = safe_num(function()
-        return mq.TLO.Window('InventoryWindow').Child('IW_AltCurr_PointList').List('=Diamond Coins', 2)()
+        return mq.TLO.Window('InventoryWindow').Child('IW_AltCurr_PointList').List('=Celestial Crests', 2)()
     end)
     if id > 0 then return id end
     return safe_num(function()
-        return mq.TLO.Window('InventoryWindow').Child('IW_AltCurr_PointList').List('=Diamond Coin', 2)()
+        return mq.TLO.Window('InventoryWindow').Child('IW_AltCurr_PointList').List('=Celestial Crest', 2)()
     end)
 end
 
-local function reclaim_dc()
-    if item_count('Diamond Coin') <= 0 then return 0 end
+local function reclaim_crests()
+    if item_count() <= 0 then return 0 end
     bot_pause.pause()
     mq.delay(100)
     if not ensure_inventory_window() then
@@ -159,22 +158,22 @@ local function reclaim_dc()
 
     local id = alt_currency_list_id()
     if id <= 0 then
-        out('\aySkipped reclaim:\ax could not find Diamond Coins in the alt-currency list.')
+        out('\aySkipped reclaim:\ax could not find Celestial Crests in the alt-currency list.')
         bot_pause.resume()
         return 0
     end
 
-    local before_inv = item_count('Diamond Coin')
+    local before_inv = item_count()
     mq.cmdf('/nomodkey /notify InventoryWindow IW_AltCurr_PointList listselect %d leftmouseup', id)
     mq.delay(150)
     mq.cmd('/nomodkey /notify InventoryWindow AltCurr_ReclaimButton leftmouseup')
-    mq.delay(250, function() return item_count('Diamond Coin') < before_inv end)
-    if item_count('Diamond Coin') >= before_inv then
+    mq.delay(250, function() return item_count() < before_inv end)
+    if item_count() >= before_inv then
         mq.cmd('/nomodkey /notify InventoryWindow IW_AltCurr_Reclaimbutton leftmouseup')
     end
-    mq.delay(800, function() return item_count('Diamond Coin') < before_inv end)
+    mq.delay(800, function() return item_count() < before_inv end)
     bot_pause.resume()
-    return math.max(0, before_inv - item_count('Diamond Coin'))
+    return math.max(0, before_inv - item_count())
 end
 
 local function close_inventory()
@@ -224,15 +223,15 @@ local function register_done_events()
         end
     end
 
-    pcall(function() mq.event('TurboCollectDCSignal', '#*#[SIGNAL_DONE]#*##1#', on_signal) end)
-    pcall(function() mq.event('TurboCollectDCDoneArrow', '#*#[DONE]#*##1#->#2#', on_done) end)
-    pcall(function() mq.event('TurboCollectDCDoneAny', '#*#[DONE]#*#', on_done) end)
+    pcall(function() mq.event('TurboCollectCrestSignal', '#*#[SIGNAL_DONE]#*##1#', on_signal) end)
+    pcall(function() mq.event('TurboCollectCrestDoneArrow', '#*#[DONE]#*##1#->#2#', on_done) end)
+    pcall(function() mq.event('TurboCollectCrestDoneAny', '#*#[DONE]#*#', on_done) end)
 end
 
 local function unregister_done_events()
-    pcall(function() mq.unevent('TurboCollectDCSignal') end)
-    pcall(function() mq.unevent('TurboCollectDCDoneArrow') end)
-    pcall(function() mq.unevent('TurboCollectDCDoneAny') end)
+    pcall(function() mq.unevent('TurboCollectCrestSignal') end)
+    pcall(function() mq.unevent('TurboCollectCrestDoneArrow') end)
+    pcall(function() mq.unevent('TurboCollectCrestDoneAny') end)
 end
 
 local function add_unique(out_list, seen, name)
@@ -279,9 +278,9 @@ end
 
 local function parse_args()
     local scope = 'group'
-    local max_amount = 0
     local recipient = ''
     local from_only = ''
+    local max_amount = 0
     local i = 1
     while i <= #args do
         local s = tostring(args[i] or '')
@@ -296,34 +295,34 @@ local function parse_args()
             i = i + 1
         elseif tonumber(s) and tonumber(s) > 0 then
             max_amount = math.floor(tonumber(s))
+        elseif recipient == '' and s:match('^[%w_]+$') and low ~= 'group' then
+            -- bare name after optional all: treat as recipient only with explicit "to"
         end
         i = i + 1
     end
     if recipient == '' then
         recipient = me_name()
     end
-    return scope, max_amount, recipient, from_only
+    return scope, recipient, from_only, max_amount
 end
 
 local function ask_sender(name, recipient, chunk)
     done[clean_name(name)] = nil
     if chunk and chunk > 0 then
-        mq.cmdf('/squelch /e3bct %s /mac turbogive _senddc %s %d', name, recipient, chunk)
+        mq.cmdf('/squelch /e3bct %s /mac turbogive _sendcrest %s %d', name, recipient, chunk)
     else
-        mq.cmdf('/squelch /e3bct %s /mac turbogive _senddc %s', name, recipient)
+        mq.cmdf('/squelch /e3bct %s /mac turbogive _sendcrest %s', name, recipient)
     end
 end
 
-local function wait_sender(name, collect_locally, chunk, recipient)
-    out('\ao[COLLECT DC]\ax Asking \ag%s\ax to send DC...', name)
-    local before_alt = collect_locally and read_alt_dc() or 0
-    local before_inv = collect_locally and item_count('Diamond Coin') or 0
+local function wait_sender(name, collect_locally)
+    out('\ao[Crest]\ax Asking \ag%s\ax...', name)
+    local before_alt = collect_locally and read_crests() or 0
+    local before_inv = collect_locally and item_count() or 0
     local start = now_ms()
     local last_activity = start
     local saw_trade = false
     local trade_count = 0
-
-    ask_sender(name, recipient, chunk)
 
     while true do
         if mq.doevents then mq.doevents() end
@@ -334,16 +333,16 @@ local function wait_sender(name, collect_locally, chunk, recipient)
             if accept_trade() then
                 trade_count = trade_count + 1
                 mq.delay(350)
-                reclaim_dc()
+                reclaim_crests()
                 last_activity = now_ms()
             else
-                out('\ay[COLLECT DC]\ax Trade with %s did not close cleanly; moving on.', name)
+                out('\ay[Crest]\ax Trade with %s did not close cleanly; moving on.', name)
                 break
             end
         end
 
-        if collect_locally and item_count('Diamond Coin') > 0 then
-            reclaim_dc()
+        if collect_locally and item_count() > 0 then
+            reclaim_crests()
             last_activity = now_ms()
         end
 
@@ -353,7 +352,7 @@ local function wait_sender(name, collect_locally, chunk, recipient)
         elseif saw_trade then
             if now_ms() - last_activity >= IDLE_AFTER_TRADE_MS then break end
         elseif now_ms() - start >= FIRST_ACTIVITY_TIMEOUT_MS then
-            out('\ay[COLLECT DC]\ax Timed out waiting for %s to open trade or signal done.', name)
+            out('\ay[Crest]\ax Timed out waiting for %s.', name)
             break
         end
 
@@ -361,9 +360,9 @@ local function wait_sender(name, collect_locally, chunk, recipient)
     end
 
     if collect_locally then
-        reclaim_dc()
-        local after_alt = read_alt_dc()
-        local after_inv = item_count('Diamond Coin')
+        reclaim_crests()
+        local after_alt = read_crests()
+        local after_inv = item_count()
         local received = math.max(0, (after_alt - before_alt) + math.max(0, after_inv - before_inv))
         return received, trade_count, done[clean_name(name)] == true
     end
@@ -371,9 +370,10 @@ local function wait_sender(name, collect_locally, chunk, recipient)
 end
 
 local function main()
-    local scope, max_amount, recipient, from_only = parse_args()
+    local scope, recipient, from_only, max_amount = parse_args()
     local me = me_name()
     local collect_locally = clean_name(recipient) == clean_name(me)
+    local send_chunk = (tonumber(max_amount) or 0) > 0 and math.floor(max_amount) or DEFAULT_CHUNK
 
     if cursor_id() > 0 then
         out('\arAborting:\ax cursor item detected before start: %s.', cursor_name() ~= '' and cursor_name() or 'unknown item')
@@ -392,9 +392,9 @@ local function main()
         return false
     end
 
-    if collect_locally and item_count('Diamond Coin') > 0 then
-        out('\ao[COLLECT DC]\ax Reclaiming existing inventory Diamond Coin before collection.')
-        reclaim_dc()
+    if collect_locally and item_count() > 0 then
+        out('\ao[Crest]\ax Reclaiming existing inventory Celestial Crest before collection.')
+        reclaim_crests()
     end
 
     local active = {}
@@ -418,22 +418,19 @@ local function main()
     end
 
     if #active == 0 then
-        out('\arNo %s members found in-zone to collect DC from (recipient %s excluded).',
+        out('\arNo %s members found in-zone to move Crests from (recipient %s excluded).',
             from_only ~= '' and 'named' or (scope == 'all' and 'E3' or 'group'), recipient)
         return false
     end
 
-    if collect_locally and free_inventory() <= 0 and item_count('Diamond Coin') <= 0 then
-        out('\ayWarning:\ax no free inventory slots. Incoming DC may fail if it cannot stack.')
+    if collect_locally and free_inventory() <= 0 and item_count() <= 0 then
+        out('\ayWarning:\ax no free inventory slots. Incoming Crests may fail if it cannot stack.')
     end
 
-    local chunk = max_amount > 0 and math.min(max_amount, DEFAULT_CHUNK) or DEFAULT_CHUNK
-    out('\ao[COLLECT DC]\ax %s -> \ag%s\ax from %d sender(s), chunk %d%s (%s).',
+    out('\ao[Crest]\ax %s -> \ag%s\ax from %d sender(s) (%s).',
         collect_locally and 'Collect' or 'Give',
         recipient,
         #active,
-        chunk,
-        max_amount > 0 and (' each, limit ' .. tostring(max_amount)) or '',
         from_only ~= '' and ('from ' .. from_only)
             or (scope == 'all' and 'E3 peers' or 'group'))
 
@@ -447,9 +444,8 @@ local function main()
         local pass_received = 0
         local pass_activity = 0
         for _, name in ipairs(active) do
-            local remaining = max_amount > 0 and max_amount or 0
-            local request_chunk = remaining > 0 and math.min(remaining, DEFAULT_CHUNK) or DEFAULT_CHUNK
-            local got, trades, signaled = wait_sender(name, collect_locally, request_chunk, recipient)
+            ask_sender(name, recipient, send_chunk)
+            local got, trades, signaled = wait_sender(name, collect_locally)
             sent_count = sent_count + 1
             if signaled or trades > 0 then
                 responded = responded + 1
@@ -458,10 +454,10 @@ local function main()
             total_received = total_received + got
             pass_received = pass_received + got
             if got > 0 then
-                out('\ao[COLLECT DC]\ax Pass %d: %s delivered \ag%d\ax DC. Alt-currency DC now: \ag%d\ax.',
-                    pass, name, got, read_alt_dc())
+                out('\ao[Crest]\ax Pass %d: %s delivered \ag%d\ax Crests. You now have \ag%d\ax.',
+                    pass, name, got, read_crests())
             elseif signaled then
-                out('\ao[COLLECT DC]\ax Pass %d: %s signaled done.', pass, name)
+                out('\ao[Crest]\ax Pass %d: %s signaled done.', pass, name)
             end
             mq.delay(350)
         end
@@ -484,14 +480,14 @@ local function main()
 
     unregister_done_events()
     if collect_locally then
-        reclaim_dc()
+        reclaim_crests()
     end
     clear_cursor('finishing', 4000)
     close_inventory()
 
     if collect_locally then
-        out('\agComplete\ax after \ag%d\ax pass(es). \ag%d\ax/\ag%d\ax requests returned activity. Total received/reclaimed: \ag%d\ax DC. Alt-currency DC now: \ag%d\ax.',
-            passes, responded, sent_count, total_received, read_alt_dc())
+        out('\agComplete\ax after \ag%d\ax pass(es). \ag%d\ax/\ag%d\ax requests returned activity. Total received/reclaimed: \ag%d\ax Crests. You now have \ag%d\ax.',
+            passes, responded, sent_count, total_received, read_crests())
     else
         out('\agComplete\ax after \ag%d\ax pass(es). \ag%d\ax/\ag%d\ax senders signaled. Recipient: \ag%s\ax.',
             passes, responded, sent_count, recipient)

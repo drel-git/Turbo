@@ -68,18 +68,55 @@ function M.active_members(scope)
     return active
 end
 
+--- Parse collector args: all/e3, from Name, to Name, and optional max amount.
+-- @return scope, max_amount, recipient ('' if unset), from_only ('' if unset)
 function M.parse_scope_args(args)
     local scope = 'group'
     local max_amount = 0
-    for _, raw in ipairs(args or {}) do
-        local s = tostring(raw or ''):lower()
-        if s == 'all' or s == 'e3' or s == 'raid' then
+    local recipient = ''
+    local from_only = ''
+    local i = 1
+    args = args or {}
+    while i <= #args do
+        local s = tostring(args[i] or '')
+        local low = s:lower()
+        if low == 'all' or low == 'e3' or low == 'raid' then
             scope = 'all'
+        elseif low == 'from' and args[i + 1] then
+            from_only = tostring(args[i + 1]):match('^[%w_]+') or ''
+            i = i + 1
+        elseif low == 'to' and args[i + 1] then
+            recipient = tostring(args[i + 1]):match('^[%w_]+') or ''
+            i = i + 1
         elseif tonumber(s) and tonumber(s) > 0 then
             max_amount = math.floor(tonumber(s))
         end
+        i = i + 1
     end
-    return scope, max_amount
+    return scope, max_amount, recipient, from_only
+end
+
+function M.resolve_active_senders(scope, recipient, from_only)
+    recipient = tostring(recipient or '')
+    from_only = tostring(from_only or '')
+    local active = {}
+    if from_only ~= '' then
+        if M.clean_name(from_only) == M.clean_name(recipient) then
+            return active, 'from_to_same'
+        end
+        if not M.spawn_exists(from_only) then
+            return active, 'from_missing'
+        end
+        active[1] = from_only
+        return active, nil
+    end
+    local members = scope == 'all' and M.e3_members() or M.group_members()
+    for _, name in ipairs(members) do
+        if M.clean_name(name) ~= M.clean_name(recipient) and M.spawn_exists(name) then
+            active[#active + 1] = name
+        end
+    end
+    return active, nil
 end
 
 function M.create_done_tracker()

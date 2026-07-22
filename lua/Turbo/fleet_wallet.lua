@@ -1,0 +1,1224 @@
+--[[
+  Turbo fleet wallet ($ chrome panel).
+  Kept in its own chunk so init.lua stays under Lua's 200-local limit.
+
+  Lean sticky pop-out: independent of Turbo Full/Mini minimize.
+  You amounts = live TLOs (alt + bag stacks).
+  Peer live = E3 TurboFW via one-shot /lua run turbo_wallet_ping (no Gear required).
+  Sidecar is optional backup; never loop-poke peers.
+]]
+
+local M = {}
+
+local TG, mq, ImGui, Ui
+local cachedWallet, refreshWalletCache
+
+local function defaultColumns()
+    return { pp = true, dc = true, rc = true, fav = true, cc = true, aa = true }
+end
+
+local function ensureColumns()
+    local cols = TG.fleetWalletColumns
+    if type(cols) ~= 'table' then
+        cols = defaultColumns()
+        TG.fleetWalletColumns = cols
+    end
+    for _, key in ipairs({ 'pp', 'dc', 'rc', 'fav', 'cc', 'aa' }) do
+        if cols[key] == nil then cols[key] = true end
+    end
+    return cols
+end
+
+local function onWalletActivity()
+    local now = (mq.gettime and mq.gettime()) or (os.time() * 1000)
+    if (tonumber(TG._fwTradePingAtMS) or 0) + 1500 > now then return end
+    TG._fwTradePingAtMS = now
+    -- Local file publish (this box). Debounced.
+    pcall(function()
+        local ok, ping = pcall(require, 'turbo_lib.wallet_ping')
+        if ok and ping and ping.publish then ping.publish() end
+    end)
+    -- If Fleet wallet is open, also ask visible peers once (covers peers without Turbo).
+    if M.isOpen and M.isOpen() then
+        if (tonumber(TG._fwTradePeerPokeAtMS) or 0) + 5000 <= now then
+            TG._fwTradePeerPokeAtMS = now
+            TG._fwNeedPeerPoke = true
+            TG._fwNextLiveMS = 0
+        end
+    end
+end
+
+local function quickWalletSig()
+    -- Cheap spend detect while MerchantWnd is open (no bag walk beyond FindItemCount).
+    local ok, ping = pcall(require, 'turbo_lib.wallet_ping')
+    if not ok or not ping or not ping.gather then return '' end
+    local snap = ping.gather()
+    if type(snap) ~= 'table' then return '' end
+    return table.concat({
+        tostring(snap.platinum or ''),
+        tostring(snap.diamond_coins or ''),
+        tostring(snap.radiant_crystals or ''),
+        tostring(snap.celestial_crests or ''),
+    }, '|')
+end
+
+local function registerTradePing()
+    if TG._fwTradePingRegistered then return end
+    -- Chat events (processed when something calls doevents, e.g. Gear).
+    pcall(function()
+        mq.event('TurboFWTradeDone', 'You complete the trade#*#', onWalletActivity)
+    end)
+    pcall(function()
+        mq.event('TurboFWTradeDone2', '#*#You complete the trade#*#', onWalletActivity)
+    end)
+    pcall(function()
+        mq.event('TurboFWPurchase1', '#*#You purchase#*#', onWalletActivity)
+    end)
+    pcall(function()
+        mq.event('TurboFWPurchase2', '#*#You buy#*#', onWalletActivity)
+    end)
+    TG._fwTradePingRegistered = true
+end
+
+local function windowOpen(name)
+    local open = false
+    pcall(function()
+        open = mq.TLO.Window(name).Open() == true
+    end)
+    return open
+end
+
+--- Watch TradeWnd / MerchantWnd (Turbo main loop skips doevents; this is the reliable path).
+function M.tick()
+    if not mq then return end
+    local now = (mq.gettime and mq.gettime()) or (os.time() * 1000)
+
+    local tradeOpen = windowOpen('TradeWnd')
+    if TG._fwTradeWasOpen and not tradeOpen then
+        onWalletActivity()
+    end
+    TG._fwTradeWasOpen = tradeOpen
+
+    local merchantOpen = windowOpen('MerchantWnd')
+    if TG._fwMerchantWasOpen and not merchantOpen then
+        onWalletActivity()
+    elseif merchantOpen then
+        -- Buys often leave the merchant open; publish when wallet totals move.
+        if (tonumber(TG._fwMerchantSigAtMS) or 0) <= now then
+            TG._fwMerchantSigAtMS = now + 1000
+            local sig = quickWalletSig()
+            if sig ~= '' and sig ~= tostring(TG._fwMerchantWalletSig or '') then
+                local had = TG._fwMerchantWalletSig ~= nil and TG._fwMerchantWalletSig ~= ''
+                TG._fwMerchantWalletSig = sig
+                if had then onWalletActivity() end
+            elseif TG._fwMerchantWalletSig == nil then
+                TG._fwMerchantWalletSig = sig
+            end
+        end
+    else
+        TG._fwMerchantWalletSig = nil
+    end
+    TG._fwMerchantWasOpen = merchantOpen
+end
+
+function M.init(deps)
+    TG = deps.TG
+    mq = deps.mq
+    ImGui = deps.ImGui
+    Ui = deps.Ui
+    cachedWallet = deps.cachedWallet
+    refreshWalletCache = deps.refreshWalletCache
+    TG.fleetWalletRecipient = TG.fleetWalletRecipient or ''
+    TG.fleetWalletRows = TG.fleetWalletRows or {}
+    TG.fleetWalletScope = TG.fleetWalletScope or 'group'
+    local cur = tostring(TG.fleetWalletCurrency or 'rc'):lower()
+    if cur ~= 'pp' and cur ~= 'dc' and cur ~= 'rc' and cur ~= 'cc' then cur = 'rc' end
+    TG.fleetWalletCurrency = cur
+    TG.fleetWalletPicks = type(TG.fleetWalletPicks) == 'table' and TG.fleetWalletPicks or {}
+    TG.fleetWalletForgotten = type(TG.fleetWalletForgotten) == 'table' and TG.fleetWalletForgotten or {}
+    TG.fleetWalletShowSettings = TG.fleetWalletShowSettings == true
+        or TG.fleetWalletShowPicks == true
+    TG.fleetWalletAmount = tostring(TG.fleetWalletAmount or ''):gsub('%D', '')
+    ensureColumns()
+    registerTradePing()
+    return M
+end
+
+local function amountOrNil()
+    local s = tostring(TG.fleetWalletAmount or ''):gsub('%D', '')
+    TG.fleetWalletAmount = s
+    local n = tonumber(s)
+    if n and n > 0 then return math.floor(n) end
+    return nil
+end
+
+local function fmt(n)
+    if n == nil then return '-' end
+    n = tonumber(n)
+    if n == nil then return '-' end
+    -- Keep exact integers through 9,999,999 so collect totals stay readable.
+    if n >= 10000000 then return string.format('%.1fm', n / 1000000) end
+    if n >= 100000 then return string.format('%.1fk', n / 1000) end
+    return tostring(math.floor(n))
+end
+
+local function clean(name)
+    return tostring(name or ''):lower():gsub('%s+', ''):gsub('[^%w]', '')
+end
+
+local function isForgotten(name)
+    local forgotten = TG.fleetWalletForgotten
+    if type(forgotten) ~= 'table' then return false end
+    local key = clean(name)
+    return forgotten[name] == true or forgotten[key] == true
+end
+
+local function forgetName(name)
+    name = tostring(name or '')
+    if name == '' then return end
+    local key = clean(name)
+    local forgotten = TG.fleetWalletForgotten
+    if type(forgotten) ~= 'table' then forgotten = {}; TG.fleetWalletForgotten = forgotten end
+    forgotten[name] = true
+    forgotten[key] = true
+    local picks = TG.fleetWalletPicks
+    if type(picks) == 'table' then
+        picks[name] = nil
+        picks[key] = nil
+    end
+    if TG.saveSettings then pcall(TG.saveSettings) end
+end
+
+local function walletSidecarPath()
+    return tostring(mq.configDir or '') .. '/TurboGear_wallet.lua'
+end
+
+local function cachePath()
+    return tostring(mq.configDir or '') .. '/TurboGear_cache.lua'
+end
+
+local function fileSig(path)
+    -- Cheap change detect: mtime + size. Never load the file here.
+    path = tostring(path or '')
+    if path == '' then return '' end
+    local ok_lfs, lfs = pcall(require, 'lfs')
+    if ok_lfs and lfs and lfs.attributes then
+        local ok, attr = pcall(lfs.attributes, path)
+        if ok and type(attr) == 'table' then
+            return tostring(attr.modification or 0) .. ':' .. tostring(attr.size or 0)
+        end
+    end
+    local f = io.open(path, 'rb')
+    if not f then return '' end
+    local size = f:seek('end') or 0
+    f:close()
+    return 'size:' .. tostring(size)
+end
+
+local function peersFromTable(value)
+    local peers, filled = {}, 0
+    if type(value) ~= 'table' then return peers, filled end
+    for key, snap in pairs(value) do
+        if type(snap) == 'table' then
+            local name = tostring(snap.name or '')
+            if name == '' then
+                name = tostring(key or ''):match('_(.+)$') or ''
+            end
+            if name ~= '' then
+                local plat = tonumber(snap.platinum)
+                local dc = tonumber(snap.diamond_coins)
+                local rc = tonumber(snap.radiant_crystals)
+                local favor = tonumber(snap.tribute_favor)
+                local crests = tonumber(snap.celestial_crests)
+                local aa = tonumber(snap.aa_unspent)
+                peers[clean(name)] = {
+                    name = name,
+                    plat = plat,
+                    dc = dc,
+                    rc = rc,
+                    favor = favor,
+                    crests = crests,
+                    aa = aa,
+                }
+                if plat ~= nil or dc ~= nil or rc ~= nil or favor ~= nil
+                    or crests ~= nil or aa ~= nil then
+                    filled = filled + 1
+                end
+            end
+        end
+    end
+    return peers, filled
+end
+
+local function loadSidecarPeers()
+    local path = walletSidecarPath()
+    local sig = fileSig(path)
+    if sig == '' then return nil, 0, '' end
+    local ok, value = pcall(function()
+        local chunk = loadfile(path)
+        if type(chunk) ~= 'function' then return nil end
+        return chunk()
+    end)
+    if not ok or type(value) ~= 'table' then return nil, 0, sig end
+    local peers, filled = peersFromTable(value)
+    return peers, filled, sig
+end
+
+local function streamScanCachePeers()
+    local path = cachePath()
+    local peers = {}
+    local filled = 0
+    local f = io.open(path, 'r')
+    if not f then return peers, filled end
+    local current, entryDepth = nil, 0
+    for line in f:lines() do
+        local keyName = line:match("^%s*%['[^'%[%]]+_([%w_]+)'%]%s*=%s*%{")
+        if keyName and (entryDepth <= 0 or not current) then
+            current = { name = keyName }
+            peers[clean(keyName)] = current
+            entryDepth = 1
+        elseif current then
+            local opens, closes = 0, 0
+            for _ in line:gmatch('%{') do opens = opens + 1 end
+            for _ in line:gmatch('%}') do closes = closes + 1 end
+            local n = line:match("%['name'%]%s*=%s*'([^']+)'")
+            if n and n ~= '' and entryDepth == 1 then current.name = n end
+            local plat = line:match("%['platinum'%]%s*=%s*([%-%d%.eE]+)")
+            if plat then current.plat = tonumber(plat) end
+            local dc = line:match("%['diamond_coins'%]%s*=%s*([%-%d%.eE]+)")
+            if dc then current.dc = tonumber(dc) end
+            local rc = line:match("%['radiant_crystals'%]%s*=%s*([%-%d%.eE]+)")
+            if rc then current.rc = tonumber(rc) end
+            local favor = line:match("%['tribute_favor'%]%s*=%s*([%-%d%.eE]+)")
+            if favor then current.favor = tonumber(favor) end
+            local crests = line:match("%['celestial_crests'%]%s*=%s*([%-%d%.eE]+)")
+            if crests then current.crests = tonumber(crests) end
+            local aa = line:match("%['aa_unspent'%]%s*=%s*([%-%d%.eE]+)")
+            if aa then current.aa = tonumber(aa) end
+            entryDepth = entryDepth + opens - closes
+            if entryDepth <= 0 then
+                if current.plat ~= nil or current.dc ~= nil or current.rc ~= nil
+                    or current.favor ~= nil or current.crests ~= nil or current.aa ~= nil then
+                    filled = filled + 1
+                end
+                current = nil
+                entryDepth = 0
+            end
+        end
+    end
+    f:close()
+    return peers, filled
+end
+
+local function ensurePeers(force)
+    local sidePath = walletSidecarPath()
+    local sideSig = fileSig(sidePath)
+    -- Sidecar-only hot path. Full cache scan is opt-in (force + no sidecar) to
+    -- avoid hitching on the multi-MB pickle.
+    local sig = 'w:' .. sideSig
+    if not force and TG._fwPeerSig == sig and type(TG._fwPeers) == 'table' then
+        return TG._fwPeers
+    end
+
+    TG._fwLoadErr = nil
+    TG._fwPeerSource = nil
+    TG._fwPeerFilled = 0
+    local peers, filled = {}, 0
+
+    if sideSig ~= '' then
+        local sidePeers, sideFilled = loadSidecarPeers()
+        if type(sidePeers) == 'table' then
+            peers, filled = sidePeers, sideFilled
+            TG._fwPeerSource = 'sidecar'
+        else
+            TG._fwLoadErr = 'sidecar load failed'
+            peers = type(TG._fwPeers) == 'table' and TG._fwPeers or {}
+        end
+    elseif force then
+        local ok, err = pcall(function()
+            peers, filled = streamScanCachePeers()
+        end)
+        if not ok then
+            TG._fwLoadErr = tostring(err or 'cache scan failed')
+            peers = type(TG._fwPeers) == 'table' and TG._fwPeers or {}
+            filled = 0
+        else
+            TG._fwPeerSource = 'cache'
+        end
+    else
+        TG._fwPeerSource = 'none'
+    end
+
+    TG._fwPeers = peers
+    TG._fwPeerFilled = filled
+    TG._fwPeerSig = sig
+    return peers
+end
+
+local function armFastPoll(ms)
+    local untilMS = ((mq.gettime and mq.gettime()) or (os.time() * 1000)) + (tonumber(ms) or 12000)
+    TG._fwPokeUntilMS = math.max(tonumber(TG._fwPokeUntilMS) or 0, untilMS)
+end
+
+--- One-shot peer ping: tiny lua sets E3 TurboFW (no Gear required, no loop).
+local function pokePeerWallet(name)
+    name = tostring(name or ''):match('^[%w_]+') or ''
+    if name == '' then return end
+    mq.cmdf('/squelch /e3bct %s /squelch /lua run turbo_wallet_ping', name)
+    armFastPoll(10000)
+end
+
+local function decodeTurboFW(text)
+    text = tostring(text or '')
+    if text == '' or text == 'NULL' then return nil end
+    local map = {}
+    for piece in string.gmatch(text, '[^:]+') do
+        local k, v = piece:match('^(%a)(.*)$')
+        if k then map[k] = v end
+    end
+    local function num(v)
+        if v == nil or v == '' then return nil end
+        return tonumber(v)
+    end
+    local p, d, r, f, c, a = num(map.p), num(map.d), num(map.r), num(map.f), num(map.c), num(map.a)
+    if p == nil and d == nil and r == nil and f == nil and c == nil and a == nil then
+        return nil
+    end
+    return {
+        plat = p, dc = d, rc = r, favor = f, crests = c, aa = a,
+        updated = num(map.t),
+        live = true,
+    }
+end
+
+local function liveFilePath(name)
+    name = tostring(name or ''):match('^[%w_]+') or ''
+    if name == '' then return '' end
+    return tostring(mq.configDir or '') .. '/TurboFW_' .. name .. '.txt'
+end
+
+local function readLiveFile(name)
+    local path = liveFilePath(name)
+    if path == '' then return nil end
+    local ok, text = pcall(function()
+        local f = io.open(path, 'r')
+        if not f then return nil end
+        local body = f:read('*l') or f:read('*a') or ''
+        f:close()
+        return body
+    end)
+    if not ok or not text then return nil end
+    return decodeTurboFW(text)
+end
+
+--- Live peer wallet: shared TurboFW_<Name>.txt first, E3 var backup.
+local function queryPeerLive(name)
+    name = tostring(name or ''):match('^[%w_]+') or ''
+    if name == '' then return nil end
+    local fromFile = readLiveFile(name)
+    if fromFile then
+        fromFile.source = 'file'
+        return fromFile
+    end
+    local ok, val = pcall(function()
+        if not (mq.TLO.MQ2Mono and mq.TLO.MQ2Mono.Query) then return nil end
+        return mq.TLO.MQ2Mono.Query(string.format('e3,%s,TurboFW', name))()
+    end)
+    if not ok then return nil end
+    local fromE3 = decodeTurboFW(val)
+    if fromE3 then fromE3.source = 'e3' end
+    return fromE3
+end
+
+--- Read-only overlay. Pokes are explicit (open / Refresh / Get·Send·Collect).
+local function refreshLivePeers(allowedKeys)
+    local now = (mq.gettime and mq.gettime()) or (os.time() * 1000)
+    if (tonumber(TG._fwNextLiveMS) or 0) > now and type(TG._fwLivePeers) == 'table' then
+        return TG._fwLivePeers
+    end
+    TG._fwNextLiveMS = now + 750
+
+    -- Rebuild each poll so departed/stale entries do not stick forever.
+    local live = {}
+    local liveCount = 0
+    if type(allowedKeys) == 'table' then
+        for key, label in pairs(allowedKeys) do
+            local name = tostring(label or key)
+            local me = tostring(mq.TLO.Me.CleanName() or '')
+            if name ~= '' and clean(name) ~= clean(me) then
+                local rec = queryPeerLive(name)
+                if rec then
+                    rec.name = name
+                    live[clean(name)] = rec
+                    liveCount = liveCount + 1
+                end
+            end
+        end
+    end
+    TG._fwLivePeers = live
+    TG._fwLiveCount = liveCount
+    return live
+end
+
+--- While open: sidecar reload only when file changes (no command spam).
+local function pollPeersIfDue()
+    local now = (mq.gettime and mq.gettime()) or (os.time() * 1000)
+    local pokeUntil = tonumber(TG._fwPokeUntilMS) or 0
+    local interval = (pokeUntil > now) and 1000 or 2500
+    if not M.isOpen() and pokeUntil <= now then return end
+    if (tonumber(TG._fwNextPollMS) or 0) > now then return end
+    TG._fwNextPollMS = now + interval
+    local sideSig = fileSig(walletSidecarPath())
+    if sideSig ~= '' and sideSig ~= tostring(TG._fwLastSideSig or '') then
+        TG._fwPeerSig = nil
+        TG._fwLastSideSig = sideSig
+    end
+    ensurePeers(false)
+end
+
+local function e3Names()
+    local out = {}
+    local ok, peers = pcall(function()
+        if mq.TLO.MQ2Mono and mq.TLO.MQ2Mono.Query then
+            return mq.TLO.MQ2Mono.Query('e3,E3Bots.ConnectedClients')()
+        end
+        return nil
+    end)
+    if ok and type(peers) == 'string' then
+        for peer in peers:gmatch('([^,]+)') do
+            local name = tostring(peer):match('^%s*([%w_]+)') or ''
+            if name ~= '' then out[clean(name)] = name end
+        end
+    end
+    return out
+end
+
+local function groupNames()
+    local out = {}
+    local me = tostring(mq.TLO.Me.CleanName() or '')
+    if me ~= '' then out[clean(me)] = me end
+    local n = tonumber(mq.TLO.Group.Members() or 0) or 0
+    for i = 1, n do
+        local ok, gname = pcall(function() return mq.TLO.Group.Member(i).Name() end)
+        gname = ok and tostring(gname or '') or ''
+        if gname ~= '' then out[clean(gname)] = gname end
+    end
+    return out
+end
+
+local function allKnown(peers)
+    local out = {}
+    local me = tostring(mq.TLO.Me.CleanName() or '')
+    if me ~= '' then out[clean(me)] = me end
+    for k, v in pairs(groupNames()) do out[k] = v end
+    for k, v in pairs(e3Names()) do out[k] = v end
+    if type(peers) == 'table' then
+        for k, rec in pairs(peers) do
+            if type(rec) == 'table' and rec.name then
+                out[k] = rec.name
+            end
+        end
+    end
+    return out
+end
+
+local function buildRows()
+    refreshWalletCache()
+    local me = tostring(mq.TLO.Me.CleanName() or '')
+    local scope = tostring(TG.fleetWalletScope or 'group')
+    local picks = type(TG.fleetWalletPicks) == 'table' and TG.fleetWalletPicks or {}
+    local peers = ensurePeers(false)
+    local e3 = e3Names()
+    local group = groupNames()
+    local known = allKnown(peers)
+
+    local allowed = {}
+    if scope == 'e3' then
+        for k, v in pairs(e3) do allowed[k] = v end
+        if me ~= '' then allowed[clean(me)] = me end
+    elseif scope == 'live' then
+        for k, v in pairs(e3) do allowed[k] = v end
+        if me ~= '' then allowed[clean(me)] = me end
+        for k, rec in pairs(peers) do
+            if type(rec) == 'table' and (rec.plat ~= nil or rec.dc ~= nil or rec.rc ~= nil
+                or rec.favor ~= nil or rec.crests ~= nil or rec.aa ~= nil) then
+                allowed[k] = rec.name or k
+            end
+        end
+    elseif scope == 'picks' then
+        for name, on in pairs(picks) do
+            if on and not isForgotten(name) then
+                local label = known[clean(name)] or tostring(name)
+                allowed[clean(name)] = label
+            end
+        end
+        if me ~= '' then allowed[clean(me)] = me end
+    else
+        for k, v in pairs(group) do allowed[k] = v end
+    end
+
+    local rows, byName = {}, {}
+    local function upsert(name, plat, dc, rc, favor, crests, aa, isSelf)
+        name = tostring(name or ''):match('^%s*(.-)%s*$') or ''
+        if name == '' then return end
+        local key = clean(name)
+        if not allowed[key] and not isSelf then return end
+        local row = byName[key]
+        if not row then
+            row = {
+                name = allowed[key] or name,
+                plat = nil, dc = nil, rc = nil, favor = nil, crests = nil, aa = nil,
+                isSelf = isSelf == true,
+            }
+            byName[key] = row
+            rows[#rows + 1] = row
+        end
+        if plat ~= nil then row.plat = tonumber(plat) end
+        if dc ~= nil then row.dc = tonumber(dc) end
+        if rc ~= nil then row.rc = tonumber(rc) end
+        if favor ~= nil then row.favor = tonumber(favor) end
+        if crests ~= nil then row.crests = tonumber(crests) end
+        if aa ~= nil then row.aa = tonumber(aa) end
+        if isSelf then row.isSelf = true; row.name = me ~= '' and me or row.name end
+    end
+
+    upsert(me, cachedWallet.plat, cachedWallet.dc, cachedWallet.rc,
+        cachedWallet.favor, cachedWallet.crests, cachedWallet.aa, true)
+    -- While open: peer amounts from live ping files only (never stale sidecar).
+    -- Sidecar only fills amounts when the panel is closed / no live yet and we
+    -- have not just requested a poke (avoids showing wrong PP/CC after trades).
+    local live = refreshLivePeers(allowed)
+    local liveOnly = M.isOpen() == true
+    if not liveOnly then
+        for key, rec in pairs(peers) do
+            if type(rec) == 'table' and allowed[key] then
+                upsert(rec.name or key, rec.plat, rec.dc, rec.rc, rec.favor, rec.crests, rec.aa, false)
+            end
+        end
+    end
+    for key, rec in pairs(live) do
+        if type(rec) == 'table' and allowed[key] then
+            upsert(rec.name or key, rec.plat, rec.dc, rec.rc, rec.favor, rec.crests, rec.aa, false)
+        end
+    end
+    -- Name rows for peers without live yet (amounts stay '-' while open).
+    for _, name in pairs(allowed) do
+        upsert(name, nil, nil, nil, nil, nil, nil, false)
+    end
+
+    table.sort(rows, function(a, b)
+        if a.isSelf ~= b.isSelf then return a.isSelf end
+        return tostring(a.name):lower() < tostring(b.name):lower()
+    end)
+    TG.fleetWalletRows = rows
+    TG._fleetWalletKnown = known
+    return rows
+end
+
+local function scopeChip(id, label, scope)
+    local on = tostring(TG.fleetWalletScope or 'group') == scope
+    local variant = on and 'walletButton' or 'secondaryButton'
+    if Ui.buttonVariant(label .. '##fw_scope_' .. id, variant) then
+        TG.fleetWalletScope = scope
+        if scope == 'picks' then TG.fleetWalletShowPicks = true end
+        if TG.saveSettings then pcall(TG.saveSettings) end
+    end
+end
+
+local function activeCurrency()
+    local cur = tostring(TG.fleetWalletCurrency or 'rc'):lower()
+    if cur ~= 'pp' and cur ~= 'dc' and cur ~= 'rc' and cur ~= 'cc' then return 'rc' end
+    return cur
+end
+
+local function currencyLabel(cur)
+    cur = cur or activeCurrency()
+    if cur == 'pp' then return 'PP' end
+    if cur == 'dc' then return 'DC' end
+    if cur == 'cc' then return 'CC' end
+    return 'RC'
+end
+
+local function currencyChip(id, label, cur)
+    local on = activeCurrency() == cur
+    local variant = on and 'walletButton' or 'secondaryButton'
+    if Ui.buttonVariant(label .. '##fw_cur_' .. id, variant) then
+        TG.fleetWalletCurrency = cur
+        if TG.saveSettings then pcall(TG.saveSettings) end
+    end
+end
+
+local function scopeIsWide()
+    return tostring(TG.fleetWalletScope) == 'e3' or tostring(TG.fleetWalletScope) == 'live'
+end
+
+local function collectorScript(cur)
+    cur = cur or activeCurrency()
+    if cur == 'pp' then return 'turbo_collect_cash' end
+    if cur == 'dc' then return 'turbo_collect_dc' end
+    if cur == 'cc' then return 'turbo_collect_crests' end
+    return 'turbo_collect_rc'
+end
+
+local function sendMode(cur)
+    cur = cur or activeCurrency()
+    if cur == 'pp' then return '_sendcash' end
+    if cur == 'dc' then return '_senddc' end
+    if cur == 'cc' then return '_sendcrest' end
+    return '_sendrc'
+end
+
+local function invalidateLive(name)
+    TG._fwNextLiveMS = 0
+    local key = clean(name)
+    if key ~= '' and type(TG._fwLivePeers) == 'table' then
+        TG._fwLivePeers[key] = nil
+    end
+end
+
+--- One-shot poke for visible peer rows (open / Refresh / collect scope).
+local function pokeVisiblePeers()
+    local rows = TG.fleetWalletRows
+    if type(rows) ~= 'table' then return end
+    for _, row in ipairs(rows) do
+        if type(row) == 'table' and not row.isSelf and row.name then
+            invalidateLive(row.name)
+            pokePeerWallet(row.name)
+        end
+    end
+end
+
+local function pokePeerWalletDelayed(name, delayDs)
+    name = tostring(name or ''):match('^[%w_]+') or ''
+    if name == '' then return end
+    delayDs = math.max(1, math.floor(tonumber(delayDs) or 40))
+    mq.cmdf('/timed %d /squelch /e3bct %s /squelch /lua run turbo_wallet_ping', delayDs, name)
+    armFastPoll(delayDs * 100 + 5000)
+end
+
+local function runCollectFrom(name)
+    local amt = amountOrNil()
+    if amt then
+        mq.cmdf('/lua run %s from %s %d', collectorScript(), name, amt)
+    else
+        mq.cmdf('/lua run %s from %s', collectorScript(), name)
+    end
+    invalidateLive(name)
+    pokePeerWallet(name)
+    pokePeerWalletDelayed(name, 50)
+end
+
+local function runSendMineTo(name)
+    local amt = amountOrNil()
+    if amt then
+        mq.cmdf('/mac turbogive %s %s %d', sendMode(), name, amt)
+    else
+        mq.cmdf('/mac turbogive %s %s', sendMode(), name)
+    end
+    invalidateLive(name)
+    pokePeerWallet(name)
+    pokePeerWalletDelayed(name, 50)
+end
+
+local function runCollectScope()
+    local script = collectorScript()
+    local amt = amountOrNil()
+    if scopeIsWide() then
+        if amt then mq.cmdf('/lua run %s all %d', script, amt)
+        else mq.cmdf('/lua run %s all', script) end
+    else
+        if amt then mq.cmdf('/lua run %s %d', script, amt)
+        else mq.cmdf('/lua run %s', script) end
+    end
+    pokeVisiblePeers()
+end
+
+local function runPoolScope(selected)
+    local script = collectorScript()
+    local amt = amountOrNil()
+    if scopeIsWide() then
+        if amt then mq.cmdf('/lua run %s all to %s %d', script, selected, amt)
+        else mq.cmdf('/lua run %s all to %s', script, selected) end
+    else
+        if amt then mq.cmdf('/lua run %s to %s %d', script, selected, amt)
+        else mq.cmdf('/lua run %s to %s', script, selected) end
+    end
+    pokeVisiblePeers()
+end
+
+function M.isOpen()
+    return rawget(_G, '__TurboFleetWalletOpen') == true
+end
+
+function M.setOpen(v)
+    local open = v == true
+    local was = rawget(_G, '__TurboFleetWalletOpen') == true
+    rawset(_G, '__TurboFleetWalletOpen', open)
+    if open and not was then
+        rawset(_G, '__TurboFleetWalletPlaceOnce', true)
+    end
+end
+
+function M.close()
+    M.setOpen(false)
+end
+
+function M.drawPanel()
+    pollPeersIfDue()
+    refreshWalletCache()
+    local rows = buildRows()
+    if TG._fwNeedPeerPoke then
+        TG._fwNeedPeerPoke = false
+        pokeVisiblePeers()
+    end
+    local me = tostring(mq.TLO.Me.CleanName() or '')
+    local selected = tostring(TG.fleetWalletRecipient or '')
+    if selected == '' then
+        selected = me
+        TG.fleetWalletRecipient = selected
+    end
+    local known = TG._fleetWalletKnown or {}
+    local canControl = TG.isSharedControlOwner and TG.isSharedControlOwner()
+    local cols = ensureColumns()
+    local curLabel = currencyLabel()
+    local amt = amountOrNil()
+
+    ImGui.TextColored(0.55, 0.78, 0.82, 1.0, 'Fleet wallet')
+    ImGui.SameLine()
+    local titleW = select(1, ImGui.GetContentRegionAvail()) or 0
+    if titleW > 28 then
+        ImGui.SetCursorPosX(ImGui.GetCursorPosX() + math.max(0, titleW - 26))
+    end
+    if Ui.buttonVariant('-##fw_minimize', 'windowToggleButton', 22, 20) then
+        M.close()
+    end
+
+    local liveN = tonumber(TG._fwLiveCount) or 0
+    if TG._fwLoadErr then
+        ImGui.TextColored(0.92, 0.45, 0.40, 1.0, 'Peers: ' .. tostring(TG._fwLoadErr))
+    elseif liveN > 0 then
+        ImGui.TextColored(0.42, 0.55, 0.50, 1.0,
+            string.format('You: live · Peers: %d live', liveN))
+    else
+        ImGui.TextColored(0.78, 0.62, 0.35, 1.0, 'You: live · Peers: Refresh once for live ping')
+    end
+
+    scopeChip('group', 'Group', 'group')
+    ImGui.SameLine(0, 4)
+    scopeChip('e3', 'E3', 'e3')
+    ImGui.SameLine(0, 4)
+    scopeChip('live', 'Live', 'live')
+    ImGui.SameLine(0, 4)
+    scopeChip('picks', 'Picks', 'picks')
+    ImGui.SameLine(0, 4)
+    if Ui.buttonVariant('Columns##fw_columns',
+        TG.fleetWalletShowSettings and 'walletButton' or 'utilityButton') then
+        TG.fleetWalletShowSettings = not TG.fleetWalletShowSettings
+    end
+    if ImGui.IsItemHovered() then
+        ImGui.BeginTooltip()
+        ImGui.Text('Show / hide table columns')
+        ImGui.EndTooltip()
+    end
+    ImGui.SameLine(0, 4)
+    if Ui.buttonVariant('Refresh##fw_refresh', 'utilityButton') then
+        TG._fwPeerSig = nil
+        TG._fwLastSideSig = nil
+        TG._fwNextLiveMS = 0
+        ensurePeers(false)
+        if (TG._fwPeerSource or '') == 'none' then ensurePeers(true) end
+        TG._fwNeedPeerPoke = true
+    end
+
+    ImGui.TextColored(0.55, 0.58, 0.68, 1.0, 'Currency')
+    ImGui.SameLine(0, 6)
+    currencyChip('pp', 'PP', 'pp')
+    ImGui.SameLine(0, 4)
+    currencyChip('dc', 'DC', 'dc')
+    ImGui.SameLine(0, 4)
+    currencyChip('rc', 'RC', 'rc')
+    ImGui.SameLine(0, 4)
+    currencyChip('cc', 'CC', 'cc')
+    ImGui.SameLine(0, 12)
+    ImGui.TextColored(0.45, 0.72, 0.68, 1.0, 'Pool to:')
+    ImGui.SameLine(0, 4)
+    ImGui.TextColored(0.55, 0.92, 0.82, 1.0, selected ~= '' and selected or '(none)')
+    ImGui.SameLine(0, 4)
+    if ImGui.Dummy then ImGui.Dummy(4, 1); ImGui.SameLine(0, 0) end
+    local canClearRecip = selected ~= '' and selected:lower() ~= me:lower()
+    if not canClearRecip then ImGui.BeginDisabled() end
+    if Ui.buttonVariant('x##fw_clear_recip', 'secondaryButton', 18, 0) then
+        if canClearRecip then
+            TG.fleetWalletRecipient = me
+            selected = me
+        end
+    end
+    if not canClearRecip then ImGui.EndDisabled() end
+    if ImGui.IsItemHovered() then
+        ImGui.BeginTooltip()
+        ImGui.Text(canClearRecip and 'Clear pool target (back to you)' or 'Pool target is you')
+        ImGui.EndTooltip()
+    end
+
+    -- Columns panel (separate from Picks roster mode).
+    if TG.fleetWalletShowSettings then
+        ImGui.Spacing()
+        ImGui.TextColored(0.55, 0.58, 0.68, 1.0, 'Columns')
+        local colChanged = false
+        for _, spec in ipairs({
+            { 'pp', 'PP' }, { 'dc', 'DC' }, { 'rc', 'RC' },
+            { 'fav', 'Fav' }, { 'cc', 'CC' }, { 'aa', 'AA' },
+        }) do
+            local key, label = spec[1], spec[2]
+            local on = cols[key] ~= false
+            local newOn = ImGui.Checkbox(label .. '##fw_col_' .. key, on)
+            if newOn ~= on then
+                cols[key] = newOn
+                colChanged = true
+            end
+            ImGui.SameLine(0, 8)
+        end
+        ImGui.NewLine()
+        if colChanged then
+            TG.fleetWalletColumns = cols
+            if TG.saveSettings then pcall(TG.saveSettings) end
+        end
+    end
+
+    -- Picks editor only while roster scope is Picks.
+    if tostring(TG.fleetWalletScope) == 'picks' then
+        ImGui.Spacing()
+        ImGui.TextColored(0.55, 0.58, 0.68, 1.0, 'Picks (saved roster for this view)')
+        local names = {}
+        for _, name in pairs(known) do
+            if not isForgotten(name) then names[#names + 1] = name end
+        end
+        table.sort(names, function(a, b) return a:lower() < b:lower() end)
+        local picks = TG.fleetWalletPicks
+        if type(picks) ~= 'table' then picks = {}; TG.fleetWalletPicks = picks end
+        local changed = false
+        for _, name in ipairs(names) do
+            local key = clean(name)
+            local on = picks[name] == true or picks[key] == true
+            local newOn = ImGui.Checkbox(name .. '##fw_pick_' .. key, on)
+            if newOn ~= on then
+                picks[name] = newOn and true or nil
+                picks[key] = nil
+                changed = true
+            end
+            ImGui.SameLine(0, 4)
+            if Ui.buttonVariant('Forget##fw_forget_' .. key, 'secondaryButton', 54, 0) then
+                forgetName(name)
+                changed = true
+            end
+        end
+        if changed then
+            TG.fleetWalletPicks = picks
+            if TG.saveSettings then pcall(TG.saveSettings) end
+        end
+        local forgotten = TG.fleetWalletForgotten
+        if type(forgotten) == 'table' and next(forgotten) ~= nil then
+            if Ui.buttonVariant('Restore forgotten##fw_restore_forgotten', 'utilityButton') then
+                TG.fleetWalletForgotten = {}
+                if TG.saveSettings then pcall(TG.saveSettings) end
+            end
+        end
+        ImGui.Spacing()
+    end
+
+    local colDefs = { { key = 'name', title = 'Name', w = 0 } }
+    if cols.pp ~= false then colDefs[#colDefs + 1] = { key = 'pp', title = 'PP', w = 52 } end
+    if cols.dc ~= false then colDefs[#colDefs + 1] = { key = 'dc', title = 'DC', w = 36 } end
+    if cols.rc ~= false then colDefs[#colDefs + 1] = { key = 'rc', title = 'RC', w = 36 } end
+    if cols.fav ~= false then colDefs[#colDefs + 1] = { key = 'fav', title = 'Fav', w = 44 } end
+    if cols.cc ~= false then colDefs[#colDefs + 1] = { key = 'cc', title = 'CC', w = 36 } end
+    if cols.aa ~= false then colDefs[#colDefs + 1] = { key = 'aa', title = 'AA', w = 36 } end
+    colDefs[#colDefs + 1] = { key = 'ops', title = 'Ops', w = 78 }
+
+    local tot = { pp = 0, dc = 0, rc = 0, fav = 0, cc = 0, aa = 0 }
+    local fwFlags = (ImGuiTableFlags and ImGuiTableFlags.RowBg or 0)
+        + (ImGuiTableFlags and ImGuiTableFlags.BordersInnerV or 0)
+        + (ImGuiTableFlags and ImGuiTableFlags.Borders or 0)
+    local colFlags = ImGuiTableColumnFlags or {}
+    if ImGui.BeginTable and ImGui.BeginTable('##fleet_wallet_tbl', #colDefs, fwFlags) then
+        for _, def in ipairs(colDefs) do
+            if def.key == 'name' then
+                ImGui.TableSetupColumn(def.title, colFlags.WidthStretch or 0)
+            else
+                ImGui.TableSetupColumn(def.title, colFlags.WidthFixed or 0, def.w)
+            end
+        end
+        if ImGui.TableHeadersRow then ImGui.TableHeadersRow() end
+        local cur = activeCurrency()
+        local function cell(baseR, baseG, baseB, text, isActive)
+            if isActive then
+                ImGui.TextColored(math.min(1, baseR + 0.14), math.min(1, baseG + 0.14),
+                    math.min(1, baseB + 0.10), 1.0, text)
+            else
+                ImGui.TextColored(baseR * 0.70, baseG * 0.70, baseB * 0.70, 0.90, text)
+            end
+        end
+        for _, row in ipairs(rows) do
+            ImGui.TableNextRow()
+            local isSel = selected:lower() == tostring(row.name):lower()
+            if isSel and ImGui.TableSetBgColor and ImGuiTableBgTarget and IM_COL32 then
+                ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg0, IM_COL32(32, 78, 72, 110))
+            end
+            for _, def in ipairs(colDefs) do
+                ImGui.TableNextColumn()
+                if def.key == 'name' then
+                    local label = (isSel and '> ' or '  ')
+                        .. row.name .. (row.isSelf and ' (you)' or '')
+                    if isSel and ImGui.PushStyleColor and ImGuiCol then
+                        ImGui.PushStyleColor(ImGuiCol.Text, 0.72, 0.96, 0.88, 1.0)
+                    end
+                    if ImGui.Selectable(label .. '##fw_' .. row.name, false) then
+                        TG.fleetWalletRecipient = row.name
+                        selected = row.name
+                    end
+                    if isSel and ImGui.PopStyleColor then ImGui.PopStyleColor(1) end
+                elseif def.key == 'pp' then
+                    cell(0.88, 0.80, 0.35, fmt(row.plat), cur == 'pp')
+                    if row.plat then tot.pp = tot.pp + row.plat end
+                elseif def.key == 'dc' then
+                    cell(0.72, 0.80, 0.95, fmt(row.dc), cur == 'dc')
+                    if row.dc then tot.dc = tot.dc + row.dc end
+                elseif def.key == 'rc' then
+                    cell(0.55, 0.85, 0.75, fmt(row.rc), cur == 'rc')
+                    if row.rc then tot.rc = tot.rc + row.rc end
+                elseif def.key == 'fav' then
+                    ImGui.TextColored(0.78, 0.64, 0.38, 0.95, fmt(row.favor))
+                    if row.favor then tot.fav = tot.fav + row.favor end
+                elseif def.key == 'cc' then
+                    cell(0.70, 0.60, 0.90, fmt(row.crests), cur == 'cc')
+                    if row.crests then tot.cc = tot.cc + row.crests end
+                elseif def.key == 'aa' then
+                    ImGui.TextColored(0.50, 0.72, 0.88, 0.95, fmt(row.aa))
+                    if row.aa then tot.aa = tot.aa + row.aa end
+                elseif def.key == 'ops' then
+                    if row.isSelf then
+                        ImGui.TextColored(0.42, 0.45, 0.52, 1.0, '-')
+                    else
+                        if not canControl then ImGui.BeginDisabled() end
+                        if Ui.buttonVariant('Get##fw_get_' .. row.name, 'walletButton', 34, 0) then
+                            if TG.requireSharedControl('Collect ' .. curLabel .. ' from ' .. row.name) then
+                                TG.fleetWalletRecipient = me
+                                selected = me
+                                runCollectFrom(row.name)
+                            end
+                        end
+                        if ImGui.IsItemHovered() then
+                            ImGui.BeginTooltip()
+                            if amt then
+                                ImGui.Text(string.format('Get %d %s from %s', amt, curLabel, row.name))
+                            else
+                                ImGui.Text(string.format('Get all %s from %s', curLabel, row.name))
+                            end
+                            ImGui.EndTooltip()
+                        end
+                        ImGui.SameLine(0, 2)
+                        if Ui.buttonVariant('Send##fw_send_' .. row.name, 'walletButton', 36, 0) then
+                            if TG.requireSharedControl('Send ' .. curLabel .. ' to ' .. row.name) then
+                                TG.fleetWalletRecipient = row.name
+                                selected = row.name
+                                runSendMineTo(row.name)
+                            end
+                        end
+                        if ImGui.IsItemHovered() then
+                            ImGui.BeginTooltip()
+                            if amt then
+                                ImGui.Text(string.format('Send %d %s to %s', amt, curLabel, row.name))
+                            else
+                                ImGui.Text(string.format('Send all %s to %s', curLabel, row.name))
+                            end
+                            ImGui.EndTooltip()
+                        end
+                        if not canControl then ImGui.EndDisabled() end
+                    end
+                end
+            end
+        end
+        ImGui.TableNextRow()
+        if ImGui.TableSetBgColor and ImGuiTableBgTarget and IM_COL32 then
+            ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg0, IM_COL32(18, 22, 28, 80))
+        end
+        for _, def in ipairs(colDefs) do
+            ImGui.TableNextColumn()
+            if def.key == 'name' then
+                ImGui.TextColored(0.45, 0.48, 0.55, 1.0, 'Totals')
+            elseif def.key == 'pp' then ImGui.TextColored(0.55, 0.55, 0.50, 1.0, fmt(tot.pp))
+            elseif def.key == 'dc' then ImGui.TextColored(0.50, 0.55, 0.58, 1.0, fmt(tot.dc))
+            elseif def.key == 'rc' then ImGui.TextColored(0.48, 0.56, 0.54, 1.0, fmt(tot.rc))
+            elseif def.key == 'fav' then ImGui.TextColored(0.55, 0.50, 0.42, 1.0, fmt(tot.fav))
+            elseif def.key == 'cc' then ImGui.TextColored(0.52, 0.48, 0.58, 1.0, fmt(tot.cc))
+            elseif def.key == 'aa' then ImGui.TextColored(0.45, 0.52, 0.58, 1.0, fmt(tot.aa))
+            else ImGui.Text('') end
+        end
+        ImGui.EndTable()
+    end
+
+    ImGui.Spacing()
+    local canGive = selected ~= '' and selected:lower() ~= me:lower()
+    local collectLabel = amt
+        and ('Collect %s x%d##fw_collect'):format(curLabel, amt)
+        or ('Collect %s##fw_collect'):format(curLabel)
+    local poolLabel
+    if amt and canGive then
+        poolLabel = ('Pool x%d to %s##fw_give'):format(amt, selected)
+    elseif canGive then
+        poolLabel = ('Pool %s to %s##fw_give'):format(curLabel, selected)
+    else
+        poolLabel = ('Pool %s##fw_give'):format(curLabel)
+    end
+    local btnW = 150
+    if #poolLabel:gsub('##.*$', '') > 18 then btnW = 168 end
+
+    -- Footer: actions left, amount right (stable; fills blank space).
+    if not canControl then ImGui.BeginDisabled() end
+    if Ui.buttonVariant(collectLabel, 'walletButton', btnW, 0) then
+        if TG.requireSharedControl('Collect ' .. curLabel) then
+            runCollectScope()
+        end
+    end
+    if ImGui.IsItemHovered() then
+        ImGui.BeginTooltip()
+        if amt then
+            ImGui.Text(string.format('Ask peers in scope for %d %s', amt, curLabel))
+        else
+            ImGui.Text(string.format('Ask peers in scope for all %s', curLabel))
+        end
+        ImGui.EndTooltip()
+    end
+    ImGui.SameLine(0, 6)
+    if not canGive then ImGui.BeginDisabled() end
+    if Ui.buttonVariant(poolLabel, 'walletButton', btnW, 0) then
+        if TG.requireSharedControl('Pool ' .. curLabel) then
+            runPoolScope(selected)
+        end
+    end
+    if ImGui.IsItemHovered() then
+        ImGui.BeginTooltip()
+        if canGive then
+            if amt then
+                ImGui.Text(string.format('Ask peers to send %d %s to %s', amt, curLabel, selected))
+            else
+                ImGui.Text(string.format('Ask peers to send all %s to %s', curLabel, selected))
+            end
+        else
+            ImGui.Text('Click a peer name to set Pool to')
+        end
+        ImGui.EndTooltip()
+    end
+    if not canGive then ImGui.EndDisabled() end
+    if not canControl then ImGui.EndDisabled() end
+
+    ImGui.SameLine(0, 16)
+    ImGui.TextColored(0.55, 0.58, 0.68, 1.0, 'Amount')
+    ImGui.SameLine(0, 6)
+    local allOn = amt == nil
+    if Ui.buttonVariant('All##fw_amt_all', allOn and 'walletButton' or 'secondaryButton', 40, 0) then
+        TG.fleetWalletAmount = ''
+        if TG.saveSettings then pcall(TG.saveSettings) end
+    end
+    ImGui.SameLine(0, 4)
+    if ImGui.SetNextItemWidth then ImGui.SetNextItemWidth(70) end
+    local nextAmt = ImGui.InputText('##fw_amt', tostring(TG.fleetWalletAmount or ''))
+    if nextAmt ~= nil and tostring(nextAmt) ~= tostring(TG.fleetWalletAmount or '') then
+        TG.fleetWalletAmount = tostring(nextAmt):gsub('%D', '')
+        if TG.saveSettings then pcall(TG.saveSettings) end
+    end
+    if ImGui.IsItemHovered() then
+        ImGui.BeginTooltip()
+        ImGui.Text('Applies to Get, Send, Collect, and Pool')
+        ImGui.EndTooltip()
+    end
+end
+
+--- $ chrome button only. Panel is drawn via drawWindow (survives Turbo Mini).
+function M.drawChrome(btnW, btnH)
+    if not btnW or btnW <= 0 then return end
+    if Ui.buttonVariant('$##topwalletbtn', 'walletButton', btnW, btnH) then
+        local opening = not M.isOpen()
+        M.setOpen(opening)
+        if opening then
+            TG._fwLoadErr = nil
+            TG._fwNextLiveMS = 0
+            pcall(function() ensurePeers(false) end)
+            TG._fwNeedPeerPoke = true -- one ping round; reads are silent after that
+            armFastPoll(10000)
+        end
+    end
+    if TG.turboChromeDragAddLastItem then TG.turboChromeDragAddLastItem() end
+    if ImGui.IsItemHovered and ImGui.IsItemHovered() then
+        ImGui.BeginTooltip()
+        ImGui.TextColored(0.88, 0.80, 0.35, 1.0, string.format('%12s pp', tostring(cachedWallet.plat)))
+        ImGui.TextColored(0.45, 0.78, 0.82, 1.0, string.format('%12s dc', tostring(cachedWallet.dc)))
+        ImGui.TextColored(0.55, 0.85, 0.75, 1.0, string.format('%12s rc', tostring(cachedWallet.rc or 0)))
+        ImGui.TextColored(0.85, 0.70, 0.40, 1.0, string.format('%12s favor', tostring(cachedWallet.favor or 0)))
+        ImGui.TextColored(0.70, 0.60, 0.90, 1.0, string.format('%12s crests', tostring(cachedWallet.crests or 0)))
+        ImGui.TextColored(0.55, 0.78, 0.95, 1.0, string.format('%12s aa', tostring(cachedWallet.aa or 0)))
+        ImGui.TextColored(0.55, 0.58, 0.68, 1.0, 'Fleet wallet - stays open if you Mini Turbo')
+        ImGui.EndTooltip()
+    end
+
+    if ImGui.GetItemRectMin and ImGui.GetItemRectMax then
+        pcall(function()
+            local x1 = select(1, ImGui.GetItemRectMin())
+            local _, y2 = ImGui.GetItemRectMax()
+            TG._fwAnchorX = tonumber(x1)
+            TG._fwAnchorY = tonumber(y2) and (tonumber(y2) + 2) or nil
+        end)
+    end
+    ImGui.SameLine()
+end
+
+--- Independent panel window (call from Mini and Full GUI paths).
+function M.drawWindow()
+    if not M.isOpen() or not ImGui.Begin then return end
+    if rawget(_G, '__TurboFleetWalletPlaceOnce') and ImGui.SetNextWindowPos
+        and TG._fwAnchorX and TG._fwAnchorY then
+        pcall(ImGui.SetNextWindowPos, TG._fwAnchorX, TG._fwAnchorY)
+        rawset(_G, '__TurboFleetWalletPlaceOnce', false)
+    end
+    -- Keep a usable minimum width so AlwaysAutoResize does not collapse left.
+    if ImGui.SetNextWindowSizeConstraints then
+        pcall(ImGui.SetNextWindowSizeConstraints, 460, 0, 1200, 1200)
+    end
+    local flags = 0
+    if ImGuiWindowFlags then
+        flags = (ImGuiWindowFlags.NoTitleBar or 0)
+            + (ImGuiWindowFlags.AlwaysAutoResize or 0)
+            + (ImGuiWindowFlags.NoCollapse or 0)
+    end
+    -- Turbo gold outline (match Mini/Full chrome; teal stays for actions).
+    local pushedBorder, pushedColor = false, false
+    if ImGui.PushStyleVar and ImGuiStyleVar and ImGuiStyleVar.WindowBorderSize then
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 2.0)
+        pushedBorder = true
+    end
+    if ImGui.PushStyleColor and ImGuiCol and ImGuiCol.Border then
+        if IM_COL32 then
+            ImGui.PushStyleColor(ImGuiCol.Border, IM_COL32(255, 188, 72, 240))
+        else
+            ImGui.PushStyleColor(ImGuiCol.Border, 1.00, 0.74, 0.28, 0.94)
+        end
+        pushedColor = true
+    end
+    local a, b = ImGui.Begin('TurboFleetWallet##panel', true, flags)
+    local shouldDraw = (b == nil) and a or b
+    if shouldDraw then
+        local ok, err = pcall(M.drawPanel)
+        if not ok then
+            ImGui.TextColored(0.92, 0.45, 0.40, 1.0, 'Fleet wallet error:')
+            ImGui.TextWrapped(tostring(err))
+        end
+    else
+        -- User closed via OS/X path if exposed; keep our open flag in sync.
+        M.close()
+    end
+    ImGui.End()
+    if pushedColor then ImGui.PopStyleColor(1) end
+    if pushedBorder then ImGui.PopStyleVar(1) end
+end
+
+return M

@@ -1,14 +1,18 @@
 --[[
-  turbo_collect_cash.lua - Lua coordinator for collecting platinum from peers.
-  @version lua/turbo_collect_cash.lua 1.0.0
+  turbo_collect_cash.lua - Lua coordinator for collecting / pooling platinum.
+  @version lua/turbo_collect_cash.lua 1.1.0
   Usage:
     /lua run turbo_collect_cash
     /lua run turbo_collect_cash all
     /lua run turbo_collect_cash 500
     /lua run turbo_collect_cash all 500
+    /lua run turbo_collect_cash from Name
+    /lua run turbo_collect_cash to Name
+    /lua run turbo_collect_cash from A to B
+    /lua run turbo_collect_cash all to Name
 
-  Hybrid model: this script orchestrates collection and accepts trades;
-  sender boxes still use TurboGive.mac _sendcash for pickup/trade-fill logic.
+  Hybrid model: this script orchestrates collection and accepts trades when
+  recipient is self; sender boxes use TurboGive.mac _sendcash.
 ]]
 
 local mq = require('mq')
@@ -32,25 +36,25 @@ local function out(fmt, ...)
     end
 end
 
-local function ask_sender(name, max_pp)
+local function ask_sender(name, recipient, max_pp)
     orch.clear_done(done, name)
-    orch.ask_peer_macro(name, 'turbogive', '_sendcash', core.me_name(), max_pp)
+    orch.ask_peer_macro(name, 'turbogive', '_sendcash', recipient, max_pp)
 end
 
-local function collect_from_sender(name, max_pp)
-    out('\ao[COLLECT CASH]\ax Asking \ag%s\ax to send cash...', name)
-    local before_pp = core.platinum()
+local function wait_sender(name, collect_locally, max_pp, recipient)
+    out('\ao[COLLECT CASH]\ax Asking \ag%s\ax...', name)
+    local before_pp = collect_locally and core.platinum() or 0
     local start = core.now_ms()
     local last_activity = start
     local saw_trade = false
     local trade_count = 0
 
-    ask_sender(name, max_pp)
+    ask_sender(name, recipient, max_pp)
 
     while true do
         if mq.doevents then mq.doevents() end
 
-        if core.window_open('TradeWnd') then
+        if collect_locally and core.window_open('TradeWnd') then
             saw_trade = true
             last_activity = core.now_ms()
             if core.accept_trade() then
@@ -74,35 +78,57 @@ local function collect_from_sender(name, max_pp)
         mq.delay(100)
     end
 
-    local after_pp = core.platinum()
-    local received = math.max(0, after_pp - before_pp)
-    local signaled = orch.is_done(done, name)
-    return received, trade_count, signaled
+    if collect_locally then
+        local after_pp = core.platinum()
+        local received = math.max(0, after_pp - before_pp)
+        return received, trade_count, orch.is_done(done, name)
+    end
+    return 0, trade_count, orch.is_done(done, name)
 end
 
 local function main()
-    local scope, max_amount = orch.parse_scope_args(args)
-    if not orch.preflight_trade(out) then return false end
+    local scope, max_amount, recipient, from_only = orch.parse_scope_args(args)
+    local me = core.me_name()
+    if recipient == '' then recipient = me end
+    local collect_locally = orch.clean_name(recipient) == orch.clean_name(me)
 
-    local active = orch.active_members(scope)
-    if #active == 0 then
-        out('\arNo %s members found in-zone to collect cash from.', scope == 'all' and 'E3' or 'group')
+    if not orch.preflight_trade(out) then return false end
+    if recipient == '' then
+        out('\arAborting:\ax no recipient.')
+        return false
+    end
+    if not collect_locally and not orch.spawn_exists(recipient) then
+        out('\arAborting:\ax recipient %s is not in zone.', recipient)
         return false
     end
 
-    out('\ao[COLLECT CASH]\ax Collecting from %s: %d sender(s)%s.',
-        scope == 'all' and 'all E3 peers' or 'group',
+    local active, resolve_err = orch.resolve_active_senders(scope, recipient, from_only)
+    if resolve_err == 'from_to_same' then
+        out('\arAborting:\ax from and to cannot be the same (%s).', from_only)
+        return false
+    end
+    if resolve_err == 'from_missing' then
+        out('\arAborting:\ax sender %s is not in zone.', from_only)
+        return false
+    end
+    if #active == 0 then
+        out('\arNo %s members found in-zone to move cash from (recipient %s excluded).',
+            from_only ~= '' and 'named' or (scope == 'all' and 'E3' or 'group'), recipient)
+        return false
+    end
+
+    out('\ao[COLLECT CASH]\ax %s -> \ag%s\ax from %d sender(s) (%s)%s.',
+        collect_locally and 'Collect' or 'Pool',
+        recipient,
         #active,
-        max_amount > 0 and (' (limit: ' .. tostring(max_amount) .. 'pp plat each)') or '')
+        from_only ~= '' and ('from ' .. from_only) or (scope == 'all' and 'E3 peers' or 'group'),
+        max_amount > 0 and (' limit ' .. tostring(max_amount) .. 'pp each') or '')
 
     orch.register_done_events(done)
 
-    local total_received = 0
-    local sent_count = 0
-    local responded = 0
-
+    local total_received, sent_count, responded = 0, 0, 0
     for _, name in ipairs(active) do
-        local got, trades, signaled = collect_from_sender(name, max_amount > 0 and max_amount or nil)
+        local got, trades, signaled = wait_sender(name, collect_locally, max_amount > 0 and max_amount or nil, recipient)
         sent_count = sent_count + 1
         if signaled or trades > 0 then responded = responded + 1 end
         total_received = total_received + got
@@ -115,8 +141,13 @@ local function main()
     orch.unregister_done_events()
     core.clear_cursor('finishing', 4000, out)
 
-    out('\agComplete.\ax \ag%d\ax/\ag%d\ax requests returned activity. Total received: \ag%d\ax pp. Platinum now: \ag%d\ax.',
-        responded, sent_count, total_received, core.platinum())
+    if collect_locally then
+        out('\agComplete.\ax \ag%d\ax/\ag%d\ax requests returned activity. Total received: \ag%d\ax pp. Platinum now: \ag%d\ax.',
+            responded, sent_count, total_received, core.platinum())
+    else
+        out('\agComplete.\ax \ag%d\ax/\ag%d\ax senders signaled. Recipient: \ag%s\ax.',
+            responded, sent_count, recipient)
+    end
     return true
 end
 

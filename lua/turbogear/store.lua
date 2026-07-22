@@ -334,6 +334,11 @@ local function merge_lite_snapshot(existing, snap)
         liveStats = snap.liveStats or existing.liveStats,
         radiant_crystals = snap.radiant_crystals ~= nil and snap.radiant_crystals or existing.radiant_crystals,
         ebon_crystals = snap.ebon_crystals ~= nil and snap.ebon_crystals or existing.ebon_crystals,
+        platinum = snap.platinum ~= nil and snap.platinum or existing.platinum,
+        diamond_coins = snap.diamond_coins ~= nil and snap.diamond_coins or existing.diamond_coins,
+        tribute_favor = snap.tribute_favor ~= nil and snap.tribute_favor or existing.tribute_favor,
+        celestial_crests = snap.celestial_crests ~= nil and snap.celestial_crests or existing.celestial_crests,
+        aa_unspent = snap.aa_unspent ~= nil and snap.aa_unspent or existing.aa_unspent,
     }
     if snap.bankValid ~= true and type(existing.bank) == "table" and #existing.bank > 0 then
         out.bank = existing.bank
@@ -363,6 +368,11 @@ local function merge_snapshot(existing, snap)
     if snap.liveStats == nil then snap.liveStats = existing.liveStats end
     if snap.radiant_crystals == nil then snap.radiant_crystals = existing.radiant_crystals end
     if snap.ebon_crystals == nil then snap.ebon_crystals = existing.ebon_crystals end
+    if snap.platinum == nil then snap.platinum = existing.platinum end
+    if snap.diamond_coins == nil then snap.diamond_coins = existing.diamond_coins end
+    if snap.tribute_favor == nil then snap.tribute_favor = existing.tribute_favor end
+    if snap.celestial_crests == nil then snap.celestial_crests = existing.celestial_crests end
+    if snap.aa_unspent == nil then snap.aa_unspent = existing.aa_unspent end
     if not snap.spells_sig or snap.spells_sig == "" then
         snap.spells = existing.spells
         snap.spells_sig = existing.spells_sig
@@ -616,6 +626,86 @@ function Store.tick()
     end
 end
 
+local function write_wallet_sidecar(out)
+    -- Tiny TurboGear_wallet.lua for Turbo $ panel (avoid scanning multi-MB cache).
+    local path = tostring(cfg.WalletFile or '')
+    if path == '' or type(out) ~= 'table' then return end
+    local slim = {}
+    for k, s in pairs(out) do
+        if type(s) == 'table' then
+            slim[k] = {
+                name = s.name,
+                platinum = s.platinum,
+                diamond_coins = s.diamond_coins,
+                radiant_crystals = s.radiant_crystals,
+                ebon_crystals = s.ebon_crystals,
+                tribute_favor = s.tribute_favor,
+                celestial_crests = s.celestial_crests,
+                aa_unspent = s.aa_unspent,
+            }
+        end
+    end
+    local tmp = path .. '.tmp'
+    pcall(function() os.remove(tmp) end)
+    local ok = pcall(function() mq.pickle(tmp, slim) end)
+    if not ok then
+        pcall(function() os.remove(tmp) end)
+        return
+    end
+    pcall(function() os.remove(path) end)
+    if not os.rename(tmp, path) then
+        pcall(function() os.remove(tmp) end)
+    end
+end
+
+local WALLET_KEYS = {
+    'platinum', 'diamond_coins', 'radiant_crystals', 'ebon_crystals',
+    'tribute_favor', 'celestial_crests', 'aa_unspent',
+}
+
+--- Merge wallet-only fields (depth=wallet) and rewrite sidecar immediately.
+function Store.put_wallet(wallet, kind)
+    if type(wallet) ~= 'table' or not wallet.name or not wallet.server then return false end
+    local key = wallet.server .. '_' .. wallet.name
+    local existing = Store.sources[key]
+    local out
+    if type(existing) == 'table' then
+        out = existing
+        for _, k in ipairs(WALLET_KEYS) do
+            if wallet[k] ~= nil then out[k] = wallet[k] end
+        end
+        out.updated = tonumber(wallet.updated) or os.time()
+        out.class = wallet.class or out.class
+        out.level = wallet.level or out.level
+    else
+        out = {
+            name = wallet.name,
+            server = wallet.server,
+            class = wallet.class,
+            level = wallet.level,
+            updated = tonumber(wallet.updated) or os.time(),
+            depth = 'wallet',
+            kind = kind or 'client',
+        }
+        for _, k in ipairs(WALLET_KEYS) do
+            out[k] = wallet[k]
+        end
+        Store.sources[key] = out
+    end
+    out.status = 'online'
+    out.last_seen = os.time()
+    out.kind = kind or out.kind or 'client'
+    if (kind or 'client') == 'client' then out.actorSeenAt = os.time() end
+    Store.sources[key] = out
+    Store.version = (Store.version or 0) + 1
+    pcall(write_wallet_sidecar, Store.sources)
+    return true
+end
+
+function Store.flush_wallet_sidecar()
+    pcall(write_wallet_sidecar, Store.sources)
+end
+
 function Store.save()
     content_flush_due_at = nil
     Store.last_save = os.clock(); Store.dirty = false
@@ -635,12 +725,18 @@ function Store.save()
                        bankPreserved=s.bankPreserved, bankCapturedAt=s.bankCapturedAt,
                        bankReason=s.bankReason,
                        lockouts=s.lockouts, spells=s.spells, spells_sig=s.spells_sig,
-                       spell_ids=s.spell_ids, liveStats=s.liveStats }
+                       spell_ids=s.spell_ids, liveStats=s.liveStats,
+                       -- Fleet wallet / DoN currency (nil-safe; never invent 0)
+                       radiant_crystals=s.radiant_crystals, ebon_crystals=s.ebon_crystals,
+                       platinum=s.platinum, diamond_coins=s.diamond_coins,
+                       tribute_favor=s.tribute_favor, celestial_crests=s.celestial_crests,
+                       aa_unspent=s.aa_unspent }
         end
         local ok_save, save_reason = backend:save(out)
         Store.cache_last_reload_reason = ok_save and "saved atomically" or ("save failed: " .. tostring(save_reason or "?"))
         if not ok_save then diag.count("store.save_failed") end
         Store.cache_signature = backend:signature()
+        if ok_save then pcall(write_wallet_sidecar, out) end
     end)
 end
 
@@ -703,6 +799,8 @@ function Store.load()
     if ok and type(t) == "table" then ingest_cache_table(t, true) end
     Store.cache_signature = backend:signature()
     Store.cache_last_reload_reason = ok and "loaded cache" or ("cache unavailable: " .. tostring(reason or "?"))
+    -- Refresh lean wallet sidecar for Turbo $ even when main cache was not rewritten.
+    if ok then pcall(write_wallet_sidecar, Store.sources) end
 end
 
 function Store.reload_cache()
