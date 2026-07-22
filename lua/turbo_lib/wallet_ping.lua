@@ -4,6 +4,7 @@
 ]]
 
 local mq = require('mq')
+local WalletCurrency = require('turbo_lib.wallet_currency')
 local M = {}
 
 local function num(fn)
@@ -53,7 +54,7 @@ function M.gather()
             end
             return n
         end, 'Diamond Coin'),
-        radiant_crystals = alt_plus_bag(function() return mq.TLO.Me.RadiantCrystals() end, 'Radiant Crystal'),
+        radiant_crystals = WalletCurrency.radiant_total(),
         tribute_favor = num(function() return mq.TLO.Me.CurrentFavor() end),
         celestial_crests = alt_plus_bag(function()
             local t = mq.TLO.Me.AltCurrency('Celestial Crests')

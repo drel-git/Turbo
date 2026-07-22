@@ -1,3 +1,18 @@
+1.2.70
+- Fleet wallet polish: active currency column gets a teal wash + bright header;
+  Pool recipient row gets a softer teal wash + bright name. VIEW (Group / E3 /
+  Live) and ACTIONS (Picks / Columns / Refresh) are separated. Self Ops cell is
+  blank. Currency chips are larger; separator above Totals. Panel buttons are
+  rounded.
+- Radiant Crystals: counts and send/collect gates use max of Me.RadiantCrystals,
+  AltCurrency name, and AltCurrency[2], then bag stacks once. Convert still
+  selects the Alt Currency list row by name.
+- DSK BiS Hideous Hex augs: all 19 shared Hex foci show for every class from
+  dsk.template (including Companion's Mercy). Physical / Mental Prowess is
+  class-gated on Aug20 the same way DoN Cryptic Clutch gates Prowess. Ranger
+  gets Physical Prowess. Short UI labels; full Hideous Hex of ... names still
+  match. Item ids filled; hover notes use DoN-style effect | stats coloring.
+
 1.2.69
 - Fleet wallet: teal $ chrome opens a sticky peer currency panel (gold Turbo
   outline). Stays open when Turbo is Mini. Scope Group / E3 / Live / Picks;

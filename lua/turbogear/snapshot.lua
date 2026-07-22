@@ -248,14 +248,9 @@ local function fill_wallet_fields(snap)
         end
     end)
     pcall(function()
-        local alt = mq.TLO.Me.RadiantCrystals()
-        local altN = alt ~= nil and tonumber(alt) or nil
-        local bag = tonumber(mq.TLO.FindItemCount('=Radiant Crystal')()) or 0
-        if altN ~= nil then
-            snap.radiant_crystals = altN + bag
-        elseif bag > 0 then
-            snap.radiant_crystals = bag
-        end
+        local WalletCurrency = require('turbo_lib.wallet_currency')
+        local total = WalletCurrency.radiant_total()
+        if total ~= nil then snap.radiant_crystals = total end
     end)
     pcall(function()
         local a = mq.TLO.Me.AAPoints()

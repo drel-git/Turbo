@@ -81,6 +81,10 @@ local function item_count()
 end
 
 local function read_rc()
+    local ok, n = pcall(function()
+        return require('turbo_lib.wallet_currency').radiant_alt()
+    end)
+    if ok and n ~= nil then return tonumber(n) or 0 end
     return safe_num(function() return mq.TLO.Me.RadiantCrystals() end)
 end
 

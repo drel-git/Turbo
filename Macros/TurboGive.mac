@@ -5233,14 +5233,25 @@ Sub SendMyDC(string collectorName, int maxAmount)
 
 | =====================================================================
 | CURRENCY: SEND MY RADIANT CRYSTALS (internal — bot sends RC to collector)
-| Creates inventory "Radiant Crystal" from alt currency (Me.RadiantCrystals),
-| then uses the shared stack trade helper.
+| Creates inventory "Radiant Crystal" from alt currency (crystal window and/or
+| Alt Currency list), then uses the shared stack trade helper.
+| Convert selects the Alt Currency row by name; counts use RadiantAltAmount.
 | =====================================================================
+Sub RadiantAltAmount
+    | Max of Me.RadiantCrystals and AltCurrency name / index 2 (no double-count).
+    /declare ra int local ${Me.RadiantCrystals}
+    /declare rb int local ${Me.AltCurrency[Radiant Crystals]}
+    /if (${rb} <= 0) /varset rb ${Me.AltCurrency[Radiant Crystal]}
+    /if (${rb} <= 0) /varset rb ${Me.AltCurrency[2]}
+    /if (${rb} > ${ra}) /varset ra ${rb}
+/return ${ra}
+
 Sub SendMyRC(string collectorName, int maxAmount)
     /if (${collectorName.Equal[${Me.Name}]}) /return
 
     /declare rcInv int local ${FindItemCount[=Radiant Crystal]}
-    /declare rcAlt int local ${Me.RadiantCrystals}
+    /call RadiantAltAmount
+    /declare rcAlt int local ${Macro.Return}
     /if (${rcInv} <= 0 && ${rcAlt} > 0) {
         /if (!${Me.FreeInventory}) {
             /echo ${tgTag} \ay[SEND RC]\aw No open inventory slots to create Radiant Crystal. Free bag space and re-run.
@@ -5287,7 +5298,8 @@ Sub SendMyRC(string collectorName, int maxAmount)
     }
     /if (${maxAmount} > 0 && ${rcTraded} >= ${maxAmount}) /goto :SendRCDone
     /varset remainingCapRC ${If[${maxAmount}>0,${Math.Calc[${maxAmount}-${rcTraded}].Int},0]}
-    /if (${FindItemCount[=Radiant Crystal]} <= 0 && ${Me.RadiantCrystals} > 0) {
+    /call RadiantAltAmount
+    /if (${FindItemCount[=Radiant Crystal]} <= 0 && ${Macro.Return} > 0) {
         /if (!${Me.FreeInventory}) {
             /echo ${tgTag} \ay[SEND RC]\aw No open inventory slots to create more Radiant Crystal. Stopping after ${rcTraded} sent.
             /goto :SendRCDone
@@ -5342,7 +5354,8 @@ Sub SelectRadiantCrystalAltCurrency(string contextTag)
 /return ${rcListID}
 
 Sub ConvertAltRC2Currency(int maxAmount)
-    /declare altRC int local ${Me.RadiantCrystals}
+    /call RadiantAltAmount
+    /declare altRC int local ${Macro.Return}
     /if (${altRC} <= 0) {
         /echo ${tgTag} \awNo alt-currency Radiant Crystals to convert.
         /return
@@ -5372,13 +5385,15 @@ Sub ConvertAltRC2Currency(int maxAmount)
 
     :CreateMoreRC
     /if (${convertedRC} >= ${convertLimit}) /goto :DoneCreateRC
-    /if (${Me.RadiantCrystals} <= 0) /goto :DoneCreateRC
+    /call RadiantAltAmount
+    /if (${Macro.Return} <= 0) /goto :DoneCreateRC
     /if (!${Me.FreeInventory} && ${FindItemCount[=Radiant Crystal]} <= 0) {
         /echo ${tgTag} \ay[EXCHANGE]\aw No open inventory slots for Radiant Crystal. Free bag space and re-run.
         /goto :DoneCreateRC
     }
 
-    /varset beforeAltRC ${Me.RadiantCrystals}
+    /call RadiantAltAmount
+    /varset beforeAltRC ${Macro.Return}
     /varset beforeInvRC ${FindItemCount[=Radiant Crystal]}
     /varset createThis ${Math.Calc[${convertLimit}-${convertedRC}].Int}
     /if (${createThis} > ${beforeAltRC}) /varset createThis ${beforeAltRC}
@@ -5409,7 +5424,8 @@ Sub ConvertAltRC2Currency(int maxAmount)
         /goto :DoneCreateRC
     }
 
-    /varset afterAltRC ${Me.RadiantCrystals}
+    /call RadiantAltAmount
+    /varset afterAltRC ${Macro.Return}
     /varset afterInvRC ${FindItemCount[=Radiant Crystal]}
     /varset madeRC ${Math.Calc[${beforeAltRC}-${afterAltRC}].Int}
     /varset madeInvRC ${Math.Calc[${afterInvRC}-${beforeInvRC}].Int}
@@ -5452,7 +5468,8 @@ Sub ReclaimAltRC
         /delay 10
     }
     /if (${Window[InventoryWindow].Open}) /nomodkey /notify InventoryWindow DoneButton leftmouseup
-    /echo ${tgTag} \am[RECLAIM]\aw Done. Radiant Crystals: ${Me.RadiantCrystals}
+    /call RadiantAltAmount
+    /echo ${tgTag} \am[RECLAIM]\aw Done. Radiant Crystals: ${Macro.Return}
 /return
 
 | =====================================================================

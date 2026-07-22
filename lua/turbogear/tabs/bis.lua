@@ -1218,12 +1218,18 @@ local function draw_cell_tooltip(row, snap, slot)
                 if lower:find("cold", 1, true) or lower:find("hcr", 1, true) then return { 0.45, 0.70, 1.00, 1.00 } end
                 if lower:find("poison", 1, true) or lower:find("hpr", 1, true) then return { 0.45, 0.90, 0.40, 1.00 } end
                 if lower:find("disease", 1, true) or lower:find("hdr", 1, true) then return { 0.75, 0.55, 0.30, 1.00 } end
-                -- Heal / beneficial
+                -- Heal / beneficial / companion
                 if lower:find("heal", 1, true)
                     or lower:find("beneficial", 1, true)
                     or lower:find("merciful", 1, true)
-                    or lower:find("mending", 1, true) then
+                    or lower:find("mending", 1, true)
+                    or lower:find("companion", 1, true) then
                     return { 0.45, 0.95, 0.65, 1.00 }
+                end
+                -- Detrimental / malevolent (caster offense that is not resist-typed)
+                if lower:find("detrimental", 1, true)
+                    or lower:find("malevolent", 1, true) then
+                    return { 0.92, 0.48, 0.72, 1.00 }
                 end
                 -- Melee / physical offense
                 if lower:find("melee", 1, true)

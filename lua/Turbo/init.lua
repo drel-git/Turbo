@@ -5934,9 +5934,9 @@ local function refreshWalletCache()
     end)
     cachedWallet.favor = ok2 and fav or 0
     local ok3, rc = pcall(function()
-        return tonumber(mq.TLO.Me.RadiantCrystals() or 0) or 0
+        return require('turbo_lib.wallet_currency').radiant_total() or 0
     end)
-    if ok3 then cachedWallet.rc = rc + walletBagCount('Radiant Crystal') end
+    if ok3 then cachedWallet.rc = rc end
     local ok4, crests = pcall(function()
         local t = mq.TLO.Me.AltCurrency('Celestial Crests')
         local n = t and tonumber(t()) or nil

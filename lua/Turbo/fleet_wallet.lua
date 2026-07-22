@@ -642,7 +642,8 @@ end
 local function currencyChip(id, label, cur)
     local on = activeCurrency() == cur
     local variant = on and 'walletButton' or 'secondaryButton'
-    if Ui.buttonVariant(label .. '##fw_cur_' .. id, variant) then
+    -- Slightly larger than scope chips so currency is the primary control.
+    if Ui.buttonVariant(label .. '##fw_cur_' .. id, variant, 42, 26) then
         TG.fleetWalletCurrency = cur
         if TG.saveSettings then pcall(TG.saveSettings) end
     end
@@ -803,12 +804,17 @@ function M.drawPanel()
         ImGui.TextColored(0.78, 0.62, 0.35, 1.0, 'You: live · Peers: Refresh once for live ping')
     end
 
+    -- VIEW scopes
     scopeChip('group', 'Group', 'group')
     ImGui.SameLine(0, 4)
     scopeChip('e3', 'E3', 'e3')
     ImGui.SameLine(0, 4)
     scopeChip('live', 'Live', 'live')
-    ImGui.SameLine(0, 4)
+    -- Thin divider between VIEW and ACTIONS
+    ImGui.SameLine(0, 10)
+    ImGui.TextColored(0.38, 0.42, 0.50, 0.90, '|')
+    ImGui.SameLine(0, 10)
+    -- ACTIONS
     scopeChip('picks', 'Picks', 'picks')
     ImGui.SameLine(0, 4)
     if Ui.buttonVariant('Columns##fw_columns',
@@ -940,6 +946,19 @@ function M.drawPanel()
         + (ImGuiTableFlags and ImGuiTableFlags.BordersInnerV or 0)
         + (ImGuiTableFlags and ImGuiTableFlags.Borders or 0)
     local colFlags = ImGuiTableColumnFlags or {}
+    -- Teal washes match walletButton / currency chip accent.
+    local COL_WASH = IM_COL32 and IM_COL32(45, 115, 125, 55) or nil      -- faint column
+    local COL_WASH_HDR = IM_COL32 and IM_COL32(45, 115, 125, 95) or nil  -- stronger header
+    local ROW_WASH = IM_COL32 and IM_COL32(36, 88, 82, 90) or nil       -- dimmer row wash
+    local CELL_BG = ImGuiTableBgTarget and (ImGuiTableBgTarget.CellBg or ImGuiTableBgTarget.RowBg0)
+    local function paint_cell(isActiveCol, isSelRow, preferHeader)
+        if not (ImGui.TableSetBgColor and IM_COL32 and CELL_BG) then return end
+        -- Selected row: row wash only (skip column stack + zebra already overridden).
+        if isSelRow then return end
+        if isActiveCol then
+            ImGui.TableSetBgColor(CELL_BG, preferHeader and COL_WASH_HDR or COL_WASH)
+        end
+    end
     if ImGui.BeginTable and ImGui.BeginTable('##fleet_wallet_tbl', #colDefs, fwFlags) then
         for _, def in ipairs(colDefs) do
             if def.key == 'name' then
@@ -948,8 +967,22 @@ function M.drawPanel()
                 ImGui.TableSetupColumn(def.title, colFlags.WidthFixed or 0, def.w)
             end
         end
-        if ImGui.TableHeadersRow then ImGui.TableHeadersRow() end
         local cur = activeCurrency()
+        -- Custom header so active currency letters use bright teal + column wash.
+        ImGui.TableNextRow()
+        if ImGui.TableSetBgColor and ImGuiTableBgTarget and IM_COL32 then
+            ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg0, IM_COL32(22, 26, 32, 200))
+        end
+        for _, def in ipairs(colDefs) do
+            ImGui.TableNextColumn()
+            local isCur = def.key == cur
+            paint_cell(isCur, false, true)
+            if isCur then
+                ImGui.TextColored(0.45, 0.90, 0.88, 1.0, def.title)
+            else
+                ImGui.TextColored(0.52, 0.55, 0.62, 1.0, def.title)
+            end
+        end
         local function cell(baseR, baseG, baseB, text, isActive)
             if isActive then
                 ImGui.TextColored(math.min(1, baseR + 0.14), math.min(1, baseG + 0.14),
@@ -961,16 +994,22 @@ function M.drawPanel()
         for _, row in ipairs(rows) do
             ImGui.TableNextRow()
             local isSel = selected:lower() == tostring(row.name):lower()
-            if isSel and ImGui.TableSetBgColor and ImGuiTableBgTarget and IM_COL32 then
-                ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg0, IM_COL32(32, 78, 72, 110))
+            if isSel and ImGui.TableSetBgColor and ImGuiTableBgTarget and ROW_WASH then
+                ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg0, ROW_WASH)
+                if ImGuiTableBgTarget.RowBg1 then
+                    ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg1, ROW_WASH)
+                end
             end
             for _, def in ipairs(colDefs) do
                 ImGui.TableNextColumn()
+                local isCur = def.key == cur
+                paint_cell(isCur, isSel, false)
                 if def.key == 'name' then
                     local label = (isSel and '> ' or '  ')
                         .. row.name .. (row.isSelf and ' (you)' or '')
                     if isSel and ImGui.PushStyleColor and ImGuiCol then
-                        ImGui.PushStyleColor(ImGuiCol.Text, 0.72, 0.96, 0.88, 1.0)
+                        -- Match "Pool to:" recipient accent.
+                        ImGui.PushStyleColor(ImGuiCol.Text, 0.55, 0.92, 0.82, 1.0)
                     end
                     if ImGui.Selectable(label .. '##fw_' .. row.name, false) then
                         TG.fleetWalletRecipient = row.name
@@ -997,7 +1036,7 @@ function M.drawPanel()
                     if row.aa then tot.aa = tot.aa + row.aa end
                 elseif def.key == 'ops' then
                     if row.isSelf then
-                        ImGui.TextColored(0.42, 0.45, 0.52, 1.0, '-')
+                        ImGui.Text('') -- blank (no disabled '-')
                     else
                         if not canControl then ImGui.BeginDisabled() end
                         if Ui.buttonVariant('Get##fw_get_' .. row.name, 'walletButton', 34, 0) then
@@ -1038,12 +1077,26 @@ function M.drawPanel()
                 end
             end
         end
+        -- Separator between peer rows and Totals.
+        ImGui.TableNextRow()
+        if ImGui.TableSetBgColor and ImGuiTableBgTarget and IM_COL32 then
+            ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg0, IM_COL32(18, 22, 28, 40))
+        end
+        for _, def in ipairs(colDefs) do
+            ImGui.TableNextColumn()
+            if ImGui.Separator then
+                ImGui.Separator()
+            else
+                ImGui.TextColored(0.35, 0.40, 0.46, 0.85, '────────')
+            end
+        end
         ImGui.TableNextRow()
         if ImGui.TableSetBgColor and ImGuiTableBgTarget and IM_COL32 then
             ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg0, IM_COL32(18, 22, 28, 80))
         end
         for _, def in ipairs(colDefs) do
             ImGui.TableNextColumn()
+            paint_cell(def.key == cur, false, false)
             if def.key == 'name' then
                 ImGui.TextColored(0.45, 0.48, 0.55, 1.0, 'Totals')
             elseif def.key == 'pp' then ImGui.TextColored(0.55, 0.55, 0.50, 1.0, fmt(tot.pp))
@@ -1191,10 +1244,15 @@ function M.drawWindow()
             + (ImGuiWindowFlags.NoCollapse or 0)
     end
     -- Turbo gold outline (match Mini/Full chrome; teal stays for actions).
-    local pushedBorder, pushedColor = false, false
+    local pushedBorder, pushedRound, pushedColor = false, false, false
     if ImGui.PushStyleVar and ImGuiStyleVar and ImGuiStyleVar.WindowBorderSize then
         ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 2.0)
         pushedBorder = true
+    end
+    -- Rounded chips / Get·Send / Collect·Pool for the whole wallet panel.
+    if ImGui.PushStyleVar and ImGuiStyleVar and ImGuiStyleVar.FrameRounding then
+        ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 5)
+        pushedRound = true
     end
     if ImGui.PushStyleColor and ImGuiCol and ImGuiCol.Border then
         if IM_COL32 then
@@ -1218,6 +1276,7 @@ function M.drawWindow()
     end
     ImGui.End()
     if pushedColor then ImGui.PopStyleColor(1) end
+    if pushedRound then ImGui.PopStyleVar(1) end
     if pushedBorder then ImGui.PopStyleVar(1) end
 end
 

@@ -12693,6 +12693,13 @@ return {
             "Aug11",
             "Aug12",
             "Aug13",
+            "Aug14",
+            "Aug15",
+            "Aug16",
+            "Aug17",
+            "Aug18",
+            "Aug19",
+            "Aug20",
           },
         },
       },
@@ -12707,78 +12714,6 @@ return {
             },
             slot = "Arms",
             source = "Brothers",
-          },
-          Aug1 = {
-            ids = {
-            },
-            item = "Hideous Hex of Benevolent Extension",
-            names = {
-              "Hideous Hex of Benevolent Extension",
-            },
-            slot = "Aug1",
-          },
-          Aug2 = {
-            ids = {
-            },
-            item = "Hideous Hex of Malevolent Efficiency",
-            names = {
-              "Hideous Hex of Malevolent Efficiency",
-            },
-            slot = "Aug2",
-          },
-          Aug3 = {
-            ids = {
-            },
-            item = "Hideous Hex of Expanded Reach",
-            names = {
-              "Hideous Hex of Expanded Reach",
-            },
-            slot = "Aug3",
-          },
-          Aug4 = {
-            ids = {
-            },
-            item = "Hideous Hex of Nimble Elusion",
-            names = {
-              "Hideous Hex of Nimble Elusion",
-            },
-            slot = "Aug4",
-          },
-          Aug5 = {
-            ids = {
-            },
-            item = "Hideous Hex of Adept Guard",
-            names = {
-              "Hideous Hex of Adept Guard",
-            },
-            slot = "Aug5",
-          },
-          Aug6 = {
-            ids = {
-            },
-            item = "Hideous Hex of Visceral Malice",
-            names = {
-              "Hideous Hex of Visceral Malice",
-            },
-            slot = "Aug6",
-          },
-          Aug7 = {
-            ids = {
-            },
-            item = "Hideous Hex of Wanton Assault",
-            names = {
-              "Hideous Hex of Wanton Assault",
-            },
-            slot = "Aug7",
-          },
-          Aug8 = {
-            ids = {
-            },
-            item = "Hideous Hex of Physical Prowess",
-            names = {
-              "Hideous Hex of Physical Prowess",
-            },
-            slot = "Aug8",
           },
           Back = {
             ids = {
@@ -13002,6 +12937,19 @@ return {
             slot = "Wrist2",
             source = "Fippy",
           },
+        
+          Aug20 = {
+            ids = {
+              33008,
+            },
+            item = "Physical Prowess",
+            names = {
+              "Physical Prowess",
+              "Hideous Hex of Physical Prowess",
+            },
+            notes = "No focus effect | +15 STR/STA/AGI/DEX, +5 WIS/INT/CHA, +150 hp, +200 mana/endur, +15 ac",
+            slot = "Aug20",
+          },
         },
         Beastlord = {
           Arms = {
@@ -13012,123 +12960,6 @@ return {
               "Savagesoul's Ascendant Sleeves of the Wilds",
             },
             slot = "Arms",
-          },
-          Aug1 = {
-            ids = {
-            },
-            item = "Hideous Hex of Benevolent Extension",
-            names = {
-              "Hideous Hex of Benevolent Extension",
-            },
-            slot = "Aug1",
-          },
-          Aug10 = {
-            ids = {
-            },
-            item = "Hideous Hex of Visceral Malice",
-            names = {
-              "Hideous Hex of Visceral Malice",
-            },
-            slot = "Aug10",
-          },
-          Aug11 = {
-            ids = {
-            },
-            item = "Hideous Hex of Wanton Assault",
-            names = {
-              "Hideous Hex of Wanton Assault",
-            },
-            slot = "Aug11",
-          },
-          Aug12 = {
-            ids = {
-            },
-            item = "Hideous Hex of Chilling Demise",
-            names = {
-              "Hideous Hex of Chilling Demise",
-            },
-            slot = "Aug12",
-          },
-          Aug13 = {
-            ids = {
-            },
-            item = "Hideous Hex of Physical Prowess",
-            names = {
-              "Hideous Hex of Physical Prowess",
-            },
-            slot = "Aug13",
-          },
-          Aug2 = {
-            ids = {
-            },
-            item = "Hideous Hex of Malevolent Efficiency",
-            names = {
-              "Hideous Hex of Malevolent Efficiency",
-            },
-            slot = "Aug2",
-          },
-          Aug3 = {
-            ids = {
-            },
-            item = "Hideous Hex of Malevolent Extension",
-            names = {
-              "Hideous Hex of Malevolent Extension",
-            },
-            slot = "Aug3",
-          },
-          Aug4 = {
-            ids = {
-            },
-            item = "Hideous Hex of Noxious Demise",
-            names = {
-              "Hideous Hex of Noxious Demise",
-            },
-            slot = "Aug4",
-          },
-          Aug5 = {
-            ids = {
-            },
-            item = "Hideous Hex of Festering Demise",
-            names = {
-              "Hideous Hex of Festering Demise",
-            },
-            slot = "Aug5",
-          },
-          Aug6 = {
-            ids = {
-            },
-            item = "Hideous Hex of Merciful Mending",
-            names = {
-              "Hideous Hex of Merciful Mending",
-            },
-            slot = "Aug6",
-          },
-          Aug7 = {
-            ids = {
-            },
-            item = "Hideous Hex of Companion's Mercy",
-            names = {
-              "Hideous Hex of Companion's Mercy",
-            },
-            slot = "Aug7",
-          },
-          Aug8 = {
-            ids = {
-            },
-            item = "Hideous Hex of Nimble Elusion",
-            names = {
-              "Hideous Hex of Nimble Elusion",
-            },
-            slot = "Aug8",
-          },
-          Aug9 = {
-            ids = {
-            },
-            item = "Hideous Hex of Adept Guard",
-            names = {
-              "Hideous Hex of Adept Guard",
-            },
-            slot = "Aug9",
           },
           Back = {
             ids = {
@@ -13344,6 +13175,19 @@ return {
             },
             slot = "Wrist2",
           },
+        
+          Aug20 = {
+            ids = {
+              33008,
+            },
+            item = "Physical Prowess",
+            names = {
+              "Physical Prowess",
+              "Hideous Hex of Physical Prowess",
+            },
+            notes = "No focus effect | +15 STR/STA/AGI/DEX, +5 WIS/INT/CHA, +150 hp, +200 mana/endur, +15 ac",
+            slot = "Aug20",
+          },
         },
         Berserker = {
           Arms = {
@@ -13355,87 +13199,6 @@ return {
             },
             slot = "Arms",
             source = "Brothers",
-          },
-          Aug1 = {
-            ids = {
-            },
-            item = "Hideous Hex of Benevolent Extension",
-            names = {
-              "Hideous Hex of Benevolent Extension",
-            },
-            slot = "Aug1",
-          },
-          Aug2 = {
-            ids = {
-            },
-            item = "Hideous Hex of Malevolent Extension",
-            names = {
-              "Hideous Hex of Malevolent Extension",
-            },
-            slot = "Aug2",
-          },
-          Aug3 = {
-            ids = {
-            },
-            item = "Hideous Hex of Noxious Demise",
-            names = {
-              "Hideous Hex of Noxious Demise",
-            },
-            slot = "Aug3",
-          },
-          Aug4 = {
-            ids = {
-            },
-            item = "Hideous Hex of Nimble Elusion",
-            names = {
-              "Hideous Hex of Nimble Elusion",
-            },
-            slot = "Aug4",
-          },
-          Aug5 = {
-            ids = {
-            },
-            item = "Hideous Hex of Adept Guard",
-            names = {
-              "Hideous Hex of Adept Guard",
-            },
-            slot = "Aug5",
-          },
-          Aug6 = {
-            ids = {
-            },
-            item = "Hideous Hex of Visceral Malice",
-            names = {
-              "Hideous Hex of Visceral Malice",
-            },
-            slot = "Aug6",
-          },
-          Aug7 = {
-            ids = {
-            },
-            item = "Hideous Hex of Wanton Assault",
-            names = {
-              "Hideous Hex of Wanton Assault",
-            },
-            slot = "Aug7",
-          },
-          Aug8 = {
-            ids = {
-            },
-            item = "Hideous Hex of Lethal Barrage",
-            names = {
-              "Hideous Hex of Lethal Barrage",
-            },
-            slot = "Aug8",
-          },
-          Aug9 = {
-            ids = {
-            },
-            item = "Hideous Hex of Physical Prowess",
-            names = {
-              "Hideous Hex of Physical Prowess",
-            },
-            slot = "Aug9",
           },
           Back = {
             ids = {
@@ -13649,6 +13412,19 @@ return {
             slot = "Wrist2",
             source = "Fippy",
           },
+        
+          Aug20 = {
+            ids = {
+              33008,
+            },
+            item = "Physical Prowess",
+            names = {
+              "Physical Prowess",
+              "Hideous Hex of Physical Prowess",
+            },
+            notes = "No focus effect | +15 STR/STA/AGI/DEX, +5 WIS/INT/CHA, +150 hp, +200 mana/endur, +15 ac",
+            slot = "Aug20",
+          },
         },
         Cleric = {
           Arms = {
@@ -13660,105 +13436,6 @@ return {
             },
             slot = "Arms",
             source = "Brothers",
-          },
-          Aug1 = {
-            ids = {
-            },
-            item = "Hideous Hex of Benevolent Efficiency",
-            names = {
-              "Hideous Hex of Benevolent Efficiency",
-            },
-            slot = "Aug1",
-          },
-          Aug10 = {
-            ids = {
-            },
-            item = "Hideous Hex of Nimble Elusion",
-            names = {
-              "Hideous Hex of Nimble Elusion",
-            },
-            slot = "Aug10",
-          },
-          Aug11 = {
-            ids = {
-            },
-            item = "Hideous Hex of Mental Prowess",
-            names = {
-              "Hideous Hex of Mental Prowess",
-            },
-            slot = "Aug11",
-          },
-          Aug2 = {
-            ids = {
-            },
-            item = "Hideous Hex of Benevolent Extension",
-            names = {
-              "Hideous Hex of Benevolent Extension",
-            },
-            slot = "Aug2",
-          },
-          Aug3 = {
-            ids = {
-            },
-            item = "Hideous Hex of Benevolent Alacrity",
-            names = {
-              "Hideous Hex of Benevolent Alacrity",
-            },
-            slot = "Aug3",
-          },
-          Aug4 = {
-            ids = {
-            },
-            item = "Hideous Hex of Malevolent Efficiency",
-            names = {
-              "Hideous Hex of Malevolent Efficiency",
-            },
-            slot = "Aug4",
-          },
-          Aug5 = {
-            ids = {
-            },
-            item = "Hideous Hex of Malevolent Extension",
-            names = {
-              "Hideous Hex of Malevolent Extension",
-            },
-            slot = "Aug5",
-          },
-          Aug6 = {
-            ids = {
-            },
-            item = "Hideous Hex of Malevolent Alacrity",
-            names = {
-              "Hideous Hex of Malevolent Alacrity",
-            },
-            slot = "Aug6",
-          },
-          Aug7 = {
-            ids = {
-            },
-            item = "Hideous Hex of Arcane Demise",
-            names = {
-              "Hideous Hex of Arcane Demise",
-            },
-            slot = "Aug7",
-          },
-          Aug8 = {
-            ids = {
-            },
-            item = "Hideous Hex of Expanded Reach",
-            names = {
-              "Hideous Hex of Expanded Reach",
-            },
-            slot = "Aug8",
-          },
-          Aug9 = {
-            ids = {
-            },
-            item = "Hideous Hex of Merciful Mending",
-            names = {
-              "Hideous Hex of Merciful Mending",
-            },
-            slot = "Aug9",
           },
           Back = {
             ids = {
@@ -13972,6 +13649,19 @@ return {
             slot = "Wrist2",
             source = "Fippy",
           },
+        
+          Aug20 = {
+            ids = {
+              33011,
+            },
+            item = "Mental Prowess",
+            names = {
+              "Mental Prowess",
+              "Hideous Hex of Mental Prowess",
+            },
+            notes = "No focus effect | +15 WIS/INT/CHA, +5 STR/STA/AGI/DEX, +130 hp, +360 mana, +13 ac, +10 resists",
+            slot = "Aug20",
+          },
         },
         Druid = {
           Arms = {
@@ -13983,114 +13673,6 @@ return {
             },
             slot = "Arms",
             source = "Brothers",
-          },
-          Aug1 = {
-            ids = {
-            },
-            item = "Hideous Hex of Benevolent Efficiency",
-            names = {
-              "Hideous Hex of Benevolent Efficiency",
-            },
-            slot = "Aug1",
-          },
-          Aug10 = {
-            ids = {
-            },
-            item = "Hideous Hex of Merciful Mending",
-            names = {
-              "Hideous Hex of Merciful Mending",
-            },
-            slot = "Aug10",
-          },
-          Aug11 = {
-            ids = {
-            },
-            item = "Hideous Hex of Nimble Elusion",
-            names = {
-              "Hideous Hex of Nimble Elusion",
-            },
-            slot = "Aug11",
-          },
-          Aug12 = {
-            ids = {
-            },
-            item = "Hideous Hex of Mental Prowess",
-            names = {
-              "Hideous Hex of Mental Prowess",
-            },
-            slot = "Aug12",
-          },
-          Aug2 = {
-            ids = {
-            },
-            item = "Hideous Hex of Benevolent Extension",
-            names = {
-              "Hideous Hex of Benevolent Extension",
-            },
-            slot = "Aug2",
-          },
-          Aug3 = {
-            ids = {
-            },
-            item = "Hideous Hex of Benevolent Alacrity",
-            names = {
-              "Hideous Hex of Benevolent Alacrity",
-            },
-            slot = "Aug3",
-          },
-          Aug4 = {
-            ids = {
-            },
-            item = "Hideous Hex of Malevolent Efficiency",
-            names = {
-              "Hideous Hex of Malevolent Efficiency",
-            },
-            slot = "Aug4",
-          },
-          Aug5 = {
-            ids = {
-            },
-            item = "Hideous Hex of Malevolent Extension",
-            names = {
-              "Hideous Hex of Malevolent Extension",
-            },
-            slot = "Aug5",
-          },
-          Aug6 = {
-            ids = {
-            },
-            item = "Hideous Hex of Malevolent Alacrity",
-            names = {
-              "Hideous Hex of Malevolent Alacrity",
-            },
-            slot = "Aug6",
-          },
-          Aug7 = {
-            ids = {
-            },
-            item = "Hideous Hex of Fiery Demise",
-            names = {
-              "Hideous Hex of Fiery Demise",
-            },
-            slot = "Aug7",
-          },
-          Aug8 = {
-            ids = {
-            },
-            item = "Hideous Hex of Arcane Demise",
-            names = {
-              "Hideous Hex of Arcane Demise",
-            },
-            slot = "Aug8",
-          },
-          Aug9 = {
-            ids = {
-            },
-            item = "Hideous Hex of Expanded Reach",
-            names = {
-              "Hideous Hex of Expanded Reach",
-            },
-            slot = "Aug9",
           },
           Back = {
             ids = {
@@ -14314,6 +13896,19 @@ return {
             slot = "Wrist2",
             source = "Fippy",
           },
+        
+          Aug20 = {
+            ids = {
+              33011,
+            },
+            item = "Mental Prowess",
+            names = {
+              "Mental Prowess",
+              "Hideous Hex of Mental Prowess",
+            },
+            notes = "No focus effect | +15 WIS/INT/CHA, +5 STR/STA/AGI/DEX, +130 hp, +360 mana, +13 ac, +10 resists",
+            slot = "Aug20",
+          },
         },
         Enchanter = {
           Arms = {
@@ -14325,96 +13920,6 @@ return {
             },
             slot = "Arms",
             source = "Brothers",
-          },
-          Aug1 = {
-            ids = {
-            },
-            item = "Hideous Hex of Benevolent Efficiency",
-            names = {
-              "Hideous Hex of Benevolent Efficiency",
-            },
-            slot = "Aug1",
-          },
-          Aug10 = {
-            ids = {
-            },
-            item = "Hideous Hex of Mental Prowess",
-            names = {
-              "Hideous Hex of Mental Prowess",
-            },
-            slot = "Aug10",
-          },
-          Aug2 = {
-            ids = {
-            },
-            item = "Hideous Hex of Benevolent Extension",
-            names = {
-              "Hideous Hex of Benevolent Extension",
-            },
-            slot = "Aug2",
-          },
-          Aug3 = {
-            ids = {
-            },
-            item = "Hideous Hex of Benevolent Alacrity",
-            names = {
-              "Hideous Hex of Benevolent Alacrity",
-            },
-            slot = "Aug3",
-          },
-          Aug4 = {
-            ids = {
-            },
-            item = "Hideous Hex of Malevolent Efficiency",
-            names = {
-              "Hideous Hex of Malevolent Efficiency",
-            },
-            slot = "Aug4",
-          },
-          Aug5 = {
-            ids = {
-            },
-            item = "Hideous Hex of Malevolent Extension",
-            names = {
-              "Hideous Hex of Malevolent Extension",
-            },
-            slot = "Aug5",
-          },
-          Aug6 = {
-            ids = {
-            },
-            item = "Hideous Hex of Malevolent Alacrity",
-            names = {
-              "Hideous Hex of Malevolent Alacrity",
-            },
-            slot = "Aug6",
-          },
-          Aug7 = {
-            ids = {
-            },
-            item = "Hideous Hex of Arcane Demise",
-            names = {
-              "Hideous Hex of Arcane Demise",
-            },
-            slot = "Aug7",
-          },
-          Aug8 = {
-            ids = {
-            },
-            item = "Hideous Hex of Expanded Reach",
-            names = {
-              "Hideous Hex of Expanded Reach",
-            },
-            slot = "Aug8",
-          },
-          Aug9 = {
-            ids = {
-            },
-            item = "Hideous Hex of Nimble Elusion",
-            names = {
-              "Hideous Hex of Nimble Elusion",
-            },
-            slot = "Aug9",
           },
           Back = {
             ids = {
@@ -14637,6 +14142,19 @@ return {
             slot = "Wrist2",
             source = "Fippy",
           },
+        
+          Aug20 = {
+            ids = {
+              33011,
+            },
+            item = "Mental Prowess",
+            names = {
+              "Mental Prowess",
+              "Hideous Hex of Mental Prowess",
+            },
+            notes = "No focus effect | +15 WIS/INT/CHA, +5 STR/STA/AGI/DEX, +130 hp, +360 mana, +13 ac, +10 resists",
+            slot = "Aug20",
+          },
         },
         Magician = {
           Arms = {
@@ -14648,96 +14166,6 @@ return {
             },
             slot = "Arms",
             source = "Brothers",
-          },
-          Aug1 = {
-            ids = {
-            },
-            item = "Hideous Hex of Benevolent Extension",
-            names = {
-              "Hideous Hex of Benevolent Extension",
-            },
-            slot = "Aug1",
-          },
-          Aug10 = {
-            ids = {
-            },
-            item = "Hideous Hex of Mental Prowess",
-            names = {
-              "Hideous Hex of Mental Prowess",
-            },
-            slot = "Aug10",
-          },
-          Aug2 = {
-            ids = {
-            },
-            item = "Hideous Hex of Benevolent Alacrity",
-            names = {
-              "Hideous Hex of Benevolent Alacrity",
-            },
-            slot = "Aug2",
-          },
-          Aug3 = {
-            ids = {
-            },
-            item = "Hideous Hex of Malevolent Efficiency",
-            names = {
-              "Hideous Hex of Malevolent Efficiency",
-            },
-            slot = "Aug3",
-          },
-          Aug4 = {
-            ids = {
-            },
-            item = "Hideous Hex of Malevolent Extension",
-            names = {
-              "Hideous Hex of Malevolent Extension",
-            },
-            slot = "Aug4",
-          },
-          Aug5 = {
-            ids = {
-            },
-            item = "Hideous Hex of Malevolent Alacrity",
-            names = {
-              "Hideous Hex of Malevolent Alacrity",
-            },
-            slot = "Aug5",
-          },
-          Aug6 = {
-            ids = {
-            },
-            item = "Hideous Hex of Fiery Demise",
-            names = {
-              "Hideous Hex of Fiery Demise",
-            },
-            slot = "Aug6",
-          },
-          Aug7 = {
-            ids = {
-            },
-            item = "Hideous Hex of Expanded Reach",
-            names = {
-              "Hideous Hex of Expanded Reach",
-            },
-            slot = "Aug7",
-          },
-          Aug8 = {
-            ids = {
-            },
-            item = "Hideous Hex of Companion's Mercy",
-            names = {
-              "Hideous Hex of Companion's Mercy",
-            },
-            slot = "Aug8",
-          },
-          Aug9 = {
-            ids = {
-            },
-            item = "Hideous Hex of Nimble Elusion",
-            names = {
-              "Hideous Hex of Nimble Elusion",
-            },
-            slot = "Aug9",
           },
           Back = {
             ids = {
@@ -14960,6 +14388,19 @@ return {
             slot = "Wrist2",
             source = "Fippy",
           },
+        
+          Aug20 = {
+            ids = {
+              33011,
+            },
+            item = "Mental Prowess",
+            names = {
+              "Mental Prowess",
+              "Hideous Hex of Mental Prowess",
+            },
+            notes = "No focus effect | +15 WIS/INT/CHA, +5 STR/STA/AGI/DEX, +130 hp, +360 mana, +13 ac, +10 resists",
+            slot = "Aug20",
+          },
         },
         Monk = {
           Arms = {
@@ -14971,69 +14412,6 @@ return {
             },
             slot = "Arms",
             source = "Brothers",
-          },
-          Aug1 = {
-            ids = {
-            },
-            item = "Hideous Hex of Benevolent Extension",
-            names = {
-              "Hideous Hex of Benevolent Extension",
-            },
-            slot = "Aug1",
-          },
-          Aug2 = {
-            ids = {
-            },
-            item = "Hideous Hex of Noxious Demise",
-            names = {
-              "Hideous Hex of Noxious Demise",
-            },
-            slot = "Aug2",
-          },
-          Aug3 = {
-            ids = {
-            },
-            item = "Hideous Hex of Nimble Elusion",
-            names = {
-              "Hideous Hex of Nimble Elusion",
-            },
-            slot = "Aug3",
-          },
-          Aug4 = {
-            ids = {
-            },
-            item = "Hideous Hex of Adept Guard",
-            names = {
-              "Hideous Hex of Adept Guard",
-            },
-            slot = "Aug4",
-          },
-          Aug5 = {
-            ids = {
-            },
-            item = "Hideous Hex of Visceral Malice",
-            names = {
-              "Hideous Hex of Visceral Malice",
-            },
-            slot = "Aug5",
-          },
-          Aug6 = {
-            ids = {
-            },
-            item = "Hideous Hex of Wanton Assault",
-            names = {
-              "Hideous Hex of Wanton Assault",
-            },
-            slot = "Aug6",
-          },
-          Aug7 = {
-            ids = {
-            },
-            item = "Hideous Hex of Physical Prowess",
-            names = {
-              "Hideous Hex of Physical Prowess",
-            },
-            slot = "Aug7",
           },
           Back = {
             ids = {
@@ -15247,6 +14625,19 @@ return {
             slot = "Wrist2",
             source = "Fippy",
           },
+        
+          Aug20 = {
+            ids = {
+              33008,
+            },
+            item = "Physical Prowess",
+            names = {
+              "Physical Prowess",
+              "Hideous Hex of Physical Prowess",
+            },
+            notes = "No focus effect | +15 STR/STA/AGI/DEX, +5 WIS/INT/CHA, +150 hp, +200 mana/endur, +15 ac",
+            slot = "Aug20",
+          },
         },
         Necromancer = {
           Arms = {
@@ -15258,114 +14649,6 @@ return {
             },
             slot = "Arms",
             source = "Brothers",
-          },
-          Aug1 = {
-            ids = {
-            },
-            item = "Hideous Hex of Benevolent Extension",
-            names = {
-              "Hideous Hex of Benevolent Extension",
-            },
-            slot = "Aug1",
-          },
-          Aug10 = {
-            ids = {
-            },
-            item = "Hideous Hex of Expanded Reach",
-            names = {
-              "Hideous Hex of Expanded Reach",
-            },
-            slot = "Aug10",
-          },
-          Aug11 = {
-            ids = {
-            },
-            item = "Hideous Hex of Nimble Elusion",
-            names = {
-              "Hideous Hex of Nimble Elusion",
-            },
-            slot = "Aug11",
-          },
-          Aug12 = {
-            ids = {
-            },
-            item = "Hideous Hex of Mental Prowess",
-            names = {
-              "Hideous Hex of Mental Prowess",
-            },
-            slot = "Aug12",
-          },
-          Aug2 = {
-            ids = {
-            },
-            item = "Hideous Hex of Benevolent Alacrity",
-            names = {
-              "Hideous Hex of Benevolent Alacrity",
-            },
-            slot = "Aug2",
-          },
-          Aug3 = {
-            ids = {
-            },
-            item = "Hideous Hex of Malevolent Efficiency",
-            names = {
-              "Hideous Hex of Malevolent Efficiency",
-            },
-            slot = "Aug3",
-          },
-          Aug4 = {
-            ids = {
-            },
-            item = "Hideous Hex of Malevolent Extension",
-            names = {
-              "Hideous Hex of Malevolent Extension",
-            },
-            slot = "Aug4",
-          },
-          Aug5 = {
-            ids = {
-            },
-            item = "Hideous Hex of Malevolent Alacrity",
-            names = {
-              "Hideous Hex of Malevolent Alacrity",
-            },
-            slot = "Aug5",
-          },
-          Aug6 = {
-            ids = {
-            },
-            item = "Hideous Hex of Fiery Demise",
-            names = {
-              "Hideous Hex of Fiery Demise",
-            },
-            slot = "Aug6",
-          },
-          Aug7 = {
-            ids = {
-            },
-            item = "Hideous Hex of Noxious Demise",
-            names = {
-              "Hideous Hex of Noxious Demise",
-            },
-            slot = "Aug7",
-          },
-          Aug8 = {
-            ids = {
-            },
-            item = "Hideous Hex of Arcane Demise",
-            names = {
-              "Hideous Hex of Arcane Demise",
-            },
-            slot = "Aug8",
-          },
-          Aug9 = {
-            ids = {
-            },
-            item = "Hideous Hex of Festering Demise",
-            names = {
-              "Hideous Hex of Festering Demise",
-            },
-            slot = "Aug9",
           },
           Back = {
             ids = {
@@ -15587,6 +14870,19 @@ return {
             slot = "Wrist2",
             source = "Fippy",
           },
+        
+          Aug20 = {
+            ids = {
+              33011,
+            },
+            item = "Mental Prowess",
+            names = {
+              "Mental Prowess",
+              "Hideous Hex of Mental Prowess",
+            },
+            notes = "No focus effect | +15 WIS/INT/CHA, +5 STR/STA/AGI/DEX, +130 hp, +360 mana, +13 ac, +10 resists",
+            slot = "Aug20",
+          },
         },
         Paladin = {
           Arms = {
@@ -15598,96 +14894,6 @@ return {
             },
             slot = "Arms",
             source = "Brothers",
-          },
-          Aug1 = {
-            ids = {
-            },
-            item = "Hideous Hex of Benevolent Efficiency",
-            names = {
-              "Hideous Hex of Benevolent Efficiency",
-            },
-            slot = "Aug1",
-          },
-          Aug10 = {
-            ids = {
-            },
-            item = "Hideous Hex of Physical Prowess",
-            names = {
-              "Hideous Hex of Physical Prowess",
-            },
-            slot = "Aug10",
-          },
-          Aug2 = {
-            ids = {
-            },
-            item = "Hideous Hex of Benevolent Extension",
-            names = {
-              "Hideous Hex of Benevolent Extension",
-            },
-            slot = "Aug2",
-          },
-          Aug3 = {
-            ids = {
-            },
-            item = "Hideous Hex of Arcane Demise",
-            names = {
-              "Hideous Hex of Arcane Demise",
-            },
-            slot = "Aug3",
-          },
-          Aug4 = {
-            ids = {
-            },
-            item = "Hideous Hex of Expanded Reach",
-            names = {
-              "Hideous Hex of Expanded Reach",
-            },
-            slot = "Aug4",
-          },
-          Aug5 = {
-            ids = {
-            },
-            item = "Hideous Hex of Merciful Mending",
-            names = {
-              "Hideous Hex of Merciful Mending",
-            },
-            slot = "Aug5",
-          },
-          Aug6 = {
-            ids = {
-            },
-            item = "Hideous Hex of Nimble Elusion",
-            names = {
-              "Hideous Hex of Nimble Elusion",
-            },
-            slot = "Aug6",
-          },
-          Aug7 = {
-            ids = {
-            },
-            item = "Hideous Hex of Adept Guard",
-            names = {
-              "Hideous Hex of Adept Guard",
-            },
-            slot = "Aug7",
-          },
-          Aug8 = {
-            ids = {
-            },
-            item = "Hideous Hex of Visceral Malice",
-            names = {
-              "Hideous Hex of Visceral Malice",
-            },
-            slot = "Aug8",
-          },
-          Aug9 = {
-            ids = {
-            },
-            item = "Hideous Hex of Wanton Assault",
-            names = {
-              "Hideous Hex of Wanton Assault",
-            },
-            slot = "Aug9",
           },
           Back = {
             ids = {
@@ -15921,6 +15127,19 @@ return {
             slot = "Wrist2",
             source = "Fippy",
           },
+        
+          Aug20 = {
+            ids = {
+              33008,
+            },
+            item = "Physical Prowess",
+            names = {
+              "Physical Prowess",
+              "Hideous Hex of Physical Prowess",
+            },
+            notes = "No focus effect | +15 STR/STA/AGI/DEX, +5 WIS/INT/CHA, +150 hp, +200 mana/endur, +15 ac",
+            slot = "Aug20",
+          },
         },
         Ranger = {
           Arms = {
@@ -15932,114 +15151,6 @@ return {
             },
             slot = "Arms",
             source = "Brothers",
-          },
-          Aug1 = {
-            ids = {
-            },
-            item = "Hideous Hex of Benevolent Extension",
-            names = {
-              "Hideous Hex of Benevolent Extension",
-            },
-            slot = "Aug1",
-          },
-          Aug10 = {
-            ids = {
-            },
-            item = "Hideous Hex of Visceral Malice",
-            names = {
-              "Hideous Hex of Visceral Malice",
-            },
-            slot = "Aug10",
-          },
-          Aug11 = {
-            ids = {
-            },
-            item = "Hideous Hex of Wanton Assault",
-            names = {
-              "Hideous Hex of Wanton Assault",
-            },
-            slot = "Aug11",
-          },
-          Aug12 = {
-            ids = {
-            },
-            item = "Hideous Hex of Lethal Barrage",
-            names = {
-              "Hideous Hex of Lethal Barrage",
-            },
-            slot = "Aug12",
-          },
-          Aug2 = {
-            ids = {
-            },
-            item = "Hideous Hex of Malevolent Efficiency",
-            names = {
-              "Hideous Hex of Malevolent Efficiency",
-            },
-            slot = "Aug2",
-          },
-          Aug3 = {
-            ids = {
-            },
-            item = "Hideous Hex of Malevolent Extension",
-            names = {
-              "Hideous Hex of Malevolent Extension",
-            },
-            slot = "Aug3",
-          },
-          Aug4 = {
-            ids = {
-            },
-            item = "Hideous Hex of Fiery Demise",
-            names = {
-              "Hideous Hex of Fiery Demise",
-            },
-            slot = "Aug4",
-          },
-          Aug5 = {
-            ids = {
-            },
-            item = "Hideous Hex of Arcane Demise",
-            names = {
-              "Hideous Hex of Arcane Demise",
-            },
-            slot = "Aug5",
-          },
-          Aug6 = {
-            ids = {
-            },
-            item = "Hideous Hex of Expanded Reach",
-            names = {
-              "Hideous Hex of Expanded Reach",
-            },
-            slot = "Aug6",
-          },
-          Aug7 = {
-            ids = {
-            },
-            item = "Hideous Hex of Merciful Mending",
-            names = {
-              "Hideous Hex of Merciful Mending",
-            },
-            slot = "Aug7",
-          },
-          Aug8 = {
-            ids = {
-            },
-            item = "Hideous Hex of Nimble Elusion",
-            names = {
-              "Hideous Hex of Nimble Elusion",
-            },
-            slot = "Aug8",
-          },
-          Aug9 = {
-            ids = {
-            },
-            item = "Hideous Hex of Adept Guard",
-            names = {
-              "Hideous Hex of Adept Guard",
-            },
-            slot = "Aug9",
           },
           Back = {
             ids = {
@@ -16264,6 +15375,19 @@ return {
             slot = "Wrist2",
             source = "Fippy",
           },
+        
+          Aug20 = {
+            ids = {
+              33008,
+            },
+            item = "Physical Prowess",
+            names = {
+              "Physical Prowess",
+              "Hideous Hex of Physical Prowess",
+            },
+            notes = "No focus effect | +15 STR/STA/AGI/DEX, +5 WIS/INT/CHA, +150 hp, +200 mana/endur, +15 ac",
+            slot = "Aug20",
+          },
         },
         Rogue = {
           Arms = {
@@ -16275,78 +15399,6 @@ return {
             },
             slot = "Arms",
             source = "Brothers",
-          },
-          Aug1 = {
-            ids = {
-            },
-            item = "Hideous Hex of Benevolent Extension",
-            names = {
-              "Hideous Hex of Benevolent Extension",
-            },
-            slot = "Aug1",
-          },
-          Aug2 = {
-            ids = {
-            },
-            item = "Hideous Hex of Malevolent Extension",
-            names = {
-              "Hideous Hex of Malevolent Extension",
-            },
-            slot = "Aug2",
-          },
-          Aug3 = {
-            ids = {
-            },
-            item = "Hideous Hex of Noxious Demise",
-            names = {
-              "Hideous Hex of Noxious Demise",
-            },
-            slot = "Aug3",
-          },
-          Aug4 = {
-            ids = {
-            },
-            item = "Hideous Hex of Nimble Elusion",
-            names = {
-              "Hideous Hex of Nimble Elusion",
-            },
-            slot = "Aug4",
-          },
-          Aug5 = {
-            ids = {
-            },
-            item = "Hideous Hex of Adept Guard",
-            names = {
-              "Hideous Hex of Adept Guard",
-            },
-            slot = "Aug5",
-          },
-          Aug6 = {
-            ids = {
-            },
-            item = "Hideous Hex of Visceral Malice",
-            names = {
-              "Hideous Hex of Visceral Malice",
-            },
-            slot = "Aug6",
-          },
-          Aug7 = {
-            ids = {
-            },
-            item = "Hideous Hex of Wanton Assault",
-            names = {
-              "Hideous Hex of Wanton Assault",
-            },
-            slot = "Aug7",
-          },
-          Aug8 = {
-            ids = {
-            },
-            item = "Hideous Hex of Physical Prowess",
-            names = {
-              "Hideous Hex of Physical Prowess",
-            },
-            slot = "Aug8",
           },
           Back = {
             ids = {
@@ -16560,6 +15612,19 @@ return {
             slot = "Wrist2",
             source = "Fippy",
           },
+        
+          Aug20 = {
+            ids = {
+              33008,
+            },
+            item = "Physical Prowess",
+            names = {
+              "Physical Prowess",
+              "Hideous Hex of Physical Prowess",
+            },
+            notes = "No focus effect | +15 STR/STA/AGI/DEX, +5 WIS/INT/CHA, +150 hp, +200 mana/endur, +15 ac",
+            slot = "Aug20",
+          },
         },
         ["Shadow Knight"] = {
           Arms = {
@@ -16571,105 +15636,6 @@ return {
             },
             slot = "Arms",
             source = "Brothers",
-          },
-          Aug1 = {
-            ids = {
-            },
-            item = "Hideous Hex of Benevolent Extension",
-            names = {
-              "Hideous Hex of Benevolent Extension",
-            },
-            slot = "Aug1",
-          },
-          Aug10 = {
-            ids = {
-            },
-            item = "Hideous Hex of Wanton Assault",
-            names = {
-              "Hideous Hex of Wanton Assault",
-            },
-            slot = "Aug10",
-          },
-          Aug11 = {
-            ids = {
-            },
-            item = "Hideous Hex of Physical Prowess",
-            names = {
-              "Hideous Hex of Physical Prowess",
-            },
-            slot = "Aug11",
-          },
-          Aug2 = {
-            ids = {
-            },
-            item = "Hideous Hex of Malevolent Extension",
-            names = {
-              "Hideous Hex of Malevolent Extension",
-            },
-            slot = "Aug2",
-          },
-          Aug3 = {
-            ids = {
-            },
-            item = "Hideous Hex of Noxious Demise",
-            names = {
-              "Hideous Hex of Noxious Demise",
-            },
-            slot = "Aug3",
-          },
-          Aug4 = {
-            ids = {
-            },
-            item = "Hideous Hex of Arcane Demise",
-            names = {
-              "Hideous Hex of Arcane Demise",
-            },
-            slot = "Aug4",
-          },
-          Aug5 = {
-            ids = {
-            },
-            item = "Hideous Hex of Festering Demise",
-            names = {
-              "Hideous Hex of Festering Demise",
-            },
-            slot = "Aug5",
-          },
-          Aug6 = {
-            ids = {
-            },
-            item = "Hideous Hex of Expanded Reach",
-            names = {
-              "Hideous Hex of Expanded Reach",
-            },
-            slot = "Aug6",
-          },
-          Aug7 = {
-            ids = {
-            },
-            item = "Hideous Hex of Nimble Elusion",
-            names = {
-              "Hideous Hex of Nimble Elusion",
-            },
-            slot = "Aug7",
-          },
-          Aug8 = {
-            ids = {
-            },
-            item = "Hideous Hex of Adept Guard",
-            names = {
-              "Hideous Hex of Adept Guard",
-            },
-            slot = "Aug8",
-          },
-          Aug9 = {
-            ids = {
-            },
-            item = "Hideous Hex of Visceral Malice",
-            names = {
-              "Hideous Hex of Visceral Malice",
-            },
-            slot = "Aug9",
           },
           Back = {
             ids = {
@@ -16912,6 +15878,19 @@ return {
             slot = "Wrist2",
             source = "Fippy",
           },
+        
+          Aug20 = {
+            ids = {
+              33008,
+            },
+            item = "Physical Prowess",
+            names = {
+              "Physical Prowess",
+              "Hideous Hex of Physical Prowess",
+            },
+            notes = "No focus effect | +15 STR/STA/AGI/DEX, +5 WIS/INT/CHA, +150 hp, +200 mana/endur, +15 ac",
+            slot = "Aug20",
+          },
         },
         Shaman = {
           Arms = {
@@ -16923,114 +15902,6 @@ return {
             },
             slot = "Arms",
             source = "Brothers",
-          },
-          Aug1 = {
-            ids = {
-            },
-            item = "Hideous Hex of Benevolent Efficiency",
-            names = {
-              "Hideous Hex of Benevolent Efficiency",
-            },
-            slot = "Aug1",
-          },
-          Aug10 = {
-            ids = {
-            },
-            item = "Hideous Hex of Merciful Mending",
-            names = {
-              "Hideous Hex of Merciful Mending",
-            },
-            slot = "Aug10",
-          },
-          Aug11 = {
-            ids = {
-            },
-            item = "Hideous Hex of Nimble Elusion",
-            names = {
-              "Hideous Hex of Nimble Elusion",
-            },
-            slot = "Aug11",
-          },
-          Aug12 = {
-            ids = {
-            },
-            item = "Hideous Hex of Mental Prowess",
-            names = {
-              "Hideous Hex of Mental Prowess",
-            },
-            slot = "Aug12",
-          },
-          Aug2 = {
-            ids = {
-            },
-            item = "Hideous Hex of Benevolent Extension",
-            names = {
-              "Hideous Hex of Benevolent Extension",
-            },
-            slot = "Aug2",
-          },
-          Aug3 = {
-            ids = {
-            },
-            item = "Hideous Hex of Benevolent Alacrity",
-            names = {
-              "Hideous Hex of Benevolent Alacrity",
-            },
-            slot = "Aug3",
-          },
-          Aug4 = {
-            ids = {
-            },
-            item = "Hideous Hex of Malevolent Efficiency",
-            names = {
-              "Hideous Hex of Malevolent Efficiency",
-            },
-            slot = "Aug4",
-          },
-          Aug5 = {
-            ids = {
-            },
-            item = "Hideous Hex of Malevolent Extension",
-            names = {
-              "Hideous Hex of Malevolent Extension",
-            },
-            slot = "Aug5",
-          },
-          Aug6 = {
-            ids = {
-            },
-            item = "Hideous Hex of Malevolent Alacrity",
-            names = {
-              "Hideous Hex of Malevolent Alacrity",
-            },
-            slot = "Aug6",
-          },
-          Aug7 = {
-            ids = {
-            },
-            item = "Hideous Hex of Noxious Demise",
-            names = {
-              "Hideous Hex of Noxious Demise",
-            },
-            slot = "Aug7",
-          },
-          Aug8 = {
-            ids = {
-            },
-            item = "Hideous Hex of Festering Demise",
-            names = {
-              "Hideous Hex of Festering Demise",
-            },
-            slot = "Aug8",
-          },
-          Aug9 = {
-            ids = {
-            },
-            item = "Hideous Hex of Expanded Reach",
-            names = {
-              "Hideous Hex of Expanded Reach",
-            },
-            slot = "Aug9",
           },
           Back = {
             ids = {
@@ -17254,6 +16125,19 @@ return {
             slot = "Wrist2",
             source = "Fippy",
           },
+        
+          Aug20 = {
+            ids = {
+              33011,
+            },
+            item = "Mental Prowess",
+            names = {
+              "Mental Prowess",
+              "Hideous Hex of Mental Prowess",
+            },
+            notes = "No focus effect | +15 WIS/INT/CHA, +5 STR/STA/AGI/DEX, +130 hp, +360 mana, +13 ac, +10 resists",
+            slot = "Aug20",
+          },
         },
         Warrior = {
           Arms = {
@@ -17265,78 +16149,6 @@ return {
             },
             slot = "Arms",
             source = "Brothers",
-          },
-          Aug1 = {
-            ids = {
-            },
-            item = "Hideous Hex of Benevolent Extension",
-            names = {
-              "Hideous Hex of Benevolent Extension",
-            },
-            slot = "Aug1",
-          },
-          Aug2 = {
-            ids = {
-            },
-            item = "Hideous Hex of Fiery Demise",
-            names = {
-              "Hideous Hex of Fiery Demise",
-            },
-            slot = "Aug2",
-          },
-          Aug3 = {
-            ids = {
-            },
-            item = "Hideous Hex of Noxious Demise",
-            names = {
-              "Hideous Hex of Noxious Demise",
-            },
-            slot = "Aug3",
-          },
-          Aug4 = {
-            ids = {
-            },
-            item = "Hideous Hex of Nimble Elusion",
-            names = {
-              "Hideous Hex of Nimble Elusion",
-            },
-            slot = "Aug4",
-          },
-          Aug5 = {
-            ids = {
-            },
-            item = "Hideous Hex of Adept Guard",
-            names = {
-              "Hideous Hex of Adept Guard",
-            },
-            slot = "Aug5",
-          },
-          Aug6 = {
-            ids = {
-            },
-            item = "Hideous Hex of Visceral Malice",
-            names = {
-              "Hideous Hex of Visceral Malice",
-            },
-            slot = "Aug6",
-          },
-          Aug7 = {
-            ids = {
-            },
-            item = "Hideous Hex of Wanton Assault",
-            names = {
-              "Hideous Hex of Wanton Assault",
-            },
-            slot = "Aug7",
-          },
-          Aug8 = {
-            ids = {
-            },
-            item = "Hideous Hex of Physical Prowess",
-            names = {
-              "Hideous Hex of Physical Prowess",
-            },
-            slot = "Aug8",
           },
           Back = {
             ids = {
@@ -17560,6 +16372,19 @@ return {
             slot = "Wrist2",
             source = "Fippy",
           },
+        
+          Aug20 = {
+            ids = {
+              33008,
+            },
+            item = "Physical Prowess",
+            names = {
+              "Physical Prowess",
+              "Hideous Hex of Physical Prowess",
+            },
+            notes = "No focus effect | +15 STR/STA/AGI/DEX, +5 WIS/INT/CHA, +150 hp, +200 mana/endur, +15 ac",
+            slot = "Aug20",
+          },
         },
         Wizard = {
           Arms = {
@@ -17571,87 +16396,6 @@ return {
             },
             slot = "Arms",
             source = "Brothers",
-          },
-          Aug1 = {
-            ids = {
-            },
-            item = "Hideous Hex of Benevolent Extension",
-            names = {
-              "Hideous Hex of Benevolent Extension",
-            },
-            slot = "Aug1",
-          },
-          Aug2 = {
-            ids = {
-            },
-            item = "Hideous Hex of Malevolent Efficiency",
-            names = {
-              "Hideous Hex of Malevolent Efficiency",
-            },
-            slot = "Aug2",
-          },
-          Aug3 = {
-            ids = {
-            },
-            item = "Hideous Hex of Malevolent Extension",
-            names = {
-              "Hideous Hex of Malevolent Extension",
-            },
-            slot = "Aug3",
-          },
-          Aug4 = {
-            ids = {
-            },
-            item = "Hideous Hex of Malevolent Alacrity",
-            names = {
-              "Hideous Hex of Malevolent Alacrity",
-            },
-            slot = "Aug4",
-          },
-          Aug5 = {
-            ids = {
-            },
-            item = "Hideous Hex of Fiery Demise",
-            names = {
-              "Hideous Hex of Fiery Demise",
-            },
-            slot = "Aug5",
-          },
-          Aug6 = {
-            ids = {
-            },
-            item = "Hideous Hex of Arcane Demise",
-            names = {
-              "Hideous Hex of Arcane Demise",
-            },
-            slot = "Aug6",
-          },
-          Aug7 = {
-            ids = {
-            },
-            item = "Hideous Hex of Expanded Reach",
-            names = {
-              "Hideous Hex of Expanded Reach",
-            },
-            slot = "Aug7",
-          },
-          Aug8 = {
-            ids = {
-            },
-            item = "Hideous Hex of Nimble Elusion",
-            names = {
-              "Hideous Hex of Nimble Elusion",
-            },
-            slot = "Aug8",
-          },
-          Aug9 = {
-            ids = {
-            },
-            item = "Hideous Hex of Mental Prowess",
-            names = {
-              "Hideous Hex of Mental Prowess",
-            },
-            slot = "Aug9",
           },
           Back = {
             ids = {
@@ -17865,6 +16609,19 @@ return {
             slot = "Wrist2",
             source = "Fippy",
           },
+        
+          Aug20 = {
+            ids = {
+              33011,
+            },
+            item = "Mental Prowess",
+            names = {
+              "Mental Prowess",
+              "Hideous Hex of Mental Prowess",
+            },
+            notes = "No focus effect | +15 WIS/INT/CHA, +5 STR/STA/AGI/DEX, +130 hp, +360 mana, +13 ac, +10 resists",
+            slot = "Aug20",
+          },
         },
       },
       group = "Raid Best In Slot",
@@ -17873,6 +16630,235 @@ return {
       show_base = {
       },
       template = {
+        Aug1 = {
+          ids = {
+            27620,
+          },
+          item = "Benevolent Efficiency",
+          names = {
+            "Benevolent Efficiency",
+            "Hideous Hex of Benevolent Efficiency",
+          },
+          notes = "-5% beneficial spell mana cost | +50 hp/mana/endur",
+          slot = "Aug1",
+        },
+        Aug2 = {
+          ids = {
+            28113,
+          },
+          item = "Benevolent Extension",
+          names = {
+            "Benevolent Extension",
+            "Hideous Hex of Benevolent Extension",
+          },
+          notes = "+35% beneficial spell duration | +50 hp/mana/endur",
+          slot = "Aug2",
+        },
+        Aug3 = {
+          ids = {
+            27622,
+          },
+          item = "Benevolent Alacrity",
+          names = {
+            "Benevolent Alacrity",
+            "Hideous Hex of Benevolent Alacrity",
+          },
+          notes = "-35% beneficial spell cast time | +50 hp/mana/endur",
+          slot = "Aug3",
+        },
+        Aug4 = {
+          ids = {
+            27618,
+          },
+          item = "Malevolent Efficiency",
+          names = {
+            "Malevolent Efficiency",
+            "Hideous Hex of Malevolent Efficiency",
+          },
+          notes = "-5% detrimental spell mana cost | +50 hp/mana/endur",
+          slot = "Aug4",
+        },
+        Aug5 = {
+          ids = {
+            28112,
+          },
+          item = "Malevolent Extension",
+          names = {
+            "Malevolent Extension",
+            "Hideous Hex of Malevolent Extension",
+          },
+          notes = "+35% detrimental spell duration | +50 hp/mana/endur",
+          slot = "Aug5",
+        },
+        Aug6 = {
+          ids = {
+            27621,
+          },
+          item = "Malevolent Alacrity",
+          names = {
+            "Malevolent Alacrity",
+            "Hideous Hex of Malevolent Alacrity",
+          },
+          notes = "-35% detrimental spell cast time | +50 hp/mana/endur",
+          slot = "Aug6",
+        },
+        Aug7 = {
+          ids = {
+            28114,
+          },
+          item = "Arcane Demise",
+          names = {
+            "Arcane Demise",
+            "Hideous Hex of Arcane Demise",
+          },
+          notes = "+5% magic spell damage | +50 hp/mana/endur",
+          slot = "Aug7",
+        },
+        Aug8 = {
+          ids = {
+            27623,
+          },
+          item = "Fiery Demise",
+          names = {
+            "Fiery Demise",
+            "Hideous Hex of Fiery Demise",
+          },
+          notes = "+5% fire spell damage | +50 hp/mana/endur",
+          slot = "Aug8",
+        },
+        Aug9 = {
+          ids = {
+            27624,
+          },
+          item = "Chilling Demise",
+          names = {
+            "Chilling Demise",
+            "Hideous Hex of Chilling Demise",
+          },
+          notes = "+5% cold spell damage | +50 hp/mana/endur",
+          slot = "Aug9",
+        },
+        Aug10 = {
+          ids = {
+            27625,
+          },
+          item = "Noxious Demise",
+          names = {
+            "Noxious Demise",
+            "Hideous Hex of Noxious Demise",
+          },
+          notes = "+5% poison spell damage | +50 hp/mana/endur",
+          slot = "Aug10",
+        },
+        Aug11 = {
+          ids = {
+            28109,
+          },
+          item = "Festering Demise",
+          names = {
+            "Festering Demise",
+            "Hideous Hex of Festering Demise",
+          },
+          notes = "+5% disease spell damage | +50 hp/mana/endur",
+          slot = "Aug11",
+        },
+        Aug12 = {
+          ids = {
+            28110,
+          },
+          item = "Merciful Mending",
+          names = {
+            "Merciful Mending",
+            "Hideous Hex of Merciful Mending",
+          },
+          notes = "+5% healing | +50 hp/mana/endur",
+          slot = "Aug12",
+        },
+        Aug13 = {
+          ids = {
+            28115,
+          },
+          item = "Expanded Reach",
+          names = {
+            "Expanded Reach",
+            "Hideous Hex of Expanded Reach",
+          },
+          notes = "+40% spell range | +50 hp/mana/endur",
+          slot = "Aug13",
+        },
+        Aug14 = {
+          ids = {
+            28119,
+          },
+          item = "Nimble Elusion",
+          names = {
+            "Nimble Elusion",
+            "Hideous Hex of Nimble Elusion",
+          },
+          notes = "+60% dodge | +50 hp/mana/endur",
+          slot = "Aug14",
+        },
+        Aug15 = {
+          ids = {
+            28118,
+          },
+          item = "Adept Guard",
+          names = {
+            "Adept Guard",
+            "Hideous Hex of Adept Guard",
+          },
+          notes = "+60% parry, +60% block | +50 hp/mana/endur",
+          slot = "Aug15",
+        },
+        Aug16 = {
+          ids = {
+            28117,
+          },
+          item = "Visceral Malice",
+          names = {
+            "Visceral Malice",
+            "Hideous Hex of Visceral Malice",
+          },
+          notes = "+250% melee critical damage | +50 hp/mana/endur",
+          slot = "Aug16",
+        },
+        Aug17 = {
+          ids = {
+            28116,
+          },
+          item = "Wanton Assault",
+          names = {
+            "Wanton Assault",
+            "Hideous Hex of Wanton Assault",
+          },
+          notes = "+18% double attack, +6% triple attack, +3% chance to hit | +50 hp/mana/endur",
+          slot = "Aug17",
+        },
+        Aug18 = {
+          ids = {
+            28120,
+          },
+          item = "Lethal Barrage",
+          names = {
+            "Lethal Barrage",
+            "Hideous Hex of Lethal Barrage",
+          },
+          notes = "+20% archery and throwing chance to hit | +50 hp/mana/endur",
+          slot = "Aug18",
+        },
+        Aug19 = {
+          ids = {
+            28111,
+          },
+          item = "Companion's Mercy",
+          names = {
+            "Companion's Mercy",
+            "Hideous Hex of Companion's Mercy",
+          },
+          notes = "+30% companion healing | +50 hp/mana/endur",
+          slot = "Aug19",
+},
+
         Charm = {
           ids = {
           },
