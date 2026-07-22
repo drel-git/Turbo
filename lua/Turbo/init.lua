@@ -174,6 +174,7 @@ local TG = {
     fleetWalletForgotten = {},
     fleetWalletColumns = { pp = true, dc = true, rc = true, fav = true, cc = true, aa = true },
     fleetWalletAmount = '',
+    fleetWalletWindowPos = nil,
     quickStartDismissed = false,
     --- Suite update check (remote CHANGELOG); default on. Throttled in Turbo.update_check.
     checkForUpdates = true,
@@ -1508,6 +1509,10 @@ saveSettings = function()
     end
     f:write('  },\n')
     f:write(string.format('  fleetWalletAmount = %q,\n', tostring(TG.fleetWalletAmount or '')))
+    if TG.fleetWalletWindowPos and TG.fleetWalletWindowPos.x and TG.fleetWalletWindowPos.y then
+        f:write(string.format('  fleetWalletWindowPos = { x = %.1f, y = %.1f },\n',
+            TG.fleetWalletWindowPos.x, TG.fleetWalletWindowPos.y))
+    end
     f:write(string.format('  quickStartDismissed = %s,\n', tostring(TG.quickStartDismissed == true)))
     f:write(string.format('  quickStartSeen = %s,\n', tostring(TG.quickStartSeen == true)))
     f:write(string.format('  checkForUpdates = %s,\n', tostring(TG.checkForUpdates ~= false)))
@@ -1655,6 +1660,12 @@ local function applySettingsTable(tbl)
     end
     if type(tbl.fleetWalletAmount) == 'string' then
         TG.fleetWalletAmount = tbl.fleetWalletAmount:gsub('%D', '')
+    end
+    if type(tbl.fleetWalletWindowPos) == 'table' and tbl.fleetWalletWindowPos.x and tbl.fleetWalletWindowPos.y then
+        TG.fleetWalletWindowPos = {
+            x = tonumber(tbl.fleetWalletWindowPos.x) or 0,
+            y = tonumber(tbl.fleetWalletWindowPos.y) or 0,
+        }
     end
     if tbl.quickStartDismissed ~= nil then TG.quickStartDismissed = tbl.quickStartDismissed == true end
     if tbl.quickStartSeen ~= nil then TG.quickStartSeen = tbl.quickStartSeen == true end
