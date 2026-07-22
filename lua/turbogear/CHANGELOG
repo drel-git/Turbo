@@ -1,3 +1,7 @@
+1.2.71
+- Turbo wallet color updates: teal is for currency and Collect/Pool; scope chips
+  and Get/Send stay neutral; recipient row uses a muted cool wash.
+
 1.2.70
 - Fleet wallet polish: active currency column gets a teal wash + bright header;
   Pool recipient row gets a softer teal wash + bright name. VIEW (Group / E3 /

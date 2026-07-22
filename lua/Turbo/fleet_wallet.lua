@@ -617,7 +617,8 @@ end
 
 local function scopeChip(id, label, scope)
     local on = tostring(TG.fleetWalletScope or 'group') == scope
-    local variant = on and 'walletButton' or 'secondaryButton'
+    -- Neutral active (not wallet teal): teal is reserved for currency.
+    local variant = on and 'subTabActive' or 'secondaryButton'
     if Ui.buttonVariant(label .. '##fw_scope_' .. id, variant) then
         TG.fleetWalletScope = scope
         if scope == 'picks' then TG.fleetWalletShowPicks = true end
@@ -784,7 +785,7 @@ function M.drawPanel()
     local curLabel = currencyLabel()
     local amt = amountOrNil()
 
-    ImGui.TextColored(0.55, 0.78, 0.82, 1.0, 'Fleet wallet')
+    ImGui.TextColored(0.62, 0.66, 0.72, 1.0, 'Fleet wallet')
     ImGui.SameLine()
     local titleW = select(1, ImGui.GetContentRegionAvail()) or 0
     if titleW > 28 then
@@ -818,7 +819,7 @@ function M.drawPanel()
     scopeChip('picks', 'Picks', 'picks')
     ImGui.SameLine(0, 4)
     if Ui.buttonVariant('Columns##fw_columns',
-        TG.fleetWalletShowSettings and 'walletButton' or 'utilityButton') then
+        TG.fleetWalletShowSettings and 'subTabActive' or 'utilityButton') then
         TG.fleetWalletShowSettings = not TG.fleetWalletShowSettings
     end
     if ImGui.IsItemHovered() then
@@ -846,9 +847,10 @@ function M.drawPanel()
     ImGui.SameLine(0, 4)
     currencyChip('cc', 'CC', 'cc')
     ImGui.SameLine(0, 12)
-    ImGui.TextColored(0.45, 0.72, 0.68, 1.0, 'Pool to:')
+    ImGui.TextColored(0.55, 0.60, 0.64, 1.0, 'Pool to:')
     ImGui.SameLine(0, 4)
-    ImGui.TextColored(0.55, 0.92, 0.82, 1.0, selected ~= '' and selected or '(none)')
+    -- Recipient accent: muted cool gray-green (not currency teal).
+    ImGui.TextColored(0.68, 0.80, 0.76, 1.0, selected ~= '' and selected or '(none)')
     ImGui.SameLine(0, 4)
     if ImGui.Dummy then ImGui.Dummy(4, 1); ImGui.SameLine(0, 0) end
     local canClearRecip = selected ~= '' and selected:lower() ~= me:lower()
@@ -946,10 +948,10 @@ function M.drawPanel()
         + (ImGuiTableFlags and ImGuiTableFlags.BordersInnerV or 0)
         + (ImGuiTableFlags and ImGuiTableFlags.Borders or 0)
     local colFlags = ImGuiTableColumnFlags or {}
-    -- Teal washes match walletButton / currency chip accent.
-    local COL_WASH = IM_COL32 and IM_COL32(45, 115, 125, 55) or nil      -- faint column
-    local COL_WASH_HDR = IM_COL32 and IM_COL32(45, 115, 125, 95) or nil  -- stronger header
-    local ROW_WASH = IM_COL32 and IM_COL32(36, 88, 82, 90) or nil       -- dimmer row wash
+    -- Currency column = wallet teal. Recipient row = cooler muted wash (not same teal).
+    local COL_WASH = IM_COL32 and IM_COL32(45, 115, 125, 55) or nil      -- currency column
+    local COL_WASH_HDR = IM_COL32 and IM_COL32(45, 115, 125, 95) or nil  -- currency header
+    local ROW_WASH = IM_COL32 and IM_COL32(48, 62, 68, 88) or nil        -- recipient row
     local CELL_BG = ImGuiTableBgTarget and (ImGuiTableBgTarget.CellBg or ImGuiTableBgTarget.RowBg0)
     local function paint_cell(isActiveCol, isSelRow, preferHeader)
         if not (ImGui.TableSetBgColor and IM_COL32 and CELL_BG) then return end
@@ -1008,8 +1010,8 @@ function M.drawPanel()
                     local label = (isSel and '> ' or '  ')
                         .. row.name .. (row.isSelf and ' (you)' or '')
                     if isSel and ImGui.PushStyleColor and ImGuiCol then
-                        -- Match "Pool to:" recipient accent.
-                        ImGui.PushStyleColor(ImGuiCol.Text, 0.55, 0.92, 0.82, 1.0)
+                        -- Match "Pool to:" recipient accent (muted cool, not currency teal).
+                        ImGui.PushStyleColor(ImGuiCol.Text, 0.68, 0.80, 0.76, 1.0)
                     end
                     if ImGui.Selectable(label .. '##fw_' .. row.name, false) then
                         TG.fleetWalletRecipient = row.name
@@ -1039,7 +1041,8 @@ function M.drawPanel()
                         ImGui.Text('') -- blank (no disabled '-')
                     else
                         if not canControl then ImGui.BeginDisabled() end
-                        if Ui.buttonVariant('Get##fw_get_' .. row.name, 'walletButton', 34, 0) then
+                        -- Quieter ops; strong teal reserved for Collect / Pool.
+                        if Ui.buttonVariant('Get##fw_get_' .. row.name, 'secondaryButton', 34, 0) then
                             if TG.requireSharedControl('Collect ' .. curLabel .. ' from ' .. row.name) then
                                 TG.fleetWalletRecipient = me
                                 selected = me
@@ -1056,7 +1059,7 @@ function M.drawPanel()
                             ImGui.EndTooltip()
                         end
                         ImGui.SameLine(0, 2)
-                        if Ui.buttonVariant('Send##fw_send_' .. row.name, 'walletButton', 36, 0) then
+                        if Ui.buttonVariant('Send##fw_send_' .. row.name, 'secondaryButton', 36, 0) then
                             if TG.requireSharedControl('Send ' .. curLabel .. ' to ' .. row.name) then
                                 TG.fleetWalletRecipient = row.name
                                 selected = row.name
@@ -1169,7 +1172,7 @@ function M.drawPanel()
     ImGui.TextColored(0.55, 0.58, 0.68, 1.0, 'Amount')
     ImGui.SameLine(0, 6)
     local allOn = amt == nil
-    if Ui.buttonVariant('All##fw_amt_all', allOn and 'walletButton' or 'secondaryButton', 40, 0) then
+    if Ui.buttonVariant('All##fw_amt_all', allOn and 'subTabActive' or 'secondaryButton', 40, 0) then
         TG.fleetWalletAmount = ''
         if TG.saveSettings then pcall(TG.saveSettings) end
     end
