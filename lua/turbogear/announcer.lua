@@ -2739,26 +2739,37 @@ function M.tick()
         -- static catalog, and gating on it starved index warm-up whenever the
         -- static build was slow (Rydell 17:05: 76 index ticks in 626 loops).
         if index_enabled and index_needed then
-            local idx_budget
-            if state.bg then
-                idx_budget = tonumber(CFG.needs_index_budget_bg_ms) or 25
-            elseif index_stale then
-                local lean_idx = tonumber(CFG.needs_index_budget_lean_ms)
-                    or tonumber(CFG.needs_index_budget_ms) or 4
-                local stale_idx = tonumber(CFG.needs_index_budget_stale_ms) or 20
-                idx_budget = lean_idx + (stale_idx - lean_idx) * stale_t
-            elseif state.lean and state.lean() then
-                idx_budget = tonumber(CFG.needs_index_budget_lean_ms) or tonumber(CFG.needs_index_budget_ms) or 4
+            local gear_settling = false
+            pcall(function()
+                local iw = require('inventory_watch')
+                gear_settling = iw and iw.inventory_settling and iw.inventory_settling() == true
+            end)
+            if gear_settling then
+                -- Keep last_store_content_version untouched so the rebuild runs
+                -- after settle. Announce paths still live-confirm ownership.
+                diag.count("needs_index.deferred_gear_settle")
             else
-                idx_budget = tonumber(CFG.needs_index_budget_ms) or 4
-            end
-            -- Draw down from the shared frame budget: subtract whatever the
-            -- catalog warm already spent, and skip this frame if the budget is
-            -- exhausted (the index build is resumable next tick).
-            local remaining_ms = (frame_deadline - os.clock()) * 1000
-            if remaining_ms < idx_budget then idx_budget = remaining_ms end
-            if idx_budget >= 1 then
-                needs_index.tick(idx_budget, { allow_peers = allow_peer_index })
+                local idx_budget
+                if state.bg then
+                    idx_budget = tonumber(CFG.needs_index_budget_bg_ms) or 25
+                elseif index_stale then
+                    local lean_idx = tonumber(CFG.needs_index_budget_lean_ms)
+                        or tonumber(CFG.needs_index_budget_ms) or 4
+                    local stale_idx = tonumber(CFG.needs_index_budget_stale_ms) or 20
+                    idx_budget = lean_idx + (stale_idx - lean_idx) * stale_t
+                elseif state.lean and state.lean() then
+                    idx_budget = tonumber(CFG.needs_index_budget_lean_ms) or tonumber(CFG.needs_index_budget_ms) or 4
+                else
+                    idx_budget = tonumber(CFG.needs_index_budget_ms) or 4
+                end
+                -- Draw down from the shared frame budget: subtract whatever the
+                -- catalog warm already spent, and skip this frame if the budget is
+                -- exhausted (the index build is resumable next tick).
+                local remaining_ms = (frame_deadline - os.clock()) * 1000
+                if remaining_ms < idx_budget then idx_budget = remaining_ms end
+                if idx_budget >= 1 then
+                    needs_index.tick(idx_budget, { allow_peers = allow_peer_index })
+                end
             end
         end
         -- Fleet item-index (Focus/Stats/Search): budgeted peer walks; UI serves

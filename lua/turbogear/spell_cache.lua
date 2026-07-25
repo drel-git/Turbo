@@ -153,7 +153,7 @@ function M.rebuild(className)
 
     local okSig, spell_snap = pcall(require, 'spell_snapshot')
     if okSig and spell_snap and spell_snap.signature then
-        last_sig = spell_snap.signature(spells) or ''
+        last_sig = spell_snap.signature(spells, spell_ids) or ''
     else
         local parts = {}
         for n, _ in pairs(known_by_norm) do parts[#parts + 1] = 'n' .. n end

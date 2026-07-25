@@ -58,7 +58,9 @@ local function trim(s)
 end
 
 local function class_key(class_name)
+    if cfg.canonical_class then return cfg.canonical_class(class_name) end
     class_name = trim(class_name)
+    if class_name == "" or class_name == "?" then return nil end
     if class_name == "Shadowknight" then return "Shadow Knight" end
     return class_name
 end
@@ -614,8 +616,13 @@ function M.resolve_entry(list_id, class_name, slot)
 
     local list = M.list(list_id)
     if not list then return nil end
-    local class_bucket = list.classes and list.classes[class_key(class_name)] or nil
+    -- No known class → empty cell. "?" is a discovery stub; falling through to
+    -- list.template/visible painted pouches/axes in Arms for Discord (?).
+    class_name = class_key(class_name)
+    if not class_name then return nil end
+    local class_bucket = list.classes and list.classes[class_name] or nil
     local entry = class_bucket and class_bucket[slot]
+    -- Template/visible only after a real class resolved (shared slots), never for stubs.
     if not entry and list.template then entry = list.template[slot] end
     if not entry and list.visible then entry = list.visible[slot] end
     if not entry then return nil end
@@ -703,6 +710,43 @@ function M.evaluate_slot(list_id, snap, slot, category)
     local entry = M.resolve_entry(list_id, snap and snap.class, slot)
     if not entry then return { category = category, slot = slot, empty = true } end
     entry.group = category or entry.group
+    -- Peer columns: prefer LazBiS-lite FindItem maps over empty/stale snapshots.
+    local ok_bs, bis_search = pcall(require, 'bis_search')
+    if ok_bs and bis_search and bis_search.slot_rec and snap and not snap._bis_search_skip then
+        local is_self = false
+        pcall(function()
+            local mine = tostring(mq.TLO.Me.CleanName() or ""):lower()
+            is_self = mine ~= "" and tostring(snap.name or ""):lower() == mine
+        end)
+        if not is_self then
+            local hit = bis_search.slot_rec(snap, list_id, slot)
+            if type(hit) == "table" and hit.status then
+                local status = tostring(hit.status)
+                if status ~= "equipped" and status ~= "carried" and status ~= "missing" then
+                    status = (tonumber(hit.count) or 0) > 0 and "carried" or "missing"
+                end
+                local loc = tostring(hit.location or "")
+                if loc == "" then
+                    loc = status == "equipped" and "Equipped" or "Bags"
+                end
+                -- Single label for display (row_location used to join location/where → "Bags - Bags").
+                local match = {
+                    name = hit.name or entry.item,
+                    where = loc,
+                    slotname = loc,
+                    location = loc,
+                }
+                return {
+                    entry = entry,
+                    have = status == "equipped" or status == "carried",
+                    match = match,
+                    status = status,
+                    category = category,
+                    from_bis_search = true,
+                }
+            end
+        end
+    end
     local row = bis.evaluate_entry(entry, snap)
     row.category = category
     return row

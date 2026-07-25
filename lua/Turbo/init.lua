@@ -29,9 +29,12 @@
         /lua run Turbo view full|mini -- layout + save (alias: layout)
         /lua run Turbo doctor     -- print install/profile doctor when UI is closed
         /lua run Turbo doctor loot -- slim auto-loot gate report (why slain did not start TurboLoot)
+        /lua run Turbo hitchlog [seconds] -- open UI and record timed UI hitch log (default 180s)
         /turbodoctor              -- same install report when the Turbo UI is already running
         /turbodoctor loot         -- slim auto-loot gate report while Turbo is running
         /tlootwhy                 -- alias for /turbodoctor loot
+        /turbo hitchlog [seconds] -- timed UI hitch capture while Turbo UI is already running
+        /turbohitchlog [seconds]  -- alias for /turbo hitchlog
         /turbosnapshot            -- active turboloot.ini settings, grouped + with descriptions
         /turbomain                -- show/hide main Turbo while the Turbo UI is already running
         /turbofocus               -- show main Turbo (open only; does not hide)
@@ -296,6 +299,10 @@ if cliMode then
         cliMode = nil
     elseif lc == 'first-run' or lc == 'firstrun' or lc == 'onboarding' then
         mq.cmd('/lua run Turbo/onboarding')
+        cliMode = nil
+    elseif lc == 'hitchlog' or lc == 'hitch' or lc == 'uiperf' then
+        -- Open GUI (saved layout) and start a timed UI hitch capture.
+        TG.pendingHitchlogSeconds = tonumber(cliArg2) or 180
         cliMode = nil
     end
 end
@@ -6120,6 +6127,8 @@ local function printHelp()
     printf('\aw    \ay%s\ax - same install report when the Turbo UI is already open\ax', TURBO_DOCTOR_BIND)
     printf('\aw    \ay%s loot\ax / \ay/tlootwhy\ax - slim auto-loot gate report\ax', TURBO_DOCTOR_BIND)
     printf('\aw    \ay/turbosnapshot\ax - active turboloot.ini settings, grouped + with descriptions\ax')
+    printf('\aw    \ay/turbo hitchlog\ax [\atseconds\ax] - timed Turbo UI hitch log (default 180s; alias \ay/turbohitchlog\ax)\ax')
+    printf('\aw    \ay/lua run Turbo hitchlog\ax [\atseconds\ax] - same when UI is closed (opens Turbo)\ax')
     printf('\aw \ax')
     printf('\at==== \ayOTHER TOOLS \at====\ax')
     printf('\aw    \ag/mac turboloot help\ax     \ag/mac turbogive help\ax     \ag/mac turbokey help\ax')
@@ -6421,6 +6430,55 @@ local function bindTurboRuntimeCommands()
     if not okWhy then
         printf('\at[Turbo]\ax \ayCould not bind /tlootwhy: %s\ax', tostring(errWhy))
     end
+    local function startHitchlogFromBind(...)
+        local a1 = tostring(({ ... })[1] or ''):lower()
+        local a2 = ({ ... })[2]
+        local seconds = tonumber(({ ... })[1])
+        if a1 == 'hitchlog' or a1 == 'hitch' or a1 == 'uiperf' then
+            seconds = tonumber(a2) or 180
+        elseif a1 == 'stop' or a1 == 'end' or a1 == 'finish' then
+            if TG.hitchlog and TG.hitchlog.capturing() then
+                TG.hitchlog.finish('manual stop')
+            else
+                printf('\at[Turbo]\ax hitchlog is not recording.')
+            end
+            return
+        elseif a1 ~= '' and seconds == nil then
+            printf('\at[Turbo]\ax Usage: \ay/turbo hitchlog\ax [\atseconds\ax]  (30-600, default 180)')
+            return
+        end
+        TG.startHitchlog(seconds or 180)
+    end
+    local okTurbo, errTurbo = pcall(function()
+        mq.bind('/turbo', function(...)
+            local a1 = tostring(({ ... })[1] or ''):lower()
+            if a1 == 'hitchlog' or a1 == 'hitch' or a1 == 'uiperf' or a1 == 'stop' or a1 == 'end' or a1 == 'finish' then
+                startHitchlogFromBind(...)
+            elseif a1 == '' then
+                printf('\at[Turbo]\ax Usage: \ay/turbo hitchlog\ax [\atseconds\ax]')
+            else
+                printf('\at[Turbo]\ax Unknown: \ay/turbo %s\ax — try \ay/turbo hitchlog\ax', a1)
+            end
+        end)
+    end)
+    TG.turboBindActive = okTurbo
+    if not okTurbo then
+        printf('\at[Turbo]\ax \ayCould not bind /turbo: %s\ax', tostring(errTurbo))
+    end
+    local okHitchBind, errHitchBind = pcall(function()
+        mq.bind('/turbohitchlog', function(...)
+            local a1 = tostring(({ ... })[1] or ''):lower()
+            if a1 == 'stop' or a1 == 'end' or a1 == 'finish' then
+                startHitchlogFromBind('stop')
+            else
+                TG.startHitchlog(tonumber(({ ... })[1]) or 180)
+            end
+        end)
+    end)
+    TG.hitchlogBindActive = okHitchBind
+    if not okHitchBind then
+        printf('\at[Turbo]\ax \ayCould not bind /turbohitchlog: %s\ax', tostring(errHitchBind))
+    end
     -- v3.8.52: /turbosnapshot — grouped active-INI dump with descriptions.
     -- Doctor lost its [Active INI Settings] block in 3.8.52; this is the
     -- canonical "what does my INI say + what does each setting mean" output.
@@ -6663,6 +6721,14 @@ local function unbindTurboRuntimeCommands()
         pcall(function() mq.unbind('/tlootwhy') end)
         TG.lootWhyBindActive = false
     end
+    if TG.turboBindActive then
+        pcall(function() mq.unbind('/turbo') end)
+        TG.turboBindActive = false
+    end
+    if TG.hitchlogBindActive then
+        pcall(function() mq.unbind('/turbohitchlog') end)
+        TG.hitchlogBindActive = false
+    end
     if TG.snapshotBindActive then
         pcall(function() mq.unbind('/turbosnapshot') end)
         TG.snapshotBindActive = false
@@ -6871,6 +6937,18 @@ TG.LAYOUT_MODE_BTN_H = LAYOUT_MODE_BTN_H
 TG.HELP_CHIP_W = HELP_CHIP_W
 TG.HELP_CHIP_H = HELP_CHIP_H
 TG.ui = Ui
+do
+    local okHitch, hitchMod = pcall(require, 'Turbo.hitchlog')
+    TG.hitchlog = (okHitch and hitchMod) or nil
+end
+TG.startHitchlog = function(seconds)
+    if not TG.hitchlog then
+        printf('\at[Turbo]\ax \arHitchlog module failed to load.\ax')
+        return false
+    end
+    TG.windowOpen = true
+    return TG.hitchlog.start(seconds, { version = TURBO_VERSION })
+end
 
 -- =========================================================
 -- Shared Tools popup body (3.8.29)
@@ -10500,6 +10578,8 @@ end)()
 -- Main render window
 -- =========================================================
 function TG.renderWindow()
+    local hitch = TG.hitchlog
+    if hitch and hitch.capturing() then hitch.on_frame_begin() end
     (function()
     local g = TG
     local mq, ImGui = g.mq, g.ImGui
@@ -10582,14 +10662,17 @@ function TG.renderWindow()
 
     local t = nowMS()
     if (t - g.lastRefreshMS) >= AUTO_REFRESH_MS then
+        if TG.hitchlog then TG.hitchlog.span_begin('auto_refresh') end
         collectGroupMembers()
         refreshWalletCache()
         if g.refreshActiveIniState then
             g.refreshActiveIniState(false)
         end
         g.lastRefreshMS = t
+        if TG.hitchlog then TG.hitchlog.span_end() end
     end
 
+    if TG.hitchlog then TG.hitchlog.span_begin('skip_journal_poll') end
     if g.skipQueue and g.skipQueue.poll and g.skipQueue.poll() then
         if skipTracker and skipTracker.refresh then
             skipTracker.refresh()
@@ -10611,6 +10694,7 @@ function TG.renderWindow()
             g.skipDisplayTotal = nil
         end
     end
+    if TG.hitchlog then TG.hitchlog.span_end() end
 
     local currentLooter = getCurrentLooter()
     local liveMainLooter = g.getLiveMainLooter and g.getLiveMainLooter() or currentLooter
@@ -10637,7 +10721,9 @@ function TG.renderWindow()
     end
     local eventLootRadius = getEventLootRadius(lootAllOn, multiModeOn, currentLooter)
     if skipTracker and skipTracker.is_ready() and g.skipDisplayRows == nil then
+        if TG.hitchlog then TG.hitchlog.span_begin('skip_display_rebuild') end
         rebuildSkipDisplayRows()
+        if TG.hitchlog then TG.hitchlog.span_end() end
     end
     local skipPendingCount = 0
     if skipTracker and skipTracker.is_ready() then
@@ -10959,6 +11045,7 @@ function TG.renderWindow()
     -- ============ MINI MODE ============
     local shouldDraw
     if g.minimizedGUI then
+        if TG.hitchlog then TG.hitchlog.span_begin('draw_mini') end
         MiniView.render(viewState, {
             cachedWallet = o.cachedWallet,
             tip = tip,
@@ -10975,12 +11062,15 @@ function TG.renderWindow()
             canSharedControlWrite = TG.isSharedControlOwner,
             sharedControlOwnerName = TG.sharedControlOwnerName,
             toggleTurboFromMini = function(rt)
-                if TG.requireSharedControl('Turbo toggle') then
-                    if rt.turboOn then
-                        TG.setTurboEnabled(false, rt.currentLooter, rt.lootAllOn, rt.multiModeOn)
-                    else
-                        TG.setTurboEnabled(true, rt.currentLooter, rt.lootAllOn, rt.multiModeOn)
-                    end
+                -- Mini has no Control badge; ON/OFF should claim control when
+                -- browse-only so a box can recover without expanding Full UI.
+                if not TG.isSharedControlOwner() then
+                    if not TG.takeSharedControl() then return end
+                end
+                if rt.turboOn then
+                    TG.setTurboEnabled(false, rt.currentLooter, rt.lootAllOn, rt.multiModeOn)
+                else
+                    TG.setTurboEnabled(true, rt.currentLooter, rt.lootAllOn, rt.multiModeOn)
                 end
             end,
             toggleMiniLooterPicker = function()
@@ -11162,10 +11252,12 @@ function TG.renderWindow()
         end
         ImGui.PopStyleColor(12)
         ImGui.PopStyleVar(6)
+        if TG.hitchlog then TG.hitchlog.span_end() end
         return
     end
 
     -- ============ FULL MODE ============
+    if TG.hitchlog then TG.hitchlog.span_begin('draw_full') end
     local fullDefaultW = UiState.windowWidthForTab(false, g.activeTab, Theme)
     local fullDefaultH = UiState.windowHeightForTab(false, g.activeTab, Theme, {
         setupExpanded = setupExpanded,
@@ -12499,6 +12591,13 @@ function TG.renderWindow()
                         (tonumber(result.errors) or 0) > 0 and string.format(', %d error(s)', tonumber(result.errors) or 0) or '')
                     printf('\at[Turbo]\ax %s', g.statusMessage)
                 end,
+                startHitchlog = function()
+                    if TG.startHitchlog(180) then
+                        g.statusMessage = 'Hitch log recording for 180s. Sit still; path prints to chat when done.'
+                    else
+                        g.statusMessage = 'Could not start hitchlog.'
+                    end
+                end,
                 toggleFileLog = function()
                     g.logFileOn = not g.logFileOn
                     mq.cmdf('/squelch /varset logToFile %s', g.logFileOn and 'TRUE' or 'FALSE')
@@ -12757,8 +12856,13 @@ function TG.renderWindow()
     end
 
     renderDetachedRulePacksWindow()
+    if TG.hitchlog then TG.hitchlog.span_end() end
     end)()
     end)()
+    if hitch and hitch.capturing() then
+        hitch.on_frame_end(TG)
+    end
+    if hitch then hitch.tick() end
 end
 
 -- =========================================================
@@ -13024,6 +13128,10 @@ bindTurboRuntimeCommands()
 TG.markStartup('binds')
 mq.imgui.init(scriptName, TG.renderWindow)
 TG.markStartup('imgui')
+if TG.pendingHitchlogSeconds then
+    TG.startHitchlog(TG.pendingHitchlogSeconds)
+    TG.pendingHitchlogSeconds = nil
+end
 if nowMS() - TG.startupT0 >= 1000 then
     printf('\at[Turbo]\ax startup %dms: %s', nowMS() - TG.startupT0, table.concat(TG.startupTrace, ', '))
 end
@@ -13057,6 +13165,9 @@ while TG.windowOpen do
     mq.delay(100)
 end
 
+if TG.hitchlog and TG.hitchlog.capturing and TG.hitchlog.capturing() then
+    TG.hitchlog.finish('ui closed')
+end
 saveSettings()
 saveCharProfiles()
 unbindTurboRuntimeCommands()

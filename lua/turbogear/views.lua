@@ -656,6 +656,21 @@ function M.source_snapshot(key)
         return snap, false, snap and snap.name or "?"
     end
     local s = Store.get(key)
+    if s and Store.enrich_class then Store.enrich_class(s) end
+    if not s then
+        local ok_bs, bis_search = pcall(require, 'bis_search')
+        if ok_bs and bis_search and bis_search.stub_snap then
+            s = bis_search.stub_snap(key)
+        end
+    elseif s and (not s.class or s.class == "" or s.class == "?") then
+        local ok_bs, bis_search = pcall(require, 'bis_search')
+        if ok_bs and bis_search and bis_search.stub_snap then
+            local stub = bis_search.stub_snap(key)
+            if stub and stub.class and stub.class ~= "" then
+                s.class = stub.class
+            end
+        end
+    end
     return s, false, (s and s.name or "?")
 end
 

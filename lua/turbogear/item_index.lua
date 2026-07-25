@@ -295,20 +295,28 @@ local function collect_peer_sources(self_snap)
     return peers
 end
 
+-- Items processed between deadline checks inside a single peer list.
+local ITEM_CHUNK = 48
+-- phase: 0=equipped, 1=bags, 2=bank
+local PHASE_EQUIPPED, PHASE_BAGS, PHASE_BANK = 0, 1, 2
+
 local function start_job()
     local target_cv = Store.content_version or 0
     local target_self_sig = self_index_signature()
     local self_snap = live_self_snapshot_for_index()
-    local rows = {}
-    if self_snap then
-        preserve_self_bank_cache(self_snap)
-        add_equipped(rows, self_snap)
-        add_storage(rows, self_snap)
+    if self_snap then preserve_self_bank_cache(self_snap) end
+    -- Self is peer_i=1 so cold-start never does a synchronous full walk in get().
+    local peers = {}
+    if self_snap then peers[1] = self_snap end
+    for _, snap in ipairs(collect_peer_sources(self_snap)) do
+        peers[#peers + 1] = snap
     end
     job = {
-        rows = rows,
-        peers = collect_peer_sources(self_snap),
+        rows = {},
+        peers = peers,
         peer_i = 1,
+        phase = PHASE_EQUIPPED,
+        item_i = 1,
         target_cv = target_cv,
         target_self_sig = target_self_sig,
         started_at = os.clock(),
@@ -337,16 +345,70 @@ local function ensure_job(force)
     return job ~= nil
 end
 
---- Synchronous full rebuild (tests / rare explicit callers). Prefer get+tick.
+local function phase_list(snap, phase)
+    if phase == PHASE_EQUIPPED then return (snap and snap.equipped) or {} end
+    if phase == PHASE_BAGS then return (snap and snap.bags) or {} end
+    return (snap and snap.bank) or {}
+end
+
+-- Process up to ITEM_CHUNK items (or until deadline). Returns true when the
+-- current peer is fully consumed (caller may advance peer_i).
+local function advance_peer_chunk(j, deadline)
+    local snap = j.peers[j.peer_i]
+    if not snap then
+        j.peer_i = j.peer_i + 1
+        j.phase = PHASE_EQUIPPED
+        j.item_i = 1
+        return true
+    end
+    local n = 0
+    while j.phase <= PHASE_BANK do
+        local list = phase_list(snap, j.phase)
+        while j.item_i <= #list do
+            if n > 0 and (n % ITEM_CHUNK) == 0 and os.clock() >= deadline then
+                return false
+            end
+            local item = list[j.item_i]
+            j.item_i = j.item_i + 1
+            n = n + 1
+            if j.phase == PHASE_EQUIPPED then
+                add_row(j.rows, snap, item, {
+                    kind = item_kind(item),
+                    where = "equipped",
+                    locationGroup = "equipped",
+                    location = item.slotname or item.where or "Equipped",
+                    sourceKey = table.concat({
+                        snap.server or "", snap.name or "", "equipped",
+                        tostring(item.slotid or ""), tostring(item.id or 0),
+                    }, ":"),
+                })
+                add_installed_augs(j.rows, snap, item, "equipped", "installed_aug")
+            elseif j.phase == PHASE_BAGS then
+                add_storage_item(j.rows, snap, item, "bags")
+            else
+                add_storage_item(j.rows, snap, item, "bank")
+            end
+            if os.clock() >= deadline and n > 0 then return false end
+        end
+        j.phase = j.phase + 1
+        j.item_i = 1
+    end
+    return true
+end
+
+--- Drain the in-flight job to completion (tests / rare explicit callers).
+--- Prefer get+tick in the live loop — never call this from UI get().
 function M.rebuild()
     start_job()
     local j = job
+    local guard = 0
     while j and j.peer_i <= #(j.peers or {}) do
-        local snap = j.peers[j.peer_i]
-        j.peer_i = j.peer_i + 1
-        if snap then
-            add_equipped(j.rows, snap)
-            add_storage(j.rows, snap)
+        guard = guard + 1
+        if guard > 100000 then break end
+        if advance_peer_chunk(j, os.clock() + 3600) then
+            j.peer_i = j.peer_i + 1
+            j.phase = PHASE_EQUIPPED
+            j.item_i = 1
         end
     end
     return finish_job(j)
@@ -366,18 +428,16 @@ function M.tick(budget_ms)
     budget_ms = tonumber(budget_ms) or 4
     if budget_ms < 0.25 then budget_ms = 0.25 end
     local deadline = os.clock() + budget_ms / 1000
-    local processed = 0
 
     while j.peer_i <= #(j.peers or {}) do
-        if os.clock() >= deadline and processed > 0 then break end
-        local snap = j.peers[j.peer_i]
-        j.peer_i = j.peer_i + 1
-        processed = processed + 1
-        if snap then
-            add_equipped(j.rows, snap)
-            add_storage(j.rows, snap)
-        end
         if os.clock() >= deadline then break end
+        if advance_peer_chunk(j, deadline) then
+            j.peer_i = j.peer_i + 1
+            j.phase = PHASE_EQUIPPED
+            j.item_i = 1
+        else
+            break
+        end
     end
 
     if j.peer_i > #(j.peers or {}) then
@@ -393,20 +453,15 @@ end
 
 function M.get(force)
     force = force == true
-    -- Cold start: no last-good rows yet -> finish synchronously once so UI
-    -- does not flash empty. Later bumps use budgeted ticks.
-    if (#(M.rows or {}) == 0) and (force or is_stale()) then
-        return M.rebuild()
-    end
-    ensure_job(force)
+    -- Never synchronous-rebuild here: cold start used to call M.rebuild() and
+    -- freeze the game thread for multi-second fleet walks (6s in captures).
+    -- Serve last-good (or empty) and let M.tick fill/swap.
+    ensure_job(force or is_stale())
     return M.rows, M.version
 end
 
 function M.refresh()
     ensure_job(true)
-    if #(M.rows or {}) == 0 then
-        return M.rebuild()
-    end
     return M.rows, M.version
 end
 

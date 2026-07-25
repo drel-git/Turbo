@@ -34,17 +34,112 @@ local Store = {
 -- UI BiS/announce path see peer loot in ~seconds instead of waiting for the
 -- normal bg save_every (~30s). Cache reloads do not schedule this.
 local content_flush_due_at = nil
+-- Keys whose content_signature changed since last successful persist. Default
+-- Store.save only serializes these (partial) — full-fleet serialize was 400s+.
+local dirty_persist_keys = {}
+local persisted_content_sig = {}
+
+-- In-flight budgeted payload build (bags/bank). Aborted when inventory changes again.
+local persist_job = nil
+local begin_persist_job, progress_persist_job
 
 local function schedule_content_flush()
     local coalesce = tonumber(CFG.save_content_coalesce_s)
-    if coalesce == nil then coalesce = 1.5 end
+    if coalesce == nil then coalesce = 8.0 end
     if coalesce <= 0 then return end
     -- Restart the window on every change so a loot train collapses to one write.
     content_flush_due_at = os.clock() + coalesce
 end
 
+local function mark_persist_dirty(key)
+    key = tostring(key or "")
+    if key == "" then return end
+    dirty_persist_keys[key] = true
+end
+
 local function my_key()
     return (mq.TLO.MacroQuest.Server() or "?") .. "_" .. (mq.TLO.Me.CleanName() or "?")
+end
+
+-- Own row: always persist. Peer rows: only when this bg shares the box with a
+-- TurboGear UI (viewer reads SQLite, not actor mail). Pure bg bots must not
+-- rewrite peer rows — that reintroduced Discord's multi-minute serialize hitch.
+local function should_persist_key(key)
+    if key == my_key() then return true end
+    local ok, st = pcall(require, 'state')
+    if not ok or type(st) ~= "table" or st.bg ~= true then return false end
+    local scripts = st.local_guard_scripts
+    return type(scripts) == "table" and scripts.main == true
+end
+
+local function abort_persist_job(reason)
+    if not persist_job then return end
+    persist_job = nil
+    diag.count("store.persist_job_aborted")
+    if reason then
+        diag.event("store.persist_job_aborted", tostring(reason))
+    end
+end
+
+local function note_persist_dirty(key)
+    if not should_persist_key(key) then return end
+    mark_persist_dirty(key)
+    -- Inventory moved again: drop in-flight chunked build and re-settle.
+    abort_persist_job("content_changed")
+    schedule_content_flush()
+    Store.dirty = true
+end
+
+-- "?" is discover_peer / failed Class.Name sentinel — never overwrite a real class.
+-- Prefer canonical_class so SHD / Shadowknight land on LazBiS "Shadow Knight".
+local function known_class(c)
+    if cfg.canonical_class then return cfg.canonical_class(c) end
+    return cfg.known_class and cfg.known_class(c) or nil
+end
+
+local function coalesce_class(preferred, fallback)
+    return known_class(preferred) or known_class(fallback) or ""
+end
+
+-- Viewer-side fill: peer rows often land as discover stubs (class="") while the
+-- toon is in group/zone. BiS needs a real class; pull it from Group/Spawn TLOs.
+local function class_from_world(name)
+    name = tostring(name or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if name == "" then return nil end
+    local c = nil
+    pcall(function()
+        local m = mq.TLO.Group and mq.TLO.Group.Member and mq.TLO.Group.Member(name)
+        if m and m() then
+            if m.Class and m.Class.Name then c = m.Class.Name() end
+            if (not c or c == "" or c == "?") and m.Class then c = m.Class() end
+            if (not c or c == "" or c == "?") and m.Class and m.Class.ShortName then c = m.Class.ShortName() end
+        end
+    end)
+    if known_class(c) then return known_class(c) end
+    pcall(function()
+        local s = mq.TLO.Spawn("pc =" .. name)
+        if not (s and s()) then s = mq.TLO.Spawn(name) end
+        if s and s() then
+            if s.Class and s.Class.Name then c = s.Class.Name() end
+            if (not c or c == "" or c == "?") and s.Class then c = s.Class() end
+            if (not c or c == "" or c == "?") and s.Class and s.Class.ShortName then c = s.Class.ShortName() end
+        end
+    end)
+    return known_class(c)
+end
+
+function Store.enrich_class(snap)
+    if type(snap) ~= "table" then return snap end
+    if known_class(snap.class) then
+        snap.class = known_class(snap.class)
+        return snap
+    end
+    local c = class_from_world(snap.name)
+    if c then
+        snap.class = c
+        Store.version = (Store.version or 0) + 1
+    end
+    return snap
 end
 
 local function is_invalid_source_key(key, snap)
@@ -308,7 +403,7 @@ local function merge_lite_snapshot(existing, snap)
     local out = {
         name = snap.name,
         server = snap.server,
-        class = snap.class or existing.class,
+        class = coalesce_class(snap.class, existing.class),
         level = snap.level or existing.level,
         zoneShortName = snap.zoneShortName or existing.zoneShortName,
         zoneName = snap.zoneName or existing.zoneName,
@@ -364,6 +459,8 @@ end
 local function merge_snapshot(existing, snap)
     if type(existing) ~= "table" or type(snap) ~= "table" then return snap end
     if snap.depth ~= "full" then return merge_lite_snapshot(existing, snap) end
+    -- Never let a full publish wipe a known class ("?" / blank → BiS (?)).
+    snap.class = coalesce_class(snap.class, existing.class)
     if snap.lockouts == nil then snap.lockouts = existing.lockouts end
     if snap.liveStats == nil then snap.liveStats = existing.liveStats end
     if snap.radiant_crystals == nil then snap.radiant_crystals = existing.radiant_crystals end
@@ -421,9 +518,10 @@ function Store.put(snap, kind)
             note_content_change("put", key, snap, Store.content_signatures[key], sig)
             Store.content_signatures[key] = sig
             Store.content_version = (Store.content_version or 0) + 1
-            schedule_content_flush()
+            -- Own row always. Peer rows only on UI+bg boxes so the viewer process
+            -- (cache-only) can see actor SNAPSHOTs; pure bg peers skip (hitch).
+            note_persist_dirty(key)
         end
-        Store.dirty = true
         Store.version = (Store.version or 0) + 1
     end)
 end
@@ -464,7 +562,7 @@ function Store.apply_delta(delta, kind)
         existing.updated = tonumber(delta.updated) or os.time()
         existing.inventoryUpdated = stamp
         existing.seq = tonumber(delta.seq) or existing.seq
-        existing.class = delta.class or existing.class
+        existing.class = coalesce_class(delta.class, existing.class)
         existing.level = delta.level or existing.level
         existing.status = "online"
         existing.last_seen = os.time()
@@ -475,9 +573,8 @@ function Store.apply_delta(delta, kind)
             note_content_change("delta", key, existing, Store.content_signatures[key], sig)
             Store.content_signatures[key] = sig
             Store.content_version = (Store.content_version or 0) + 1
-            schedule_content_flush()
+            note_persist_dirty(key)
         end
-        Store.dirty = true
         Store.version = (Store.version or 0) + 1
         return true
     end)
@@ -500,7 +597,7 @@ function Store.touch(snap, kind)
         existing.last_seen = now
         existing.kind = kind or existing.kind or "client"
         if (kind or "client") == "client" then existing.actorSeenAt = now end
-        existing.class = snap.class or existing.class
+        existing.class = coalesce_class(snap.class, existing.class)
         existing.level = snap.level or existing.level
         existing.zoneShortName = snap.zoneShortName or existing.zoneShortName
         existing.zoneName = snap.zoneName or existing.zoneName
@@ -520,7 +617,7 @@ function Store.touch(snap, kind)
     Store.sources[key] = {
         name = snap.name,
         server = snap.server,
-        class = snap.class,
+        class = coalesce_class(snap.class, nil),
         level = snap.level,
         zoneShortName = snap.zoneShortName,
         zoneName = snap.zoneName,
@@ -563,7 +660,7 @@ function Store.discover_peer(name, provider)
     Store.sources[key] = {
         name = name,
         server = server,
-        class = "?",
+        class = "",
         level = 0,
         updated = nil,
         inventoryUpdated = nil,
@@ -616,13 +713,26 @@ function Store.tick()
         end
     end
     local now = os.clock()
-    -- Content flush wins over the normal debounce so BiS/UI see inventory
-    -- changes promptly; still requires Store.dirty (put/delta already set it).
+    -- Quiet settle: while the coalesce window is still open, do not disk-save
+    -- (including save_every). Actor publish already updated peers.
+    if content_flush_due_at and now < content_flush_due_at then
+        return
+    end
+    -- Budgeted payload build in progress.
+    if persist_job then
+        progress_persist_job(CFG.save_persist_budget_ms)
+        return
+    end
     if content_flush_due_at and Store.dirty and now >= content_flush_due_at then
         diag.count("store.content_flush")
-        Store.save()
+        content_flush_due_at = nil
+        begin_persist_job()
+        if persist_job then progress_persist_job(CFG.save_persist_budget_ms) end
     elseif Store.dirty and (now - Store.last_save) > save_every then
-        Store.save()
+        begin_persist_job()
+        if persist_job then
+            progress_persist_job(CFG.save_persist_budget_ms)
+        end
     end
 end
 
@@ -675,13 +785,13 @@ function Store.put_wallet(wallet, kind)
             if wallet[k] ~= nil then out[k] = wallet[k] end
         end
         out.updated = tonumber(wallet.updated) or os.time()
-        out.class = wallet.class or out.class
+        out.class = coalesce_class(wallet.class, out.class)
         out.level = wallet.level or out.level
     else
         out = {
             name = wallet.name,
             server = wallet.server,
-            class = wallet.class,
+            class = coalesce_class(wallet.class, nil),
             level = wallet.level,
             updated = tonumber(wallet.updated) or os.time(),
             depth = 'wallet',
@@ -706,37 +816,541 @@ function Store.flush_wallet_sidecar()
     pcall(write_wallet_sidecar, Store.sources)
 end
 
-function Store.save()
+-- Persist-slim: drop stats/focus/classes blobs. Ownership + Inventory need
+-- name/id/location/augs; Stats/Focus re-enrich from live gather when opened.
+-- This is what made own-row serialize 30–60s for a ~370KB rich tree.
+local function slim_aug(a)
+    if type(a) ~= "table" then return a end
+    return {
+        index = a.index, type = a.type, name = a.name, id = a.id,
+        icon = a.icon, empty = a.empty,
+    }
+end
+
+local function slim_item(it)
+    if type(it) ~= "table" then return it end
+    local augs = {}
+    for i, a in ipairs(it.augs or {}) do
+        augs[i] = slim_aug(a)
+    end
+    return {
+        name = it.name, id = it.id, icon = it.icon,
+        location = it.location, where = it.where,
+        slotid = it.slotid, slotname = it.slotname,
+        qty = it.qty, nodrop = it.nodrop,
+        attuned = it.attuned, attunable = it.attunable,
+        lore = it.lore, loreGroup = it.loreGroup,
+        augType = it.augType, depth = it.depth or "lite",
+        augs = augs,
+    }
+end
+
+local function slim_item_list(list)
+    if type(list) ~= "table" then return {} end
+    local out = {}
+    for i, it in ipairs(list) do
+        out[i] = slim_item(it)
+    end
+    return out
+end
+
+local function persist_row(s)
+    local has_spell_ids = type(s.spell_ids) == "table" and #s.spell_ids > 0
+    return {
+        name = s.name, server = s.server, class = s.class, level = s.level,
+        updated = s.updated, seq = s.seq, inventoryUpdated = s.inventoryUpdated,
+        metaUpdated = s.metaUpdated, actorSeenAt = s.actorSeenAt,
+        discoverySeenAt = s.discoverySeenAt, kind = s.kind, depth = s.depth,
+        equipped = slim_item_list(s.equipped),
+        bags = slim_item_list(s.bags),
+        bank = slim_item_list(s.bank),
+        bankValid = s.bankValid, bankLive = s.bankLive, bankOpen = s.bankOpen,
+        bankPreserved = s.bankPreserved, bankCapturedAt = s.bankCapturedAt,
+        bankReason = s.bankReason,
+        lockouts = s.lockouts,
+        -- Prefer compact spell ids; full spell name tables are large and rebuildable.
+        spells = has_spell_ids and nil or s.spells,
+        spells_sig = s.spells_sig,
+        spell_ids = s.spell_ids,
+        radiant_crystals = s.radiant_crystals, ebon_crystals = s.ebon_crystals,
+        platinum = s.platinum, diamond_coins = s.diamond_coins,
+        tribute_favor = s.tribute_favor, celestial_crests = s.celestial_crests,
+        aa_unspent = s.aa_unspent,
+    }
+end
+
+-- Sectional payload cache: bags/bank dominate serialize time (~7–11s). Equip-only
+-- changes reuse those section strings; full content_sig match skips the row.
+local section_ser_cache = {}
+
+local function backend_codec()
+    if not backend or backend.kind ~= "sqlite" then return nil, nil end
+    local mod = package.loaded["store_backend_sqlite"]
+    if type(mod) ~= "table" then return nil, nil end
+    return mod._serialize, mod._hash
+end
+
+local function encode_scalar(v)
+    local t = type(v)
+    if t == "number" then
+        if v == math.floor(v) and math.abs(v) < 9e15 then return string.format("%d", v) end
+        return string.format("%.17g", v)
+    elseif t == "boolean" then
+        return tostring(v)
+    elseif t == "string" then
+        return string.format("%q", v)
+    end
+    return "nil"
+end
+
+local function encode_field(k, encoded_v)
+    return "[" .. string.format("%q", tostring(k)) .. "]=" .. encoded_v
+end
+
+local function section_payload(cache, sig_key, ser_key, sig, live_list, serialize_fn)
+    if cache[sig_key] == sig and type(cache[ser_key]) == "string" then
+        return cache[ser_key], true
+    end
+    local ser = serialize_fn(slim_item_list(live_list))
+    cache[sig_key] = sig
+    cache[ser_key] = ser
+    return ser, false
+end
+
+-- Build SQLite payload with sectional reuse. Equip-only flushes keep bags/bank
+-- strings and only re-slim/re-serialize the changed list(s).
+local function build_row_payload(key, live, serialize_fn, hash_fn)
+    local content_sig = Store.content_signatures[key]
+    local cache = section_ser_cache[key]
+    if not cache then
+        cache = {}
+        section_ser_cache[key] = cache
+    end
+    if content_sig and cache.full_sig == content_sig and type(cache.full_payload) == "string" then
+        diag.count("store.serialize_full_reuse")
+        return cache.full_payload, cache.full_hash or hash_fn(cache.full_payload)
+    end
+
+    local eq_sig = item_list_sig(live.equipped)
+    local bags_sig = item_list_sig(live.bags)
+    local bank_sig = item_list_sig(live.bank)
+    local reused = 0
+    local eq_ser, hit = section_payload(cache, "eq_sig", "eq", eq_sig, live.equipped, serialize_fn)
+    if hit then reused = reused + 1 end
+    local bags_ser
+    bags_ser, hit = section_payload(cache, "bags_sig", "bags", bags_sig, live.bags, serialize_fn)
+    if hit then reused = reused + 1 end
+    local bank_ser
+    bank_ser, hit = section_payload(cache, "bank_sig", "bank", bank_sig, live.bank, serialize_fn)
+    if hit then reused = reused + 1 end
+    if reused > 0 then diag.count("store.serialize_section_reuse", reused) end
+
+    local has_spell_ids = type(live.spell_ids) == "table" and #live.spell_ids > 0
+    local parts = {
+        encode_field("name", encode_scalar(live.name)),
+        encode_field("server", encode_scalar(live.server)),
+        encode_field("class", encode_scalar(live.class)),
+        encode_field("level", encode_scalar(live.level)),
+        encode_field("updated", encode_scalar(live.updated)),
+        encode_field("seq", encode_scalar(live.seq)),
+        encode_field("inventoryUpdated", encode_scalar(live.inventoryUpdated)),
+        encode_field("metaUpdated", encode_scalar(live.metaUpdated)),
+        encode_field("actorSeenAt", encode_scalar(live.actorSeenAt)),
+        encode_field("discoverySeenAt", encode_scalar(live.discoverySeenAt)),
+        encode_field("kind", encode_scalar(live.kind)),
+        encode_field("depth", encode_scalar(live.depth)),
+        encode_field("equipped", eq_ser),
+        encode_field("bags", bags_ser),
+        encode_field("bank", bank_ser),
+        encode_field("bankValid", encode_scalar(live.bankValid)),
+        encode_field("bankLive", encode_scalar(live.bankLive)),
+        encode_field("bankOpen", encode_scalar(live.bankOpen)),
+        encode_field("bankPreserved", encode_scalar(live.bankPreserved)),
+        encode_field("bankCapturedAt", encode_scalar(live.bankCapturedAt)),
+        encode_field("bankReason", encode_scalar(live.bankReason)),
+        encode_field("lockouts", serialize_fn(live.lockouts)),
+        encode_field("spells", serialize_fn(has_spell_ids and nil or live.spells)),
+        encode_field("spells_sig", encode_scalar(live.spells_sig)),
+        encode_field("spell_ids", serialize_fn(live.spell_ids)),
+        encode_field("radiant_crystals", encode_scalar(live.radiant_crystals)),
+        encode_field("ebon_crystals", encode_scalar(live.ebon_crystals)),
+        encode_field("platinum", encode_scalar(live.platinum)),
+        encode_field("diamond_coins", encode_scalar(live.diamond_coins)),
+        encode_field("tribute_favor", encode_scalar(live.tribute_favor)),
+        encode_field("celestial_crests", encode_scalar(live.celestial_crests)),
+        encode_field("aa_unspent", encode_scalar(live.aa_unspent)),
+    }
+    local payload = "{" .. table.concat(parts, ",") .. "}"
+    local h = hash_fn(payload)
+    cache.full_sig = content_sig
+    cache.full_payload = payload
+    cache.full_hash = h
+    return payload, h
+end
+
+local function assemble_payload_from_cache(key, live, cache, serialize_fn, hash_fn)
+    local has_spell_ids = type(live.spell_ids) == "table" and #live.spell_ids > 0
+    local parts = {
+        encode_field("name", encode_scalar(live.name)),
+        encode_field("server", encode_scalar(live.server)),
+        encode_field("class", encode_scalar(live.class)),
+        encode_field("level", encode_scalar(live.level)),
+        encode_field("updated", encode_scalar(live.updated)),
+        encode_field("seq", encode_scalar(live.seq)),
+        encode_field("inventoryUpdated", encode_scalar(live.inventoryUpdated)),
+        encode_field("metaUpdated", encode_scalar(live.metaUpdated)),
+        encode_field("actorSeenAt", encode_scalar(live.actorSeenAt)),
+        encode_field("discoverySeenAt", encode_scalar(live.discoverySeenAt)),
+        encode_field("kind", encode_scalar(live.kind)),
+        encode_field("depth", encode_scalar(live.depth)),
+        encode_field("equipped", cache.eq or "{}"),
+        encode_field("bags", cache.bags or "{}"),
+        encode_field("bank", cache.bank or "{}"),
+        encode_field("bankValid", encode_scalar(live.bankValid)),
+        encode_field("bankLive", encode_scalar(live.bankLive)),
+        encode_field("bankOpen", encode_scalar(live.bankOpen)),
+        encode_field("bankPreserved", encode_scalar(live.bankPreserved)),
+        encode_field("bankCapturedAt", encode_scalar(live.bankCapturedAt)),
+        encode_field("bankReason", encode_scalar(live.bankReason)),
+        encode_field("lockouts", serialize_fn(live.lockouts)),
+        encode_field("spells", serialize_fn(has_spell_ids and nil or live.spells)),
+        encode_field("spells_sig", encode_scalar(live.spells_sig)),
+        encode_field("spell_ids", serialize_fn(live.spell_ids)),
+        encode_field("radiant_crystals", encode_scalar(live.radiant_crystals)),
+        encode_field("ebon_crystals", encode_scalar(live.ebon_crystals)),
+        encode_field("platinum", encode_scalar(live.platinum)),
+        encode_field("diamond_coins", encode_scalar(live.diamond_coins)),
+        encode_field("tribute_favor", encode_scalar(live.tribute_favor)),
+        encode_field("celestial_crests", encode_scalar(live.celestial_crests)),
+        encode_field("aa_unspent", encode_scalar(live.aa_unspent)),
+    }
+    local payload = "{" .. table.concat(parts, ",") .. "}"
+    local h = hash_fn(payload)
+    local content_sig = Store.content_signatures[key]
+    cache.full_sig = content_sig
+    cache.full_payload = payload
+    cache.full_hash = h
+    return payload, h
+end
+
+begin_persist_job = function()
+    local serialize_fn, hash_fn = backend_codec()
+    if not serialize_fn or not hash_fn then
+        Store.save()
+        return
+    end
+    local keys = {}
+    for k in pairs(dirty_persist_keys) do
+        if type(Store.sources[k]) == "table" then keys[#keys + 1] = k end
+    end
+    if #keys == 0 then
+        content_flush_due_at = nil
+        Store.dirty = false
+        diag.count("store.save_skipped_clean")
+        return
+    end
+    persist_job = {
+        keys = keys,
+        ki = 1,
+        out = {},
+        serialize_fn = serialize_fn,
+        hash_fn = hash_fn,
+        work = nil,
+        section = nil,
+    }
+    diag.count("store.persist_job_started")
+    diag.event("store.persist_job_started", string.format("keys=%d", #keys))
+end
+
+local function finish_persist_job()
+    local job = persist_job
+    if not job then return end
+    local any = false
+    for _ in pairs(job.out) do any = true; break end
+    if not any then
+        persist_job = nil
+        return
+    end
+    local ok_save, save_reason = backend:save(job.out, { partial = true })
+    Store.cache_last_reload_reason = ok_save and "saved atomically" or ("save failed: " .. tostring(save_reason or "?"))
+    Store.last_save = os.clock()
+    if not ok_save then
+        diag.count("store.save_failed")
+        for k in pairs(job.out) do dirty_persist_keys[k] = true end
+        Store.dirty = true
+        schedule_content_flush()
+    else
+        for k in pairs(job.out) do
+            persisted_content_sig[k] = Store.content_signatures[k]
+            dirty_persist_keys[k] = nil
+        end
+        pcall(write_wallet_sidecar, Store.sources)
+        Store.cache_signature = backend:signature()
+        local still = false
+        for _ in pairs(dirty_persist_keys) do still = true; break end
+        if still then
+            Store.dirty = true
+            schedule_content_flush()
+        else
+            Store.dirty = false
+            content_flush_due_at = nil
+        end
+        diag.count("store.persist_job_finished")
+    end
+    persist_job = nil
+end
+
+progress_persist_job = function(budget_ms)
+    local job = persist_job
+    if not job then return end
+    local budget = (tonumber(budget_ms) or tonumber(CFG.save_persist_budget_ms) or 4.0) / 1000.0
+    if budget <= 0 then budget = 0.004 end
+    local t0 = os.clock()
+    local serialize_fn, hash_fn = job.serialize_fn, job.hash_fn
+
+    while (os.clock() - t0) < budget do
+        local key = job.keys[job.ki]
+        if not key then
+            finish_persist_job()
+            return
+        end
+        local live = Store.sources[key]
+        if type(live) ~= "table" then
+            job.ki = job.ki + 1
+            job.work = nil
+            job.section = nil
+            goto continue_persist
+        end
+        local content_sig = Store.content_signatures[key]
+        if persisted_content_sig[key] ~= nil and persisted_content_sig[key] == content_sig then
+            dirty_persist_keys[key] = nil
+            job.ki = job.ki + 1
+            job.work = nil
+            job.section = nil
+            goto continue_persist
+        end
+
+        if not job.section then
+            local cache = section_ser_cache[key]
+            if not cache then
+                cache = {}
+                section_ser_cache[key] = cache
+            end
+            if content_sig and cache.full_sig == content_sig and type(cache.full_payload) == "string" then
+                job.out[key] = {
+                    name = live.name, server = live.server, class = live.class, level = live.level,
+                    updated = live.updated, seq = live.seq,
+                    inventoryUpdated = live.inventoryUpdated,
+                    bankCapturedAt = live.bankCapturedAt,
+                    _payload = cache.full_payload,
+                    _payload_hash = cache.full_hash or hash_fn(cache.full_payload),
+                }
+                diag.count("store.serialize_full_reuse")
+                job.ki = job.ki + 1
+                goto continue_persist
+            end
+            job.cache = cache
+            job.key_sig = content_sig
+            job.eq_sig = item_list_sig(live.equipped)
+            job.bags_sig = item_list_sig(live.bags)
+            job.bank_sig = item_list_sig(live.bank)
+            job.need = {}
+            if not (cache.eq_sig == job.eq_sig and type(cache.eq) == "string") then
+                job.need[#job.need + 1] = { name = "eq", list = live.equipped, sig = job.eq_sig, sig_key = "eq_sig", ser_key = "eq" }
+            end
+            if not (cache.bags_sig == job.bags_sig and type(cache.bags) == "string") then
+                job.need[#job.need + 1] = { name = "bags", list = live.bags, sig = job.bags_sig, sig_key = "bags_sig", ser_key = "bags" }
+            else
+                diag.count("store.serialize_section_reuse")
+            end
+            if not (cache.bank_sig == job.bank_sig and type(cache.bank) == "string") then
+                job.need[#job.need + 1] = { name = "bank", list = live.bank, sig = job.bank_sig, sig_key = "bank_sig", ser_key = "bank" }
+            else
+                diag.count("store.serialize_section_reuse")
+            end
+            if cache.eq_sig == job.eq_sig and type(cache.eq) == "string" then
+                diag.count("store.serialize_section_reuse")
+            end
+            job.need_i = 1
+            job.section = "build"
+            job.work = nil
+        end
+
+        if Store.content_signatures[key] ~= job.key_sig then
+            -- Live inventory changed mid-build; settle path will restart.
+            abort_persist_job("sig_drift")
+            return
+        end
+
+        if job.need_i <= #job.need then
+            local need = job.need[job.need_i]
+            local work = job.work
+            if not work then
+                local list = need.list or {}
+                work = { i = 1, n = #list, list = list, parts = {} }
+                job.work = work
+                if work.n <= 0 then
+                    job.cache[need.sig_key] = need.sig
+                    job.cache[need.ser_key] = "{}"
+                    job.need_i = job.need_i + 1
+                    job.work = nil
+                    goto continue_persist
+                end
+            end
+            while work.i <= work.n and (os.clock() - t0) < budget do
+                work.parts[work.i] = serialize_fn(slim_item(work.list[work.i]))
+                work.i = work.i + 1
+            end
+            if work.i <= work.n then return end -- budget exhausted mid-section
+            local ser = "{" .. table.concat(work.parts, ",") .. "}"
+            job.cache[need.sig_key] = need.sig
+            job.cache[need.ser_key] = ser
+            job.need_i = job.need_i + 1
+            job.work = nil
+            goto continue_persist
+        end
+
+        -- All sections ready: assemble + queue for upsert.
+        local payload, phash = assemble_payload_from_cache(key, live, job.cache, serialize_fn, hash_fn)
+        job.out[key] = {
+            name = live.name, server = live.server, class = live.class, level = live.level,
+            updated = live.updated, seq = live.seq,
+            inventoryUpdated = live.inventoryUpdated,
+            bankCapturedAt = live.bankCapturedAt,
+            _payload = payload,
+            _payload_hash = phash,
+        }
+        job.ki = job.ki + 1
+        job.section = nil
+        job.work = nil
+        job.need = nil
+        ::continue_persist::
+    end
+end
+
+-- True while a quiet-settle content flush or chunked persist job is in flight.
+function Store.persist_busy()
+    if persist_job ~= nil then return true end
+    if content_flush_due_at and os.clock() < content_flush_due_at then return true end
+    return false
+end
+
+-- Blocking flush for unload/shutdown. May hitch once; preferred over losing gear state.
+function Store.flush_pending()
+    abort_persist_job("flush_pending")
+    content_flush_due_at = nil
+    local any = false
+    for _ in pairs(dirty_persist_keys) do any = true; break end
+    if not any and not Store.dirty then return false end
+    diag.count("store.flush_pending")
+    if any then
+        Store.save()
+    else
+        Store.save({ only_self = true })
+    end
+    return true
+end
+
+-- opts.only_self: persist just this box's row (worn_persist).
+-- opts.keys: optional list/set of store keys to include.
+-- opts.force_all: serialize every source (rare; setup/manual). Default saves only
+-- dirty_persist_keys so content_flush cannot re-serialize the whole fleet.
+function Store.save(opts)
+    opts = type(opts) == "table" and opts or {}
+    abort_persist_job("blocking_save")
     content_flush_due_at = nil
     Store.last_save = os.clock(); Store.dirty = false
+    local filter = nil
+    if opts.only_self == true then
+        local k = my_key()
+        if k and k ~= "" then filter = { [k] = true } end
+    elseif type(opts.keys) == "table" then
+        filter = {}
+        if opts.keys[1] ~= nil then
+            for _, k in ipairs(opts.keys) do filter[tostring(k)] = true end
+        else
+            for k, v in pairs(opts.keys) do
+                if v then filter[tostring(k)] = true end
+            end
+        end
+    elseif opts.force_all ~= true then
+        filter = dirty_persist_keys
+        dirty_persist_keys = {}
+        local any = false
+        for _ in pairs(filter) do any = true; break end
+        if not any then
+            diag.count("store.save_skipped_clean")
+            return
+        end
+    end
+    local partial = filter ~= nil
     local source_count = 0
     for _ in pairs(Store.sources) do source_count = source_count + 1 end
-    diag.context("store.save", string.format("sources=%d backend=%s", source_count, tostring(backend and backend.kind or "?")))
+    diag.context("store.save", string.format("sources=%d backend=%s partial=%s",
+        source_count, tostring(backend and backend.kind or "?"), tostring(partial)))
     diag.time("store.save", function()
-        -- strip volatile status before persisting; mark loaded ones offline on read
+        local serialize_fn, hash_fn = backend_codec()
         local out = {}
+        local skipped_unchanged = 0
         for k, s in pairs(Store.sources) do
-            out[k] = { name=s.name, server=s.server, class=s.class, level=s.level,
-                       updated=s.updated, seq=s.seq, inventoryUpdated=s.inventoryUpdated,
-                       metaUpdated=s.metaUpdated, actorSeenAt=s.actorSeenAt,
-                       discoverySeenAt=s.discoverySeenAt, kind=s.kind, depth=s.depth,
-                       equipped=s.equipped, bags=s.bags, bank=s.bank,
-                       bankValid=s.bankValid, bankLive=s.bankLive, bankOpen=s.bankOpen,
-                       bankPreserved=s.bankPreserved, bankCapturedAt=s.bankCapturedAt,
-                       bankReason=s.bankReason,
-                       lockouts=s.lockouts, spells=s.spells, spells_sig=s.spells_sig,
-                       spell_ids=s.spell_ids, liveStats=s.liveStats,
-                       -- Fleet wallet / DoN currency (nil-safe; never invent 0)
-                       radiant_crystals=s.radiant_crystals, ebon_crystals=s.ebon_crystals,
-                       platinum=s.platinum, diamond_coins=s.diamond_coins,
-                       tribute_favor=s.tribute_favor, celestial_crests=s.celestial_crests,
-                       aa_unspent=s.aa_unspent }
+            if filter and not filter[k] then goto continue_save_key end
+            -- Disk already has this inventory content; skip slim+serialize.
+            if opts.force_all ~= true
+                and persisted_content_sig[k] ~= nil
+                and persisted_content_sig[k] == Store.content_signatures[k] then
+                skipped_unchanged = skipped_unchanged + 1
+                goto continue_save_key
+            end
+            if serialize_fn and hash_fn then
+                local payload, phash = build_row_payload(k, s, serialize_fn, hash_fn)
+                -- Scalars for bind_row / merge-by-newer; lists live in _payload.
+                out[k] = {
+                    name = s.name, server = s.server, class = s.class, level = s.level,
+                    updated = s.updated, seq = s.seq,
+                    inventoryUpdated = s.inventoryUpdated,
+                    bankCapturedAt = s.bankCapturedAt,
+                    _payload = payload,
+                    _payload_hash = phash,
+                }
+            else
+                out[k] = persist_row(s)
+            end
+            ::continue_save_key::
         end
-        local ok_save, save_reason = backend:save(out)
+        if skipped_unchanged > 0 then
+            diag.count("store.save_skipped_unchanged", skipped_unchanged)
+        end
+        local any_out = false
+        for _ in pairs(out) do any_out = true; break end
+        if not any_out then
+            diag.count("store.save_skipped_clean")
+            return
+        end
+        local ok_save, save_reason = backend:save(out, { partial = partial })
         Store.cache_last_reload_reason = ok_save and "saved atomically" or ("save failed: " .. tostring(save_reason or "?"))
-        if not ok_save then diag.count("store.save_failed") end
-        Store.cache_signature = backend:signature()
-        if ok_save then pcall(write_wallet_sidecar, out) end
+        if not ok_save then
+            diag.count("store.save_failed")
+            if partial then
+                for k in pairs(out) do dirty_persist_keys[k] = true end
+            end
+        else
+            for k in pairs(out) do
+                persisted_content_sig[k] = Store.content_signatures[k]
+                dirty_persist_keys[k] = nil
+            end
+            pcall(write_wallet_sidecar, Store.sources)
+        end
+        -- Partial own-row saves: adopt data_version without re-deserializing the
+        -- whole fleet (that re-parse was a second hitch after serialize). UI/bg
+        -- already poll reload_cache_if_changed for peer updates.
+        if ok_save and partial then
+            Store.cache_signature = backend:signature()
+        elseif ok_save then
+            Store.cache_signature = nil
+            pcall(function() Store.reload_cache_if_changed(true) end)
+        else
+            Store.cache_signature = backend:signature()
+        end
     end)
 end
 
@@ -767,10 +1381,14 @@ local function ingest_cache_table(t, mark_offline)
                 local sig = snapshot_content_sig(s)
                 note_content_change("cache-new", k, s, Store.content_signatures[k], sig)
                 Store.content_signatures[k] = sig
+                -- Loaded from disk: already persisted at this content.
+                persisted_content_sig[k] = sig
                 accepted = true
                 content_changed = true
             elseif is_newer(s, existing) then
                 s = preserve_presence(existing, s, mark_offline and "offline" or existing.status)
+                -- Disk/actor rows with class="?" must not clobber a known in-memory class.
+                s.class = coalesce_class(s.class, existing.class)
                 Store.sources[k] = s
                 accepted = true
                 -- Newer timestamp does not imply new content (bg re-saves on
@@ -780,6 +1398,8 @@ local function ingest_cache_table(t, mark_offline)
                 if Store.content_signatures[k] ~= sig then
                     note_content_change("cache-newer", k, s, Store.content_signatures[k], sig)
                     Store.content_signatures[k] = sig
+                    -- Fresher disk/actor row replaces memory; treat as persisted.
+                    persisted_content_sig[k] = sig
                     content_changed = true
                 end
             end
@@ -930,6 +1550,8 @@ function Store.remove_source(key)
     if key == "" or key == my_key() or not Store.sources[key] then return false end
     Store.sources[key] = nil
     Store.content_signatures[key] = nil
+    persisted_content_sig[key] = nil
+    section_ser_cache[key] = nil
     Store.last_content_change_by_key[key] = nil
     Store.version = (Store.version or 0) + 1
     Store.content_version = (Store.content_version or 0) + 1
@@ -959,7 +1581,13 @@ function Store.is_recently_visible(key, snap)
     return (os.time() - last) <= grace
 end
 
-function Store.get(key) return Store.sources[key] end
+function Store.get(key)
+    local snap = Store.sources[key]
+    if type(snap) == "table" and not known_class(snap.class) then
+        Store.enrich_class(snap)
+    end
+    return snap
+end
 
 function Store.counts()
     local on, st, off = 0, 0, 0

@@ -88,6 +88,30 @@ ck(impLoaded.Srv_Old and impLoaded.Srv_Old.equipped[1].id == 777, "imported row 
 local imp2 = newB()
 ck((imp2.imported or 0) == 0, "no re-import when DB already has rows")
 
+-- 7. serialize must memoize shared tables / break cycles (regression: 438s CPU)
+do
+    local ser = sqlmod._serialize
+    ck(type(ser) == "function", "serialize exported")
+    local shared = { ac = 10, hp = 5 }
+    local a = { id = 1, stats = shared }
+    local b = { id = 2, stats = shared }
+    local root = { equipped = { a, b } }
+    local t0 = os.clock()
+    local payload = ser(root)
+    local elapsed = (os.clock() - t0) * 1000
+    ck(type(payload) == "string" and #payload > 10, "shared-ref serialize returns payload")
+    ck(elapsed < 50, "shared-ref serialize finishes quickly (<50ms)")
+    local cyclic = { name = "loop" }
+    cyclic.self = cyclic
+    t0 = os.clock()
+    local cpay = ser(cyclic)
+    elapsed = (os.clock() - t0) * 1000
+    ck(type(cpay) == "string", "cyclic serialize returns payload")
+    ck(elapsed < 50, "cyclic serialize finishes quickly (<50ms)")
+    local round = sqlmod._deserialize(cpay)
+    ck(type(round) == "table" and round.name == "loop", "cyclic deserialize yields table")
+end
+
 wipe()
 print(string.format("store sqlite backend: %d passed, %d failed", pass, fail))
 os.exit(fail == 0 and 0 or 1)

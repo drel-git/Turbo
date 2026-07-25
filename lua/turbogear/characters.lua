@@ -383,10 +383,16 @@ end
 function M.source_keys(tab, opts)
     local a = adapter(tab)
     if a.mode == M.MODE_LIST then return {} end
-    if a.mode == M.MODE_PICKER then
-        return roster_sets.source_keys("all", merge_opts(tab, opts))
+    local scope = a.mode == M.MODE_PICKER and "all" or M.get_scope(tab)
+    local keys = roster_sets.source_keys(scope, merge_opts(tab, opts))
+    -- BiS All Known: include characters that only have lite FindItem maps.
+    if tostring(tab or "") == "bis" then
+        local ok_bs, bis_search = pcall(require, 'bis_search')
+        if ok_bs and bis_search and bis_search.merge_roster_keys then
+            keys = bis_search.merge_roster_keys(keys, scope)
+        end
     end
-    return roster_sets.source_keys(M.get_scope(tab), merge_opts(tab, opts))
+    return keys
 end
 
 function M.primary_for_new_scope(tab, scope, prefer_key)

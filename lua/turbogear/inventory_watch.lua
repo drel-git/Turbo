@@ -18,6 +18,8 @@ local dirty_full = false
 local last_publish_at = 0
 local last_known_sig = nil
 local last_bg_poll_at = 0
+-- Forward decl: worn refresh calls this before its definition below.
+local publish_snap_if_changed
 -- Baseline of the last state peers received (full snapshot or delta), used to
 -- compute changed-slot deltas. { equipped/bags/bank = slot_key -> item }.
 local delta_baseline = nil
@@ -40,7 +42,8 @@ local function publish_cooldown_s()
 end
 
 local function bg_poll_s()
-    return tonumber(CFG.inventory_watch_bg_poll_s) or 12.0
+    -- Must match config.lua default (0.0 = disabled). Never fall back to a periodic scan.
+    return tonumber(CFG.inventory_watch_bg_poll_s) or 0.0
 end
 
 local function mark_dirty(urgent, full)
@@ -79,8 +82,8 @@ local function try_adopt_store_self(force_reload)
     return true
 end
 
--- Trade/equip/give: urgent lite is enough for bag qty/slot changes (no full
--- make_item stats walk). Bank put/pick still use full so bankLive can refresh.
+-- Trade/give: bags change — urgent lite flush (bag walk). Equip/remove use
+-- on_worn_line (targeted equipped patch) instead; do not route them here.
 local function on_gear_line(_line)
     -- UI viewer: wait for bg lite save + adopt (avoids mid-frame bag scan hitch).
     if state.engine_claim_disabled == true then
@@ -92,6 +95,159 @@ end
 
 local function on_bank_line(_line)
     mark_dirty(true, true)
+end
+
+-- Phase 2: worn change detection. Local BiS uses live FindItem (no persist).
+-- Persist/publish for peers is debounced — never saveNow on the UI thread.
+local last_worn_sig, last_worn_poll_at = nil, 0
+local worn_persist_due_at = nil
+local worn_persist_snap = nil
+local last_known_wallet_sig = nil
+
+local function worn_persist_debounce_s()
+    local s = tonumber(CFG.perf_worn_persist_debounce_s) or 2.5
+    if s < 0.5 then s = 0.5 end
+    return s
+end
+
+local function schedule_worn_persist(snap)
+    if type(snap) ~= "table" then return end
+    worn_persist_snap = snap
+    worn_persist_due_at = os.clock() + worn_persist_debounce_s()
+    diag.count("inventory_watch.worn_persist_scheduled")
+end
+
+local function persist_worn_snap(snap)
+    if type(snap) ~= "table" then return false end
+    -- Actor publish immediately; disk save is debounced via Store content_flush
+    -- (slim persist). saveNow=true was re-serializing the full rich row (30–60s).
+    local opts = {
+        skipLockouts = true,
+        skipLiveStats = true,
+        reason = "worn_persist",
+        saveNow = false,
+        force = true,
+    }
+    -- Always try publish_snapshot (not gated on Engine.ok). When the actor is
+    -- down it still Store.put so content_flush persists the slim row.
+    local okE, Engine = pcall(function() return require('engine').Engine end)
+    if okE and Engine and Engine.publish_snapshot then
+        if Engine.publish_snapshot(snap, opts) == true then
+            last_known_sig = snapshot.lite_signature(snap)
+            if snapshot.wallet_signature then
+                last_known_wallet_sig = snapshot.wallet_signature(snap)
+            end
+            last_publish_at = os.clock()
+            diag.count("inventory_watch.worn_persist_flush")
+            return true
+        end
+    end
+    -- Last resort: put + let content_flush / next save tick write slim row.
+    local saved = false
+    pcall(function()
+        local Store = require('store').Store
+        Store.put(snap, 'client')
+        saved = true
+    end)
+    if saved then
+        last_known_sig = snapshot.lite_signature(snap)
+        if snapshot.wallet_signature then
+            last_known_wallet_sig = snapshot.wallet_signature(snap)
+        end
+        last_publish_at = os.clock()
+        diag.count("inventory_watch.worn_persist_flush")
+        diag.count("inventory_watch.worn_persist_direct_save")
+        return true
+    end
+    diag.count("inventory_watch.worn_persist_fail")
+    return false
+end
+
+local function flush_worn_persist_if_due()
+    if not worn_persist_due_at then return end
+    local now = os.clock()
+    if now < worn_persist_due_at then return end
+    local snap = worn_persist_snap
+    worn_persist_due_at = nil
+    worn_persist_snap = nil
+    if type(snap) ~= "table" then return end
+    -- Debounced peer update: one publish/save after gear settles — not per equip.
+    if not persist_worn_snap(snap) then
+        -- Keep the patched snap; short retry (not full debounce) so one fail
+        -- does not wait another 2.5s while peers stay stale.
+        worn_persist_snap = snap
+        worn_persist_due_at = os.clock() + 0.5
+        diag.count("inventory_watch.worn_persist_retry")
+    end
+end
+
+local function note_worn_sig_changed()
+    pcall(function()
+        local bis = require('bis')
+        if bis.invalidate_live_ownership_cache then
+            bis.invalidate_live_ownership_cache()
+        end
+    end)
+end
+
+-- UI viewer: display is live TLO — only invalidate live cache + seed worn sig.
+-- Never refresh_equipped / publish / save on the UI thread (that was the hitch).
+local function apply_worn_ui_only()
+    if snapshot.worn_signature then
+        last_worn_sig = snapshot.worn_signature()
+    end
+    note_worn_sig_changed()
+    diag.count("inventory_watch.worn_ui_live")
+    -- Let bg adopt/publish when it notices; UI does not Store.save here.
+    store_adopt_retries = math.max(store_adopt_retries, 4)
+    return true
+end
+
+local function apply_worn_refresh(now, reason)
+    -- UI path: zero persist cost.
+    if state.engine_claim_disabled == true then
+        return apply_worn_ui_only()
+    end
+    if not snapshot.refresh_equipped or not snapshot.cached() then return false end
+    local snap = snapshot.refresh_equipped("lite")
+    if not snap then return false end
+    if snapshot.worn_signature then
+        last_worn_sig = snapshot.worn_signature()
+    end
+    note_worn_sig_changed()
+    diag.count("inventory_watch.worn_refresh")
+    schedule_worn_persist(snap)
+    return true
+end
+
+local function on_worn_line(_line)
+    local now = os.clock()
+    if apply_worn_refresh(now, "worn_event") then return end
+    if state.engine_claim_disabled == true then
+        apply_worn_ui_only()
+        return
+    end
+    mark_dirty(true, false)
+end
+
+local function poll_equipped_if_due()
+    if CFG.perf_equip_poll == false then return end
+    if not snapshot.worn_signature then return end
+    local interval = tonumber(CFG.perf_equip_poll_interval_s) or 1.0
+    if interval <= 0 then return end
+    local now = os.clock()
+    if (now - last_worn_poll_at) < interval then return end
+    last_worn_poll_at = now
+
+    local sig = snapshot.worn_signature()
+    if sig == last_worn_sig then return end
+    if last_worn_sig == nil then
+        last_worn_sig = sig -- seed; no phantom on first observation
+        return
+    end
+    last_worn_sig = sig
+    diag.count("inventory_watch.worn_change")
+    apply_worn_refresh(now, "worn_poll")
 end
 
 -- Record what peers now hold so future deltas diff against the right base.
@@ -124,9 +280,7 @@ local function publish_delta_if_small(snap)
     return false
 end
 
-local last_known_wallet_sig = nil
-
-local function publish_snap_if_changed(snap, now, depth, bypass_cooldown, publish_opts)
+publish_snap_if_changed = function(snap, now, depth, bypass_cooldown, publish_opts)
     if not snap then return false end
     local sig = snapshot.lite_signature(snap)
     local wsig = snapshot.wallet_signature and snapshot.wallet_signature(snap) or ""
@@ -152,17 +306,20 @@ local function publish_snap_if_changed(snap, now, depth, bypass_cooldown, publis
         publish_delta_if_small(snap)
         return false
     end
-    last_known_sig = sig
-    last_known_wallet_sig = wsig
     local ok, Engine = pcall(function() return require('engine').Engine end)
-    if ok and Engine and Engine.ok then
+    -- Call publish_snapshot even when Engine.ok is false — it has a Store.put+save
+    -- fallback. Gating on Engine.ok left worn/inventory changes unpublished and
+    -- (previously) burned last_known_sig so they never retried.
+    if ok and Engine then
         local sent
         if Engine.publish_snapshot then
             sent = Engine.publish_snapshot(snap, publish_opts)
-        else
+        elseif Engine.ok then
             sent = Engine.publish(true, depth == "full" and "full" or "lite", publish_opts)
         end
         if sent then
+            last_known_sig = sig
+            last_known_wallet_sig = wsig
             last_publish_at = now
             diag.count("inventory_watch.publish")
             return true
@@ -247,6 +404,7 @@ local function flush_if_due()
     local snap = snapshot.gather({
         force = true,
         depth = depth,
+        noCoalesce = true, -- real inventory change; never reuse a coalesced force gather
         skipLockouts = publish_opts and publish_opts.skipLockouts == true,
         skipLiveStats = publish_opts and publish_opts.skipLiveStats == true,
     })
@@ -318,8 +476,9 @@ function M.register()
     pcall(function() mq.event('tgearInvGive', 'You give #*#to #*#', on_gear_line, opts) end)
     pcall(function() mq.event('tgearInvBank', 'You put #*#', on_bank_line, opts) end)
     pcall(function() mq.event('tgearInvPick', 'You pick up #*#', on_bank_line, opts) end)
-    pcall(function() mq.event('tgearInvEquip', 'You equip #*#', on_gear_line, opts) end)
-    pcall(function() mq.event('tgearInvRemove', 'You remove #*#', on_gear_line, opts) end)
+    -- Equip/remove: targeted worn patch (not the bag-walk gear flush).
+    pcall(function() mq.event('tgearInvEquip', 'You equip #*#', on_worn_line, opts) end)
+    pcall(function() mq.event('tgearInvRemove', 'You remove #*#', on_worn_line, opts) end)
     pcall(function() mq.event('tgearInvDestroy', 'You destroy #*#', on_inventory_line, opts) end)
     -- Scribe/memorize: scroll vanishes; these lines are the usual tells.
     pcall(function() mq.event('tgearInvScribe1', '#*#You have learned #*#', on_inventory_line, opts) end)
@@ -352,6 +511,8 @@ function M.tick()
     -- UI viewer: prefer Store adopt from bg; only bag-scan as last resort.
     if state.engine_claim_disabled == true then
         diag.time("inventory_watch.tick_ui", function()
+            -- Live BiS only: poll seeds sig + invalidates FindItem cache. No save.
+            poll_equipped_if_due()
             if store_adopt_retries > 0 then
                 if try_adopt_store_self(store_adopt_retries % 3 == 0) then
                     store_adopt_retries = 0
@@ -378,6 +539,8 @@ function M.tick()
         return
     end
     diag.time("inventory_watch.tick", function()
+        poll_equipped_if_due()
+        flush_worn_persist_if_due()
         flush_if_due()
         bg_poll_if_due()
     end)
@@ -386,6 +549,9 @@ end
 function M.seed_signature()
     local snap = snapshot.cached() or snapshot.gather({ force = false, depth = "lite" })
     if snap then last_known_sig = snapshot.lite_signature(snap) end
+    if snapshot.worn_signature then
+        last_worn_sig = snapshot.worn_signature()
+    end
 end
 
 -- Call from bg startup after the actor mailbox is claimed. Builds the known
@@ -413,6 +579,26 @@ end
 
 function M.try_adopt_store_self(force_reload)
     return try_adopt_store_self(force_reload == true)
+end
+
+-- True while gear/bags are still in flux (or just finished a worn publish).
+-- Callers (needs-index) should defer heavy rebuilds; announce stays live-accurate.
+function M.inventory_settling()
+    if CFG.perf_needs_gear_settle == false then return false end
+    local pad = tonumber(CFG.perf_needs_gear_settle_s)
+    if pad == nil then pad = 2.0 end
+    if pad < 0 then pad = 0 end
+    local now = os.clock()
+    if worn_persist_due_at and now <= worn_persist_due_at then return true end
+    if dirty_at then return true end
+    if last_publish_at > 0 and (now - last_publish_at) < pad then return true end
+    local ok, store_mod = pcall(require, 'store')
+    if ok and store_mod and store_mod.Store and store_mod.Store.persist_busy then
+        local busy = false
+        pcall(function() busy = store_mod.Store.persist_busy() == true end)
+        if busy then return true end
+    end
+    return false
 end
 
 return M

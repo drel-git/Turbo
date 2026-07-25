@@ -1,3 +1,18 @@
+1.2.89
+- Turbo UI hitchlog: /turbo hitchlog [seconds] (or More -> Record Hitch Log)
+  times the hub ImGui loop and writes Config\Turbo\Turbo_hitchlog_*.txt for
+  freeze reports when only the Turbo UI is open.
+- Mini ON/OFF: if another box owns Turbo control, clicking ON/OFF takes
+  control on this box and toggles auto-loot (Mini has no Control badge).
+- TurboGear save hitch: inventory persist waits for a quiet settle, then
+  writes in small chunks so equip/unequip and bag changes do not freeze the
+  client; peers still get worn updates immediately.
+- TurboGear SQLite: section payloads skip rewrite when content is unchanged.
+- Needs / announce warm: heavy needs-index work defers while inventory is
+  settling; DoN spell lookup and BiS snapshot index warm faster.
+- BiS roster: location labels show Bags / Bank (not Bags - Bags); ownership
+  refreshes after equip without changing tabs.
+
 1.2.72
 - TurboWallet UI improvements.
 

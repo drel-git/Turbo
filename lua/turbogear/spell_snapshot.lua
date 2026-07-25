@@ -153,12 +153,24 @@ function M.gather(className)
     return out, spell_ids_out
 end
 
-function M.signature(spellMap)
+-- Known-set signature. Keys on name+book/scroll and known spell IDs so a
+-- same-count swap of different spells still invalidates caches.
+function M.signature(spellMap, spellIds)
     if type(spellMap) ~= 'table' then return '' end
     local parts = {}
     for norm, row in pairs(spellMap) do
         if type(row) == 'table' then
-            parts[#parts + 1] = string.format('%s:%d:%d', norm, tonumber(row.book) or 0, tonumber(row.scroll) or 0)
+            local sid = tonumber(row.spell_id) or 0
+            parts[#parts + 1] = string.format('%s:%d:%d:%d',
+                norm, tonumber(row.book) or 0, tonumber(row.scroll) or 0, sid)
+        end
+    end
+    if type(spellIds) == 'table' then
+        for id, v in pairs(spellIds) do
+            if v then
+                id = tonumber(id) or 0
+                if id > 0 then parts[#parts + 1] = 'i' .. tostring(id) end
+            end
         end
     end
     table.sort(parts)

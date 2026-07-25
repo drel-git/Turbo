@@ -315,8 +315,8 @@ function M.render(state, actions, ui)
         if not canControl then
             turboLabel = rt.turboOn and ' ON ##mturbo' or ' OFF##mturbo'
             turboVariant = 'amberButton'
-            turboTip = ('Turbo is %s, but this box is browse-only. %s owns Turbo control; switch to that box to turn looting on or off.')
-                :format(rt.turboOn and 'ON' or 'OFF', tostring(ownerName or 'the driver'))
+            turboTip = ('Browse mode: %s owns Turbo control. Click ON/OFF to take control on this box and toggle auto-loot.')
+                :format(tostring(ownerName or 'another box'))
         end
         if miniButton(turboLabel, turboVariant) then
             actions.toggleTurboFromMini(rt)

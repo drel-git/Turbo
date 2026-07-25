@@ -48,6 +48,9 @@ local MSG = {
     NEED_CONFIRM_REPLY = 'need_confirm_reply',
     GO_LOOT = 'go_loot',
     GO_LOOT_RESULT = 'go_loot_result',
+    -- LazBiS-shaped BiS ownership: catalog FindItem scan, not full inventory.
+    BIS_SEARCH = 'bis_search',
+    BIS_RESULT = 'bis_result',
 }
 
 local loot_link_dedupe = {}
@@ -193,10 +196,20 @@ end
 local function metadata_snap()
     local cached = snapshot.cached()
     local zoneShort, zoneName = zone_fields()
+    -- Ignore sticky class="?" from a failed early gather; re-read TLO each heartbeat.
+    local canon = cfg.canonical_class or cfg.known_class
+    local class = canon and canon(cached and cached.class) or nil
+    if not class and canon then
+        class = canon(mq.TLO.Me.Class.Name())
+            or canon(mq.TLO.Me.Class and mq.TLO.Me.Class())
+            or canon(mq.TLO.Me.Class and mq.TLO.Me.Class.ShortName and mq.TLO.Me.Class.ShortName())
+            or ""
+    end
+    class = class or ""
     return {
         name = (cached and cached.name) or mq.TLO.Me.CleanName() or "?",
         server = (cached and cached.server) or mq.TLO.MacroQuest.Server() or "?",
-        class = (cached and cached.class) or mq.TLO.Me.Class.Name() or "?",
+        class = class,
         level = (cached and cached.level) or mq.TLO.Me.Level() or 0,
         zoneShortName = zoneShort ~= "" and zoneShort or (cached and cached.zoneShortName) or "",
         zoneName = zoneName ~= "" and zoneName or (cached and cached.zoneName) or "",
@@ -280,6 +293,8 @@ local function on_message(message)
                 tostring(c.replyTo), tostring(c.snap.name or "?"), tostring(c.snap.depth or "?")))
             -- Explicit inventory requests (need-confirm / go-loot) should reach
             -- the announce UI promptly; bg normally debounce-saves for ~30s.
+            -- Owner-only disk writes otherwise: peer boxes must not save each
+            -- other's rows into the shared DB (lost-update vs merge-by-newer).
             pcall(function() Store.save() end)
         end
     elseif c.type == MSG.SNAPSHOT_DELTA and c.delta then
@@ -314,6 +329,46 @@ local function on_message(message)
     elseif c.type == MSG.HEARTBEAT and c.snap then
         dprint("rx HEARTBEAT from %s/%s", tostring(c.snap.name), tostring(c.snap.server))
         Store.touch(c.snap, c.kind)
+    elseif c.type == MSG.BIS_SEARCH then
+        if not request_targets_this_box(c) then return end
+        local list_id = tostring(c.list_id or c.list or "")
+        if list_id == "" then return end
+        diag.count("engine.bis_search_rx")
+        local ok_bs, bis_search = pcall(require, 'bis_search')
+        if not ok_bs or not bis_search or not bis_search.search_local then return end
+        local result = diag.time("engine.bis_search_local", function()
+            return bis_search.search_local(list_id)
+        end)
+        if type(result) ~= "table" then return end
+        -- Keep our own map warm even if nobody is listening.
+        pcall(function() bis_search.apply_result(result); bis_search.save() end)
+        send_mail("bis_result", {
+            type = MSG.BIS_RESULT,
+            proto = CFG.proto,
+            kind = 'client',
+            name = result.name,
+            server = result.server,
+            class = result.class,
+            list_id = list_id,
+            updated = result.updated,
+            slots = result.slots,
+        })
+        diag.event("engine.bis_search", string.format("replied list=%s slots=%d",
+            list_id, (function()
+                local n = 0
+                for _ in pairs(result.slots or {}) do n = n + 1 end
+                return n
+            end)()))
+    elseif c.type == MSG.BIS_RESULT then
+        diag.count("engine.bis_result_rx")
+        local ok_bs, bis_search = pcall(require, 'bis_search')
+        if ok_bs and bis_search and bis_search.apply_result then
+            if bis_search.apply_result(c) then
+                pcall(function() bis_search.save() end)
+                diag.event("engine.bis_result", string.format("from=%s list=%s",
+                    tostring(c.name or "?"), tostring(c.list_id or c.list or "?")))
+            end
+        end
     elseif c.type == MSG.LIST_SHARE or c.type == MSG.LIST_REQUEST then
         pcall(function() require('userlists').handle_actor_message(c) end)
     elseif c.type == MSG.LOOT_LINK then
@@ -534,6 +589,12 @@ function Engine.init()
 end
 
 function Engine.shutdown()
+    -- Best-effort disk flush so the last settled gear state is not lost.
+    -- May hitch once on unload; never called on zone.
+    pcall(function()
+        local Store = require('store').Store
+        if Store and Store.flush_pending then Store.flush_pending() end
+    end)
     local released = false
     if Engine.mailbox then
         for _, method in ipairs({ "unregister", "destroy", "close" }) do
@@ -640,7 +701,7 @@ function Engine.publish(force, depth, opts)
     -- deltas are computed against the last published state.
     pcall(function() require('inventory_watch').note_published_snapshot(snap) end)
     if opts.saveNow == true then
-        Store.save()
+        Store.save({ only_self = true })
     else
         pcall(function() Store.flush_wallet_sidecar() end)
     end
@@ -709,7 +770,7 @@ function Engine.publish_snapshot(snap, opts)
             return false
         end
         Store.put(snap, 'cache')
-        Store.save()
+        Store.save({ only_self = true })
         return true
     end
     return diag.time("engine.publish_snapshot", function()
@@ -759,7 +820,9 @@ function Engine.publish_snapshot(snap, opts)
         Store.put(snap, 'client')
         pcall(function() require('inventory_watch').note_published_snapshot(snap) end)
         if opts.saveNow == true then
-            Store.save()
+            -- Hot path (worn_persist / urgent inventory): only this box's row.
+            -- Full-fleet serialize was freezing Discord bg for minutes.
+            Store.save({ only_self = true })
         else
             pcall(function() Store.flush_wallet_sidecar() end)
         end
@@ -821,6 +884,38 @@ function Engine.request_all(force, opts)
             return nil
         end)(),
     })
+end
+
+--- Broadcast a LazBiS-style catalog FindItem search for list_id.
+function Engine.request_bis_search(list_id, opts)
+    if not Engine.ok then return false end
+    opts = type(opts) == "table" and opts or {}
+    list_id = tostring(list_id or "")
+    if list_id == "" then return false end
+    local ok_bs, bis_search = pcall(require, 'bis_search')
+    if ok_bs and bis_search then
+        if opts.force ~= true and bis_search.should_request and not bis_search.should_request(list_id) then
+            return false
+        end
+        if bis_search.mark_requested then bis_search.mark_requested(list_id) end
+        -- Answer locally first so the UI host paints without waiting on the bus.
+        local local_result = bis_search.search_local and bis_search.search_local(list_id)
+        if type(local_result) == "table" then
+            bis_search.apply_result(local_result)
+            pcall(function() bis_search.save() end)
+        end
+    end
+    diag.count("engine.bis_search_tx")
+    diag.event("engine.bis_search_tx", "list=" .. list_id)
+    send_mail("bis_search", {
+        type = MSG.BIS_SEARCH,
+        proto = CFG.proto,
+        list_id = list_id,
+        from = this_name(),
+        targetName = opts.targetName,
+        targetServer = opts.strictServer == true and opts.targetServer or nil,
+    })
+    return true
 end
 
 function Engine.request_source(source_key, force, opts)

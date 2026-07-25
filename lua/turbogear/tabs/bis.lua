@@ -1142,7 +1142,11 @@ local function row_location(row)
     if not m then return "-" end
     if type(m) == "string" then return m end
     if row.status == "equipped" then return m.slotname or m.where or "Equipped" end
-    return (m.location or "") .. " - " .. (m.where or "")
+    local loc = tostring(m.location or "")
+    local where = tostring(m.where or "")
+    if loc == "" then return where ~= "" and where or "-" end
+    if where == "" or where:lower() == loc:lower() then return loc end
+    return loc .. " - " .. where
 end
 
 local function elsewhere_location(row)
@@ -2072,6 +2076,10 @@ catalog_cell_text = function(row, layout, name_max)
     if layout == "ultra" then return status_glyph(row) end
     local item = row.entry.item or "?"
     if row.status == "equipped" and row.match then return item .. " (" .. compact_location(row) .. ")" end
+    if row.status == "carried" and row.match and row.from_bis_search then
+        local loc = compact_location(row)
+        if loc ~= "" then return item .. " (" .. loc .. ")" end
+    end
     if row.elsewhere then return item .. " (" .. elsewhere_location(row) .. ")" end
     return item
 end
@@ -2084,13 +2092,33 @@ end
 local function roster_source_token(key)
     local store_key = key
     if key == "__self__" then store_key = my_key() end
+    local sig = ""
     if Store.content_signatures and store_key then
-        return tostring(Store.content_signatures[store_key] or "")
+        sig = tostring(Store.content_signatures[store_key] or "")
     end
-    return ""
+    -- Hash only: full content_signatures are 10–50KB and must not sit in roster_cache.key.
+    if sig == "" then return "0" end
+    local h, n = 5381, #sig
+    local step = math.max(1, math.floor(n / 256))
+    for i = 1, n, step do
+        h = ((h * 33) + sig:byte(i)) % 4294967296
+    end
+    return string.format("%d:%08x", n, h)
 end
 
 local function roster_cache_key(list_id, keys)
+    local bis_ver = 0
+    pcall(function()
+        local bs = require('bis_search')
+        if bs.reload_if_changed then bs.reload_if_changed() end
+        bis_ver = tonumber(bs.version and bs.version()) or 0
+    end)
+    -- Include live worn gen so equip/unequip rebuilds Missing Only / headers
+    -- without requiring a BiS tab remount.
+    local live_gen = 0
+    pcall(function()
+        if bis.live_ownership_gen then live_gen = tonumber(bis.live_ownership_gen()) or 0 end
+    end)
     local parts = {
         tostring(list_id or ""),
         tostring(Settings.bisShowMissingOnly),
@@ -2098,6 +2126,8 @@ local function roster_cache_key(list_id, keys)
         tostring(density_mode()),
         tostring(Settings.bisCompactFullNames),
         tostring(show_elsewhere()),
+        "bs" .. tostring(bis_ver),
+        "lg" .. tostring(live_gen),
     }
     for _, key in ipairs(keys or {}) do
         parts[#parts + 1] = tostring(key) .. ":" .. roster_source_token(key)
@@ -2136,6 +2166,8 @@ local function start_roster_build_job(list_id, keys, cache_key)
         rows = {},
         needle = (filter or ""):lower(),
         started = os.clock(),
+        -- Faster rebuild when replacing an existing sheet (inventory/content change).
+        catch_up = roster_cache.key ~= nil and roster_cache.key ~= cache_key,
     }
 end
 
@@ -2156,7 +2188,10 @@ local function process_roster_build_job(cache_key)
     local job = roster_build_job
     if not job or job.key ~= cache_key then return false end
     return diag.time("ui.bis.roster_rebuild_tick", function()
-        local deadline = os.clock() + 0.0035
+        -- Catch-up budget after inventory/content changes so peer columns don't
+        -- sit on a stale roster_cache for minutes.
+        local budget_s = job.catch_up and 0.020 or 0.0035
+        local deadline = os.clock() + budget_s
         local refs = job.refs or {}
         while job.index <= #refs do
             local ref = refs[job.index]
@@ -2258,6 +2293,47 @@ local function draw_roster_header_cell(snap, c, layout, col_w, key)
     end
 end
 
+-- Local column: live FindItem when roster_cache is stale (UI never saveNow on equip).
+-- Methods on one table (not local functions) to stay under LuaJIT's 200-local limit;
+-- rows cached per worn-gen so paint does not resolve_entry every cell every frame.
+local live_local = { cache = {}, gen = -1, list_id = nil }
+live_local.is_column = function(key, snap)
+    if key == "__self__" then return true end
+    if type(snap) ~= "table" then return false end
+    local my = tostring(mq.TLO.Me.CleanName() or ""):lower()
+    if my == "" then return false end
+    return tostring(snap.name or ""):lower() == my
+end
+live_local.catalog_row = function(list_id, key, snap, rec)
+    if cfg.CFG.perf_live_self_bis == false then return nil end
+    if not live_local.is_column(key, snap) then return nil end
+    if not rec or rec.header then return nil end
+    local gen = 0
+    if bis.live_ownership_gen then gen = tonumber(bis.live_ownership_gen()) or 0 end
+    list_id = tostring(list_id or "")
+    if gen ~= live_local.gen or live_local.list_id ~= list_id then
+        live_local.cache = {}
+        live_local.gen = gen
+        live_local.list_id = list_id
+    end
+    local ck
+    if rec.spell_index then
+        ck = "s|" .. tostring(rec.spell_index) .. "|" .. tostring(rec.category or "")
+    else
+        ck = "t|" .. tostring(rec.slot or "") .. "|" .. tostring(rec.category or "")
+    end
+    local hit = live_local.cache[ck]
+    if hit ~= nil then return hit end
+    local row
+    if rec.spell_index then
+        row = catalog.evaluate_spell_index(list_id, snap, rec.spell_index, rec.category)
+    elseif rec.slot then
+        row = catalog.evaluate_slot(list_id, snap, rec.slot, rec.category)
+    end
+    live_local.cache[ck] = row
+    return row
+end
+
 local function draw_catalog_cell(row, layout, layout_cfg, snap, slot, ridx, col_idx)
     ImGui.TableSetColumnIndex(col_idx)
     local name_max = layout_cfg and layout_cfg.name_max or 20
@@ -2314,6 +2390,11 @@ M.bis_legend_tooltip = function(layout)
 end
 
 local function draw_catalog_roster(list_id)
+    -- LazBiS-style: ask peers to FindItem this catalog (bg owns the actor bus).
+    pcall(function()
+        local bs = require('bis_search')
+        if bs.request_via_bg then bs.request_via_bg(list_id) end
+    end)
     local keys = roster_source_keys_for_view(Settings.bisViewKey or "__all__")
     local cache_key = roster_cache_key(list_id, keys)
     if roster_cache.key ~= cache_key then
@@ -2322,7 +2403,10 @@ local function draw_catalog_roster(list_id)
         end
         process_roster_build_job(cache_key)
         if roster_cache.key ~= cache_key then
+            -- First load: nothing to show yet. Otherwise keep painting the prior
+            -- sheet while catch-up rebuild runs (local column is live-refreshed).
             if not roster_cache.rows or #roster_cache.rows == 0 then
+                col_text(Theme.amber or Theme.dim, "Updating BiS roster…")
                 return
             end
         end
@@ -2394,7 +2478,8 @@ local function draw_catalog_roster(list_id)
                     draw_slot_column_cell(rec)
                     for cidx, key in ipairs(keys) do
                         local snap = peek_snapshot(key)
-                        local row = rec.rows and rec.rows[key]
+                        local row = live_local.catalog_row(list_id, key, snap, rec)
+                            or (rec.rows and rec.rows[key])
                         draw_catalog_cell(row, layout, layout_cfg_use, snap, rec.slot, ridx, cidx)
                     end
                 end

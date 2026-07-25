@@ -85,11 +85,25 @@ Store.sources = {
 }
 Store.content_version = 1
 
--- Cold start fills synchronously once.
+-- Cold start must NOT sync-rebuild; get starts a job and serves empty/last-good.
+local rows0, ver0 = item_index.get(false)
+check(type(rows0) == "table", "cold get returns a table")
+check(item_index.building() == true, "cold get starts a budgeted job")
+check(#rows0 == 0 and ver0 == 0, "cold get does not sync-fill rows")
+
+local finished_cold = false
+for _ = 1, 50 do
+    if item_index.tick(50) then
+        finished_cold = true
+        break
+    end
+end
+check(finished_cold, "tick completes cold-start job")
+check(item_index.building() ~= true, "no job after cold complete")
+
 local rows1, ver1 = item_index.get(false)
-check(type(rows1) == "table" and #rows1 >= 4, "cold get builds self+peers")
-check(ver1 >= 1, "cold get bumps version")
-check(item_index.building() ~= true, "cold get leaves no in-flight job")
+check(type(rows1) == "table" and #rows1 >= 4, "cold tick builds self+peers")
+check(ver1 >= 1, "cold tick bumps version")
 
 local cold_total = #rows1
 local cold_ver = ver1
@@ -102,15 +116,14 @@ check(ver2 == cold_ver, "stale get keeps last-good version")
 check(#rows2 == cold_total, "stale get keeps last-good row count")
 check(item_index.building() == true, "stale get starts a rebuild job")
 
--- One tiny tick should not always finish 4 peers; drain with ticks.
+-- Drain with ticks (chunked within peers).
 local finished = false
-for _ = 1, 20 do
+for _ = 1, 50 do
     if item_index.tick(0.25) then
         finished = true
         break
     end
 end
--- Force completion if budget was too tight for environment noise.
 if not finished then
     while item_index.building() do
         item_index.tick(50)
@@ -139,6 +152,36 @@ local rows4, ver4 = item_index.get(false)
 check(ver4 > ver3, "restarted job still publishes a complete generation")
 check(item_index.content_version == 4, "finished job targets latest content_version")
 check(#rows4 >= #rows3, "final row count stable after restart")
+
+-- Within-peer chunking: a large bag list cannot finish in one tiny budget tick.
+item_index._reset_for_tests()
+local big_bags = {}
+for i = 1, 200 do
+    big_bags[i] = { name = "BagItem" .. i, id = 1000 + i, qty = 1, slotid = i, stats = {} }
+end
+Store.sources = {
+    ["Srv:Fat"] = {
+        name = "Fat",
+        server = "Srv",
+        class = "Wizard",
+        status = "online",
+        depth = "full",
+        inventoryUpdated = 100,
+        equipped = {},
+        bags = big_bags,
+        bank = {},
+    },
+}
+Store.content_version = 1
+self_cached.bags = {}
+item_index.get(false)
+check(item_index.building() == true, "fat peer starts job")
+local progressed = item_index.tick(0.01)
+check(progressed == false, "tiny budget does not finish 200-bag peer in one tick")
+check(item_index.building() == true, "fat peer still building after tiny tick")
+while item_index.building() do item_index.tick(50) end
+local rows_fat = item_index.get(false)
+check(#rows_fat >= 200, "fat peer eventually indexed")
 
 print(string.format("item_index: %d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

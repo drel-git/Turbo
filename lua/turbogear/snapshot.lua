@@ -35,6 +35,25 @@ local self_lite_snap, self_lite_time = nil, 0
 local self_full_snap, self_full_time = nil, 0
 local self_bank_cache = nil
 
+-- Phase 1: last spell gather (ID/signature keyed). Cleared on invalidate / scribe.
+local spell_cache_store = { class = nil, spells = nil, ids = nil, sig = nil }
+
+-- Phase 1: coalesce burst force=true gathers (startup / peer_request storms).
+local last_force_snap, last_force_time, last_force_depth = nil, 0, nil
+
+local function perf_snapshot_cache_on()
+    return CFG.perf_snapshot_cache ~= false
+end
+
+-- Top-level clone only. Nested equipped/bags/bank/spells tables are shared —
+-- snapshots are read-only by contract (Store.save builds its own out table).
+local function shallow_copy_snap(src)
+    if type(src) ~= "table" then return src end
+    local dst = {}
+    for k, v in pairs(src) do dst[k] = v end
+    return dst
+end
+
 local function normalize_opts(arg)
     if type(arg) == "boolean" then
         return { force = arg, depth = arg and "full" or nil }
@@ -56,9 +75,207 @@ function M.cached()
     return self_lite_snap
 end
 
+-- Phase 2: worn-slot signature. ~23 Inventory(id).ID() reads — no make_item,
+-- no bag/bank walk. Change detector for silent equip/unequip.
+function M.worn_signature()
+    local parts = {}
+    for _, slot in ipairs(inventory_slots) do
+        local id = 0
+        pcall(function()
+            id = tonumber(mq.TLO.Me.Inventory(slot.id).ID() or 0) or 0
+        end)
+        parts[#parts + 1] = tostring(slot.id) .. ":" .. tostring(id)
+    end
+    return table.concat(parts, "|")
+end
+
+-- Phase 2: ID-only bag-slot locate (no make_item / stats walk).
+function M.find_bag_slot_by_id(item_id)
+    item_id = tonumber(item_id) or 0
+    if item_id <= 0 then return nil end
+    -- Cursor counts as carried for BiS ownership (mid-swap must not go missing).
+    do
+        local cur = mq.TLO.Cursor
+        local cid = 0
+        pcall(function() cid = tonumber(cur and cur.ID() or 0) or 0 end)
+        if cid == item_id then
+            return { where = "Cursor", slotid = nil, slotname = "Cursor" }
+        end
+    end
+    for inv = 23, 34 do
+        local pack = mq.TLO.Me.Inventory(inv)
+        local pack_id = 0
+        pcall(function() pack_id = tonumber(pack and pack.ID() or 0) or 0 end)
+        if pack_id == item_id then
+            return {
+                where = "Inventory Bag " .. tostring(inv - 22),
+                slotid = inv,
+                slotname = "Bag",
+            }
+        end
+        local slots = 0
+        pcall(function() slots = tonumber(pack and pack.Container() or 0) or 0 end)
+        for i = 1, slots do
+            local it = pack.Item(i)
+            local id = 0
+            pcall(function() id = tonumber(it and it.ID() or 0) or 0 end)
+            if id == item_id then
+                local pack_name = "Bag" .. tostring(inv - 22)
+                pcall(function() pack_name = tostring(pack.Name() or pack_name) end)
+                return {
+                    where = pack_name .. " #" .. i,
+                    slotid = inv,
+                    slotname = i,
+                }
+            end
+        end
+    end
+    return nil
+end
+
+-- Phase 2: re-read worn slots and patch the cached snap in place.
+-- Reuses cached entries by slot+id (typical equip = ~1 make_item_lite).
+-- Removes newly-worn IDs from bags (equip-from-bags ghost).
+-- Relocates departed worn IDs into bags (keeps ownership; BiS stays blue not red).
+-- Bumps seq so peer cache-newer / is_newer accepts the patch.
+-- Returns the patched snap, or nil if there is no cached snap to patch.
+function M.refresh_equipped(depth)
+    local snap = M.cached()
+    if type(snap) ~= "table" or type(snap.equipped) ~= "table" then return nil end
+    -- Hard lite in this path — never a full stats/aug walk for worn refresh.
+    local mk = make_item_lite
+    if depth == "full" then mk = make_item end -- reserved; callers should pass lite/nil
+
+    local old_by_slot_id = {}
+    local old_by_id = {}
+    for _, it in ipairs(snap.equipped) do
+        if it and it.slotid ~= nil then
+            old_by_slot_id[it.slotid] = it
+        end
+        local id = tonumber(it and it.id)
+        if id and id > 0 then old_by_id[id] = it end
+    end
+
+    local new_equipped, now_ids = {}, {}
+    for _, slot in ipairs(inventory_slots) do
+        local item = mq.TLO.Me.Inventory(slot.id)
+        local live_id = 0
+        pcall(function()
+            live_id = tonumber(item and item.ID() or 0) or 0
+        end)
+        if live_id ~= 0 then
+            local prev = old_by_slot_id[slot.id]
+            if prev and tonumber(prev.id) == live_id then
+                new_equipped[#new_equipped + 1] = prev
+            else
+                new_equipped[#new_equipped + 1] =
+                    mk(item, "Equipped", slot.name, slot.id, slot.name)
+            end
+            now_ids[live_id] = true
+        end
+    end
+
+    snap.bags = type(snap.bags) == "table" and snap.bags or {}
+
+    -- Ghost removal: item now worn must not remain listed in bags.
+    do
+        local kept = {}
+        for _, it in ipairs(snap.bags) do
+            local id = tonumber(it and it.id)
+            if not (id and now_ids[id]) then
+                kept[#kept + 1] = it
+            end
+        end
+        snap.bags = kept
+    end
+
+    -- Worn -> bags: keep ownership so BiS doesn't go missing/red. Prefer a live
+    -- bag slot; if the item is mid-cursor, still keep a Carried stub.
+    local bags_have = {}
+    for _, it in ipairs(snap.bags) do
+        local id = tonumber(it and it.id)
+        if id then bags_have[id] = true end
+    end
+    for id, old in pairs(old_by_id) do
+        if not now_ids[id] and not bags_have[id] then
+            local loc = M.find_bag_slot_by_id(id)
+            old.location = "Bags"
+            if loc then
+                old.where = loc.where
+                old.slotid = loc.slotid
+                old.slotname = loc.slotname
+            else
+                old.where = "Bags"
+                old.slotid = nil
+                old.slotname = nil
+            end
+            snap.bags[#snap.bags + 1] = old
+            bags_have[id] = true
+            diag.count("snapshot.equipped_to_bags")
+        end
+    end
+
+    snap.equipped = new_equipped
+    -- Must bump seq: peer cache ingest uses is_newer(seq). Same seq = rejected,
+    -- which left re-equips stuck on the post-unequip (missing) snap.
+    snap.seq = next_seq()
+    snap.updated = os.time()
+    snap.inventoryUpdated = snap.updated
+    -- Ownership index is stale after equipped/bags patch.
+    snap._bis_index = nil
+    snap._bis_index_key = nil
+    -- Keep lite/full cache pointers coherent with the patched snap.
+    M.adopt(snap)
+    diag.count("snapshot.equipped_patch")
+    return snap
+end
+
 function M.invalidate()
     self_lite_snap, self_lite_time = nil, 0
     self_full_snap, self_full_time = nil, 0
+    spell_cache_store = { class = nil, spells = nil, ids = nil, sig = nil }
+    last_force_snap, last_force_time, last_force_depth = nil, 0, nil
+end
+
+--- Attach spells to snap: reuse module cache when spell_cache signature matches
+--- (ID-level known-set); otherwise gather once and store.
+local function attach_spells(snap)
+    local spell_snap = require('spell_snapshot')
+    local className = snap.class
+    if perf_snapshot_cache_on()
+        and spell_cache_store.spells
+        and spell_cache_store.class == className
+        and type(spell_cache_store.sig) == "string"
+        and spell_cache_store.sig ~= "" then
+        local reuse = false
+        local okC, SC = pcall(require, 'spell_cache')
+        if okC and SC and SC.ready and SC.ready() and SC.signature then
+            local live_sig = tostring(SC.signature() or "")
+            reuse = live_sig ~= "" and live_sig == spell_cache_store.sig
+        else
+            -- spell_cache not ready: keep last gather until invalidate/scribe.
+            reuse = true
+        end
+        if reuse then
+            snap.spells = spell_cache_store.spells
+            snap.spell_ids = spell_cache_store.ids
+            snap.spells_sig = spell_cache_store.sig
+            diag.count("snapshot.spells_cache_hit")
+            return
+        end
+    end
+    local spells, spell_ids = spell_snap.gather(className)
+    local sig = spell_snap.signature(spells, spell_ids)
+    snap.spells = spells
+    snap.spell_ids = spell_ids
+    snap.spells_sig = sig
+    spell_cache_store = {
+        class = className,
+        spells = spells,
+        ids = spell_ids,
+        sig = sig,
+    }
+    diag.count("snapshot.spells_cache_miss")
 end
 
 local function append_item(snap, list_key, item, location, where, slotid, slotname, depth)
@@ -273,11 +490,27 @@ function M.wallet_signature(snap)
 end
 
 --- Cheap wallet-only gather (no inventory walk). For Fleet $ live refresh.
+local function me_class_name()
+    local canon = cfg.canonical_class
+    local function take(v)
+        if canon then return canon(v) end
+        return cfg.known_class and cfg.known_class(v) or nil
+    end
+    local c = take(try_tlo_value(function() return mq.TLO.Me.Class.Name() end))
+    if c then return c end
+    c = take(try_tlo_value(function() return mq.TLO.Me.Class() end))
+    if c then return c end
+    c = take(try_tlo_value(function() return mq.TLO.Me.Class.ShortName() end))
+    if c then return c end
+    -- Never persist "?" — that sentinel made peer BiS paint list.template junk.
+    return ""
+end
+
 function M.gather_wallet()
     local snap = {
         name = mq.TLO.Me.CleanName() or "?",
         server = mq.TLO.MacroQuest.Server() or "?",
-        class = mq.TLO.Me.Class.Name() or "?",
+        class = me_class_name(),
         level = mq.TLO.Me.Level() or 0,
         updated = os.time(),
         depth = "wallet",
@@ -334,7 +567,7 @@ local function build_snap(depth, opts)
     local snap = {
         name = mq.TLO.Me.CleanName() or "?",
         server = mq.TLO.MacroQuest.Server() or "?",
-        class = mq.TLO.Me.Class.Name() or "?",
+        class = me_class_name(),
         level = mq.TLO.Me.Level() or 0,
         zoneShortName = tostring(try_tlo_value(function() return mq.TLO.Zone.ShortName() end) or ""),
         zoneName = tostring(try_tlo_value(function() return mq.TLO.Zone.Name() end) or ""),
@@ -388,6 +621,15 @@ local function build_snap(depth, opts)
                     end
                 end
             end
+            -- Item on cursor is owned (carried) — peer_request mid-swap was
+            -- publishing eq/bags without Face Guard and BiS went red.
+            do
+                local cur = mq.TLO.Cursor
+                if cur and cur() then
+                    append_item(snap, "bags", cur, "Bags", "Cursor", nil, "Cursor", depth)
+                    diag.count("snapshot.cursor_carried")
+                end
+            end
             if bank_open then
                 for b = 1, CFG.max_bank do
                     local bk = mq.TLO.Me.Bank(b)
@@ -409,11 +651,7 @@ local function build_snap(depth, opts)
     if opts.includeSpells == true then
         pcall(function()
             diag.time("snapshot.spells", function()
-                local spell_snap = require('spell_snapshot')
-                local spells, spell_ids = spell_snap.gather(snap.class)
-                snap.spells = spells
-                snap.spell_ids = spell_ids
-                snap.spells_sig = spell_snap.signature(snap.spells)
+                attach_spells(snap)
             end)
         end)
     end
@@ -705,6 +943,36 @@ function M.gather(arg)
         return cache_snap
     end
 
+    -- Coalesce burst force gathers (startup / peer_request). inventory_watch sets noCoalesce.
+    -- Snapshots are read-only by contract; coalesce returns a shallow copy so
+    -- callers cannot corrupt last_force_snap via top-level field writes.
+    local coalesce_s = tonumber(CFG.perf_force_gather_coalesce_s) or 2.5
+    local bank_live_now = bank_window_open()
+    local bank_live_cached = last_force_snap and last_force_snap.bankLive == true
+    if force and perf_snapshot_cache_on() and opts.noCoalesce ~= true
+        and last_force_snap and last_force_depth == depth
+        and coalesce_s > 0 and (now - last_force_time) < coalesce_s
+        and bank_live_now == bank_live_cached then
+        local out = shallow_copy_snap(last_force_snap)
+        if include_spells then
+            pcall(function()
+                diag.time("snapshot.spells", function()
+                    attach_spells(out)
+                end)
+            end)
+            -- Keep cache spell fields warm without exposing the cache table.
+            last_force_snap.spells = out.spells
+            last_force_snap.spell_ids = out.spell_ids
+            last_force_snap.spells_sig = out.spells_sig
+        end
+        diag.count("snapshot.force_coalesced")
+        diag.event("snapshot.gather", string.format(
+            "force=true coalesced depth=%s age=%.2fs eq=%d bag=%d bankLive=%s",
+            tostring(depth), now - last_force_time,
+            #(out.equipped or {}), #(out.bags or {}), tostring(bank_live_cached)))
+        return out
+    end
+
     local snap = diag.time("snapshot.gather", function() return build_snap(depth, opts) end)
     snap = preserve_cached_bank(snap, cache_snap)
     remember_bank(snap)
@@ -719,6 +987,11 @@ function M.gather(arg)
     else
         self_lite_snap = snap
         self_lite_time = now
+    end
+    if force then
+        last_force_snap = snap
+        last_force_time = now
+        last_force_depth = depth
     end
     return snap
 end

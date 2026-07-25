@@ -4,7 +4,7 @@
 
 local mq  = require('mq')
 local cfg = require('config')
-local Settings = cfg.Settings
+local CFG, Settings = cfg.CFG, cfg.Settings
 
 local M = {}
 
@@ -447,7 +447,7 @@ local function better_match(a, b)
 end
 
 local function snapshot_index(snap)
-    if not snap then return { by_id = {}, by_name = {} } end
+    if not snap then return { by_id = {}, by_name = {}, known_spells = {} } end
     local cache_key = table.concat({
         tostring(snap.server or ""),
         tostring(snap.name or ""),
@@ -458,7 +458,7 @@ local function snapshot_index(snap)
     }, "|")
     if snap._bis_index_key == cache_key and snap._bis_index then return snap._bis_index end
 
-    local idx = { by_id = {}, by_name = {} }
+    local idx = { by_id = {}, by_name = {}, known_spells = {} }
     local function add_rec(rec)
         local it = rec.item
         local iid = tonumber(it and it.id)
@@ -476,9 +476,31 @@ local function snapshot_index(snap)
     end
     for _, rec in ipairs(all_items(snap)) do add_rec(rec) end
     for _, rec in ipairs(all_augments(snap)) do add_rec(rec) end
+    -- Book/disc ownership for spell-aware entries (avoid per-entry pairs() scan).
+    local known = idx.known_spells
+    local spells = snap.spells
+    if type(spells) == "table" then
+        for key, rec in pairs(spells) do
+            if type(rec) == "table" then
+                if (rec.book == true) or ((tonumber(rec.book) or 0) > 0) then
+                    local n = norm(rec.name or key)
+                    if n ~= "" then known[n] = true end
+                end
+            elseif rec == true then
+                local n = norm(key)
+                if n ~= "" then known[n] = true end
+            end
+        end
+    end
     snap._bis_index_key = cache_key
     snap._bis_index = idx
     return idx
+end
+
+--- Prewarm ownership index (items + augs + known spells). Call once before
+--- bulk needs-index evaluation so the first entry does not pay the full build.
+function M.ensure_snapshot_index(snap)
+    return snapshot_index(snap)
 end
 
 local function entry_matches_item(entry, it)
@@ -503,62 +525,90 @@ end
 -- semantically complete. Iterating every alias name (80+ on expanded
 -- fungal/Jonas entries) ran hundreds of FindItem/FindItemBank scans per call
 -- and froze the game for 29-39s when chat hit a warm-up fallback scan.
-function M.live_own_item(entry, item_name, item_id)
-    local function find_count(id)
-        id = tonumber(id)
-        if not id or id <= 0 then return 0 end
-        local ok, cnt = pcall(function()
-            local fi = mq.TLO.FindItem and mq.TLO.FindItem(id)
-            if fi and fi() then return tonumber(fi.Count()) or 0 end
-            return 0
-        end)
-        return ok and cnt or 0
-    end
+local function find_item_tlo(id_or_name)
+    local ok, fi = pcall(function()
+        if type(id_or_name) == "number" then
+            return mq.TLO.FindItem and mq.TLO.FindItem(id_or_name) or nil
+        end
+        local name = trim(id_or_name)
+        if name == "" then return nil end
+        return mq.TLO.FindItem and mq.TLO.FindItem("=" .. name) or nil
+    end)
+    if not ok or not fi or not fi() then return nil end
+    return fi
+end
 
-    local function find_count_name(name)
-        name = trim(name)
-        if name == "" then return 0 end
-        local ok, cnt = pcall(function()
-            local fi = mq.TLO.FindItem and mq.TLO.FindItem("=" .. name)
-            if fi and fi() then return tonumber(fi.Count()) or 0 end
-            return 0
-        end)
-        return ok and cnt or 0
-    end
+local function live_status_from_fi(fi)
+    if not fi then return nil end
+    local slot = nil
+    pcall(function() slot = tonumber(fi.ItemSlot()) end)
+    -- InvSlots 0-22 are worn; bag/bank pack slots are higher.
+    if slot and slot >= 0 and slot <= 22 then return "equipped" end
+    return "carried"
+end
 
+--- Returns "equipped", "carried", or nil (not owned on this box).
+function M.live_item_status(entry, item_name, item_id)
     entry = entry and M.normalize_entry(entry) or {}
     for _, id in ipairs(entry.ids or {}) do
-        if find_count(id) > 0 then return true end
+        local fi = find_item_tlo(tonumber(id) or 0)
+        if fi then return live_status_from_fi(fi) end
     end
     item_id = tonumber(item_id) or 0
-    if item_id > 0 and find_count(item_id) > 0 then return true end
-    item_name = trim(item_name)
-    if item_name ~= "" and find_count_name(item_name) > 0 then return true end
-    local canonical = trim(entry.item)
-    if canonical ~= "" and canonical ~= item_name and find_count_name(canonical) > 0 then
-        return true
+    if item_id > 0 then
+        local fi = find_item_tlo(item_id)
+        if fi then return live_status_from_fi(fi) end
     end
-    return false
+    item_name = trim(item_name)
+    if item_name ~= "" then
+        local fi = find_item_tlo(item_name)
+        if fi then return live_status_from_fi(fi) end
+    end
+    local canonical = trim(entry.item)
+    if canonical ~= "" and canonical ~= item_name then
+        local fi = find_item_tlo(canonical)
+        if fi then return live_status_from_fi(fi) end
+    end
+    return nil
+end
+
+function M.live_own_item(entry, item_name, item_id)
+    return M.live_item_status(entry, item_name, item_id) ~= nil
 end
 
 local live_fallback_cache = {}
-local LIVE_FALLBACK_TTL = 2.0
+local LIVE_FALLBACK_TTL = 0.4 -- snappy local BiS; short enough for equip/unequip
+local live_ownership_gen = 0
 
 local function live_fallback_key(entry)
     entry = M.normalize_entry(entry)
     return norm_item_name(entry.item)
 end
 
-local function live_own_cached(entry)
+local function live_status_cached(entry)
     local key = live_fallback_key(entry)
     local now = os.clock()
     local hit = live_fallback_cache[key]
     if hit and (now - hit.at) <= LIVE_FALLBACK_TTL then
-        return hit.owned
+        return hit.status
     end
-    local owned = M.live_own_item(entry, entry.item, nil)
-    live_fallback_cache[key] = { owned = owned, at = now }
-    return owned
+    local status = M.live_item_status(entry, entry.item, nil)
+    live_fallback_cache[key] = { status = status, at = now }
+    return status
+end
+
+local function live_own_cached(entry)
+    return live_status_cached(entry) ~= nil
+end
+
+function M.invalidate_live_ownership_cache()
+    live_fallback_cache = {}
+    live_ownership_gen = live_ownership_gen + 1
+end
+
+--- Generation bumped on worn change; BiS paint caches local column rows against it.
+function M.live_ownership_gen()
+    return live_ownership_gen
 end
 
 -- Read-only normalized-entry memo for the match/evaluate hot paths. Catalog
@@ -592,9 +642,13 @@ end
 local function snap_knows_spell(snap, spell_name)
     spell_name = trim(spell_name)
     if spell_name == "" then return false end
+    local want = norm(spell_name)
+    local idx = snap and snap._bis_index
+    if type(idx) == "table" and type(idx.known_spells) == "table" then
+        return idx.known_spells[want] == true
+    end
     local spells = snap and snap.spells
     if type(spells) ~= "table" then return false end
-    local want = norm(spell_name)
     local row = spells[want]
     if type(row) == "table" and ((row.book == true) or (tonumber(row.book) or 0) > 0) then
         return true
@@ -718,6 +772,14 @@ local function match_entry(entry, snap)
     return nil, "missing", entry
 end
 
+-- Same ownership rules as evaluate_entry(..., { skip_live = true }). Used by
+-- needs-index warm so bulk status checks stay faithful (never thinner than
+-- evaluate for owned) without the live FindItem path.
+function M.snap_entry_status(entry, snap)
+    local _, status = match_entry(entry, snap or {})
+    return status or "missing"
+end
+
 function M.evaluate(list, snap)
     list = type(list) == "table" and list or M.get(list)
     local rows = {}
@@ -729,41 +791,20 @@ function M.evaluate(list, snap)
         end
         return rows
     end
-    -- BiS tab uses evaluate() (not evaluate_entry). For the local toon, DoN /
-    -- spell-aware rows that are snap-missing still get a live Me.Book /
-    -- Me.CombatAbility check — same signal as Book?=4. Skip live FindItem for
-    -- ordinary gear (that path is evaluate_entry-only; too heavy per frame).
-    local local_live = is_local_eval_snap(snap)
-    local DS = local_live and ensure_don_spells() or nil
+    -- Local checklist/roster: same live FindItem path as evaluate_entry so
+    -- equip/unequip colors match reality without waiting on Store persist.
+    -- Cached (~0.4s TTL); invalidate_live_ownership_cache on worn changes.
+    if (CFG.perf_live_self_bis ~= false) and is_local_eval_snap(snap) then
+        for _, entry in ipairs(list.entries or {}) do
+            rows[#rows + 1] = M.evaluate_entry(entry, snap)
+        end
+        return rows
+    end
     for _, entry in ipairs(list.entries or {}) do
         local match, status
         match, status, entry = match_entry(entry, snap)
-        if match == nil and status == "missing" and local_live then
-            if DS and DS.try_live_match then
-                local handled, liveMatch, liveStatus = DS.try_live_match(entry)
-                if handled then
-                    rows[#rows + 1] = {
-                        entry = entry,
-                        have = liveStatus ~= nil and liveStatus ~= "missing",
-                        match = liveMatch,
-                        status = liveStatus or "missing",
-                    }
-                    goto continue_eval
-                end
-            end
-            if live_spells_known(entry) then
-                rows[#rows + 1] = {
-                    entry = entry,
-                    have = true,
-                    match = entry.item,
-                    status = "known",
-                }
-                goto continue_eval
-            end
-        end
         local have = status ~= nil and status ~= "missing"
         rows[#rows + 1] = { entry = entry, have = have, match = match, status = status }
-        ::continue_eval::
     end
     return rows
 end
@@ -776,30 +817,65 @@ function M.evaluate_entry(entry, snap, opts)
     local match, status
     match, status, entry = match_entry(entry, snap or {})
     -- opts.skip_live: bulk callers (needs index builds) evaluate purely against
-    -- the snapshot. The self-snapshot live FindItem fallback below scans the
-    -- whole inventory+bank per missing entry - hundreds of entries per build
-    -- made that a multi-second stall on the game thread. Announce paths still
-    -- live-confirm individual hits at announce time.
-    if match == nil and status == "missing" and not (opts and opts.skip_live) then
-        if (opts and opts.live_fallback) or is_local_eval_snap(snap) then
-            local DS = ensure_don_spells()
-            if DS and DS.try_live_match then
-                local handled, liveMatch, liveStatus = DS.try_live_match(entry)
-                if handled then
-                    return {
-                        entry = entry,
-                        have = status_is_have(liveStatus),
-                        match = liveMatch,
-                        status = liveStatus or "missing",
-                    }
-                end
+    -- the snapshot. Local BiS display (perf_live_self_bis) reconciles with live
+    -- FindItem so equip/unequip is instant without waiting on Store persist.
+    local want_live = not (opts and opts.skip_live)
+        and ((opts and opts.live_fallback) or is_local_eval_snap(snap))
+    local live_self = want_live and (CFG.perf_live_self_bis ~= false) and is_local_eval_snap(snap)
+
+    if live_self then
+        -- Spell/pack rows keep snap/live spell helpers; gear uses live slot status.
+        local DS = ensure_don_spells()
+        if DS and DS.try_live_match then
+            local handled, liveMatch, liveStatus = DS.try_live_match(entry)
+            if handled then
+                return {
+                    entry = entry,
+                    have = status_is_have(liveStatus),
+                    match = liveMatch,
+                    status = liveStatus or "missing",
+                }
             end
-            if live_own_cached(entry) then
-                return { entry = entry, have = true, match = nil, status = "carried" }
+        end
+        if status == "known" or status == "ready" or status == "pack_owned" then
+            if live_spells_known(entry) or status_is_have(status) then
+                return { entry = entry, have = true, match = match or entry.item, status = status }
             end
-            if live_spells_known(entry) then
-                return { entry = entry, have = true, match = entry.item, status = "known" }
+        end
+        local live = live_status_cached(entry)
+        if live == "equipped" or live == "carried" then
+            return {
+                entry = entry,
+                have = true,
+                match = match or entry.item,
+                status = live,
+            }
+        end
+        if live_spells_known(entry) then
+            return { entry = entry, have = true, match = entry.item, status = "known" }
+        end
+        return { entry = entry, have = false, match = nil, status = "missing" }
+    end
+
+    if match == nil and status == "missing" and want_live then
+        local DS = ensure_don_spells()
+        if DS and DS.try_live_match then
+            local handled, liveMatch, liveStatus = DS.try_live_match(entry)
+            if handled then
+                return {
+                    entry = entry,
+                    have = status_is_have(liveStatus),
+                    match = liveMatch,
+                    status = liveStatus or "missing",
+                }
             end
+        end
+        local live = live_status_cached(entry)
+        if live then
+            return { entry = entry, have = true, match = nil, status = live }
+        end
+        if live_spells_known(entry) then
+            return { entry = entry, have = true, match = entry.item, status = "known" }
         end
     end
     return { entry = entry, have = status_is_have(status), match = match, status = status }

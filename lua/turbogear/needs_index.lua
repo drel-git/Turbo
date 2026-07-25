@@ -358,6 +358,10 @@ local state_idx = {
     merged = nil,
     merged_dirty = false,
     settings_sig = nil,
+    settings_parts = nil, -- structured snapshot for scoped invalidate (perf_needs_settle)
+    pending_settings_sig = nil,
+    pending_settings_parts = nil,
+    pending_settings_at = 0,
     last_store_content_version = -1,
     last_scan_at = 0,
     last_local_scan_at = 0,
@@ -377,6 +381,10 @@ local state_idx = {
     max_single_entry_ms = 0,
     last_build = nil,
 }
+
+local function perf_needs_settle_on()
+    return CFG.perf_needs_settle ~= false
+end
 
 -- Scans are EVENT-DRIVEN (Store.content_version changes); this cadence is
 -- only a safety sweep for visibility flaps that don't touch content.
@@ -411,15 +419,17 @@ local function is_local_key(char_key)
     return tostring(char_key or "") == local_char_key()
 end
 
-local function settings_signature()
-    local parts = {}
+-- Structured settings snapshot. Signature string is derived from this so
+-- debounce + scoped invalidate can classify roster vs catalog changes.
+local function settings_parts()
+    local disabled_parts = {}
     local disabled = SharedSettings.bisAnnounceDisabledLists
     if type(disabled) == "table" then
         for k, v in pairs(disabled) do
-            if v then parts[#parts + 1] = tostring(k) end
+            if v then disabled_parts[#disabled_parts + 1] = tostring(k) end
         end
     end
-    table.sort(parts)
+    table.sort(disabled_parts)
     local set_parts = {}
     if type(SharedSettings.characterSets) == "table" then
         for id, rec in pairs(SharedSettings.characterSets) do
@@ -435,23 +445,76 @@ local function settings_signature()
         end
     end
     table.sort(set_parts)
+    local selected_parts = {}
+    local selected = cfg.Settings.bisViewSelectedChars
+    if type(selected) == "table" then
+        for k, v in pairs(selected) do
+            selected_parts[#selected_parts + 1] = tostring(k) .. "=" .. tostring(v)
+        end
+        table.sort(selected_parts)
+    end
+    return {
+        announce = tostring(SharedSettings.bisAnnounceEnabled ~= false),
+        listMode = tostring(cfg.Settings.bisListMode or ""),
+        selectedList = tostring(cfg.Settings.bisSelectedList or ""),
+        rosterScope = tostring(cfg.Settings.bisRosterScope or "online"),
+        viewKey = tostring(cfg.Settings.bisViewKey or "__all__"),
+        selectedChars = table.concat(selected_parts, ","),
+        disabledLists = table.concat(disabled_parts, ","),
+        characterSets = table.concat(set_parts, "\30"),
+    }
+end
+
+local function settings_signature_from_parts(parts)
+    parts = type(parts) == "table" and parts or {}
     return table.concat({
-        tostring(SharedSettings.bisAnnounceEnabled ~= false),
-        tostring(cfg.Settings.bisListMode or ""),
-        tostring(cfg.Settings.bisSelectedList or ""),
-        tostring(cfg.Settings.bisRosterScope or "online"),
-        tostring(cfg.Settings.bisViewKey or "__all__"),
-        (function()
-            local selected = cfg.Settings.bisViewSelectedChars
-            if type(selected) ~= "table" then return "" end
-            local selected_parts = {}
-            for k, v in pairs(selected) do selected_parts[#selected_parts + 1] = tostring(k) .. "=" .. tostring(v) end
-            table.sort(selected_parts)
-            return table.concat(selected_parts, ",")
-        end)(),
-        table.concat(parts, ","),
-        table.concat(set_parts, "\30"),
+        tostring(parts.announce or ""),
+        tostring(parts.listMode or ""),
+        tostring(parts.selectedList or ""),
+        tostring(parts.rosterScope or ""),
+        tostring(parts.viewKey or ""),
+        tostring(parts.selectedChars or ""),
+        tostring(parts.disabledLists or ""),
+        tostring(parts.characterSets or ""),
     }, "\31")
+end
+
+local function settings_signature()
+    return settings_signature_from_parts(settings_parts())
+end
+
+-- catalog = BiS list / announce filters changed → needs results stale for everyone
+-- roster  = visibility / character sets / view selection only → keep built chars
+local function settings_change_kind(old_parts, new_parts)
+    if type(old_parts) ~= "table" or type(new_parts) ~= "table" then return "catalog" end
+    if old_parts.announce ~= new_parts.announce
+        or old_parts.listMode ~= new_parts.listMode
+        or old_parts.selectedList ~= new_parts.selectedList
+        or old_parts.disabledLists ~= new_parts.disabledLists then
+        return "catalog"
+    end
+    return "roster"
+end
+
+local function apply_settings_change(new_sig, new_parts)
+    local kind = settings_change_kind(state_idx.settings_parts, new_parts)
+    state_idx.settings_sig = new_sig
+    state_idx.settings_parts = new_parts
+    state_idx.pending_settings_sig = nil
+    state_idx.pending_settings_parts = nil
+    state_idx.pending_settings_at = 0
+    if kind == "catalog" then
+        diag.event("needs_index.settings", "catalog settings settled; clearing indexed chars")
+        state_idx.chars = {}
+        state_idx.queue = {}
+        state_idx.queued = {}
+        state_idx.queued_at = {}
+        state_idx.building = nil
+    else
+        -- Roster/visibility flap: keep already-built needs; present-prune +
+        -- new_char enqueue below will catch adds/removes without restarting progress.
+        diag.event("needs_index.settings", "roster settings settled; keeping built chars")
+    end
 end
 
 local function sig_brief(sig)
@@ -682,6 +745,13 @@ local function start_char_build(char_key, deadline)
     if not recs or not ok_bis or not bis then
         return tombstone_char(char_key, sig)
     end
+    -- Prewarm item/aug/spell ownership map once (same coverage as evaluate).
+    -- Avoids attributing a multi-second index build to the first entry_eval.
+    if bis.ensure_snapshot_index then
+        diag.time("needs_index.ownership_index", function()
+            bis.ensure_snapshot_index(snap)
+        end)
+    end
     state_idx.building = {
         char_key = char_key,
         snap = snap,
@@ -708,9 +778,12 @@ local function continue_char_build(deadline)
     diag.time("needs_index.evaluate", function()
         local recs, n = b.recs, #b.recs
         local i = b.i
+        -- snap_entry_status = evaluate_entry(skip_live) ownership rules via the
+        -- prewarmed snap index (never thinner than evaluate for owned).
         local evaluator = function(entry)
-            -- skip_live: never run per-entry FindItem storms during index
-            -- builds; announce paths live-confirm individual hits instead.
+            if b.bis.snap_entry_status then
+                return b.bis.snap_entry_status(entry, b.snap)
+            end
             local row = b.bis.evaluate_entry(entry, b.snap, { skip_live = true })
             return row and row.status or "missing"
         end
@@ -781,42 +854,64 @@ local function prune_queue_to(present)
     end
 end
 
+-- Returns true when a pending settings signature has been stable long enough
+-- to apply (or when settle is off / first adopt and the raw sig already differs).
+local function settings_ready_to_apply(now)
+    local parts = settings_parts()
+    local sig = settings_signature_from_parts(parts)
+    if sig == state_idx.settings_sig then
+        state_idx.pending_settings_sig = nil
+        state_idx.pending_settings_parts = nil
+        state_idx.pending_settings_at = 0
+        return false, sig, parts
+    end
+    -- First observation: adopt immediately (nothing built yet to protect).
+    if state_idx.settings_sig == nil or not perf_needs_settle_on() then
+        return true, sig, parts
+    end
+    local settle_s = tonumber(CFG.perf_needs_settle_s) or 1.5
+    if settle_s < 0.25 then settle_s = 0.25 end
+    if state_idx.pending_settings_sig ~= sig then
+        state_idx.pending_settings_sig = sig
+        state_idx.pending_settings_parts = parts
+        state_idx.pending_settings_at = now
+        diag.event("needs_index.settings", string.format(
+            "settings change pending (debounce %.1fs) kind=%s",
+            settle_s, settings_change_kind(state_idx.settings_parts, parts)))
+        return false, sig, parts
+    end
+    if (now - (tonumber(state_idx.pending_settings_at) or now)) < settle_s then
+        return false, sig, parts
+    end
+    return true, sig, parts
+end
+
 local function scan_for_changes(opts)
     opts = type(opts) == "table" and opts or {}
     local allow_peers = opts.allow_peers ~= false and opts.local_only ~= true
     local now = os.clock()
-    -- Throttle applies UNCONDITIONALLY: a busy queue is no reason to rescan
-    -- (scanning per tick while a slow warm-up held the queue was the constant
-    -- 66-134ms stutter in the 17:40 log). Scans re-run only when content
-    -- actually changed or on the slow safety sweep.
+    -- Observe settings every tick (debounce / settle), but the per-char scan
+    -- below is throttled UNCONDITIONALLY. A busy/warming queue must not force
+    -- a full rescan every tick — that was the steady 66-135ms stutter.
+    local apply_settings, pending_sig, pending_parts = settings_ready_to_apply(now)
     if allow_peers then
         if (now - state_idx.last_scan_at) < SCAN_EVERY_S then
             local cv = tonumber(Store.content_version) or 0
-            local settings_changed = settings_signature() ~= state_idx.settings_sig
-            if cv == state_idx.last_store_content_version
-                and not settings_changed
-                and not visible_needs_work() then
+            if cv == state_idx.last_store_content_version and not apply_settings then
                 return
             end
         end
         state_idx.last_scan_at = now
         state_idx.last_store_content_version = tonumber(Store.content_version) or 0
     else
-        if (now - state_idx.last_local_scan_at) < SCAN_EVERY_S and not local_needs_work() then return end
+        if (now - state_idx.last_local_scan_at) < SCAN_EVERY_S and not apply_settings then
+            return
+        end
         state_idx.last_local_scan_at = now
     end
 
-    local sig = settings_signature()
-    if sig ~= state_idx.settings_sig then
-        diag.event("needs_index.settings", "settings signature changed; clearing indexed chars")
-        state_idx.settings_sig = sig
-        state_idx.chars = {}
-        -- Drop queued rebuilds too: they may belong to the previous roster
-        -- scope (e.g. Live Peers -> Group left 15 peers queued for a 6-char group).
-        state_idx.queue = {}
-        state_idx.queued = {}
-        state_idx.queued_at = {}
-        state_idx.building = nil
+    if apply_settings then
+        apply_settings_change(pending_sig, pending_parts)
     end
 
     local building_key = state_idx.building and state_idx.building.char_key or nil
@@ -1004,6 +1099,10 @@ function M.invalidate(reason)
     diag.event("needs_index.invalidate", tostring(reason or "manual"))
     state_idx.chars = {}
     state_idx.settings_sig = nil
+    state_idx.settings_parts = nil
+    state_idx.pending_settings_sig = nil
+    state_idx.pending_settings_parts = nil
+    state_idx.pending_settings_at = 0
     state_idx.last_store_content_version = -1
     state_idx.queue = {}
     state_idx.queued = {}
@@ -1048,6 +1147,7 @@ function M.status()
         failures = state_idx.failures or 0,
         last_enqueue = state_idx.last_enqueue,
         enqueue_counts = state_idx.enqueue_counts,
+        settings_pending = state_idx.pending_settings_sig ~= nil,
         builds_started = state_idx.builds_started or 0,
         builds_finished = state_idx.builds_finished or 0,
         eval_entries = state_idx.eval_entries or 0,

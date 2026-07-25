@@ -166,6 +166,7 @@ local function buildFpsChecklist(ctx)
     add('  [ ] TurboGear running if gear UI was open during hitch')
     add('  [ ] lootPerfLog=ON and at least one loot since enabling')
     add('  [ ] Export Diagnostics again — send whole Turbo_diag_* folder')
+    add('  [ ] For Turbo UI freezes (hub only): /turbo hitchlog — send Turbo_hitchlog_*.txt')
 
     return lines
 end

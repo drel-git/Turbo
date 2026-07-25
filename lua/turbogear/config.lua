@@ -35,7 +35,7 @@ M.CFG = {
     script_name  = 'TurboGear',    -- display/settings/cache name
     lua_name     = 'turbogear',     -- folder/module name used by /lua run and /lua stop
     bg_lua_name  = 'turbogear_bg',  -- wrapper responder name; leaves /lua run turbogear free for UI
-    version      = '1.2.72',
+    version      = '1.2.89',
     mailbox      = 'turbogear',     -- shared actor mailbox name across all boxes
     proto        = 1,              -- snapshot protocol version (guards mismatched boxes)
     frame_round  = 5.0,
@@ -43,6 +43,29 @@ M.CFG = {
     max_bank     = 24,             -- RoF2 bank slots
     self_cache_lite_s = 8.0,       -- lite gather cache (heartbeat / bg / most tabs)
     self_cache_full_s = 5.0,       -- full gather cache (Stats / Focus / Suggest)
+    -- Phase 1 perf: reuse spell snapshots + coalesce burst force-gathers (startup/zone storms).
+    -- Set false to A/B against the old always-regather behavior.
+    perf_snapshot_cache = true,
+    perf_force_gather_coalesce_s = 2.5, -- reuse last force gather within this window (inventory_watch opts out)
+    -- Needs-index: debounce settings-signature flaps + scoped invalidate (roster vs catalog).
+    -- Set false to restore immediate clear-all on every settings_sig change.
+    perf_needs_settle = true,
+    perf_needs_settle_s = 1.5, -- apply settings change only after sig is stable this long
+    -- While gear/inventory is still moving, skip needs-index rebuilds (announce
+    -- still uses live FindItem confirm). Rebuild once after this quiet pad.
+    perf_needs_gear_settle = true,
+    perf_needs_gear_settle_s = 2.0,
+    -- Phase 2: cheap worn-slot poll catches silent equip/unequip (drag-to-bags
+    -- prints no chat line). Detector only -> targeted equipped patch; must NEVER
+    -- route through a full snapshot.gather (bag walk).
+    perf_equip_poll = true,
+    perf_equip_poll_interval_s = 1.0,
+    -- LazBis-shaped: local BiS colors use live FindItem; worn→Store persist is
+    -- debounced (never saveNow on the UI thread per equip).
+    perf_live_self_bis = true,
+    perf_worn_persist_debounce_s = 2.5,
+    -- Persist rows without stats/focus blobs (store.persist_row). Keep true.
+    perf_persist_slim = true,
     save_every_s = 15.0,           -- debounce cache writes (UI open)
     age_sweep_interval_s = 1.0,    -- P3: throttle source online/stale/offline aging sweep (status is second-granular)
     cache_tmp_validate_s = 30.0,   -- P1 interim: re-validate the temp cache file at most this often (not every save)
@@ -68,10 +91,12 @@ M.CFG = {
         "turbo_bank_all", "turbo_collect_cash", "turbo_collect_dc", "turbo_collect_rc", "turbo_collect_crests", "turbo_reclaim_lotto",
     },
     save_every_bg_s = 30.0,        -- debounce bg cache writes; actors carry live updates without disk stalls
-    -- After inventory content_version bumps (put/delta), flush sooner so the UI
-    -- BiS sheet can reload without waiting for save_every_bg_s. Debounced: each
-    -- change restarts the window (loot trains → one write). 0 disables.
-    save_content_coalesce_s = 1.5,
+    -- After inventory content_version bumps (put/delta), wait for quiet settle
+    -- before disk flush. Each change restarts the window (gear swaps → one write).
+    -- Peers still get actor publish immediately. 0 disables content flush.
+    save_content_coalesce_s = 8.0,
+    -- Max ms per tick while chunk-building bags/bank payloads (avoids 3–6s hitch).
+    save_persist_budget_ms = 4.0,
     save_every_heavy_ui_s = 120.0, -- avoid disk-pickle hitches while Inventory/TurboBiS are open
     save_every_minimized_s = 30.0, -- slower disk writes when minimized
     request_cooldown_s = 10.0,     -- min gap between background roster refresh requests
@@ -146,6 +171,7 @@ M.SettingsFile = string.format("%s/%s_%s.lua", mq.configDir, M.CFG.script_name, 
 M.CacheFile    = string.format("%s/%s_cache.lua", mq.configDir, M.CFG.script_name)
 M.WalletFile   = string.format("%s/%s_wallet.lua", mq.configDir, M.CFG.script_name) -- lean fleet-wallet sidecar
 M.DbFile       = string.format("%s/%s_cache.db", mq.configDir, M.CFG.script_name)  -- Phase 3 SQLite backend
+M.BisSearchFile = string.format("%s/%s_bissearch.lua", mq.configDir, M.CFG.script_name) -- LazBiS-lite peer BiS maps
 M.BgReadyFile  = string.format("%s/%s_bgready", mq.configDir, M.CFG.script_name)   -- R5 bg-responder readiness ack
 M.PatchLockFile = string.format("%s/turbo_patch.lock", mq.configDir)              -- patcher writes this to stop Turbo before updating
 M.SharedSettingsFile = string.format("%s/%s_shared.lua", mq.configDir, M.CFG.script_name)
@@ -1042,6 +1068,41 @@ function M.bg_ready_age()
     local t = tonumber((tostring(body):gsub("%s+", "")))
     if not t then return nil end
     return os.time() - t
+end
+
+-- Real class name for BiS / announce, or nil. "?" is a discovery stub sentinel
+-- (Store.discover_peer / failed Me.Class.Name) — never treat it as a class.
+function M.known_class(class_name)
+    local c = tostring(class_name or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if c == "" or c == "?" then return nil end
+    return c
+end
+
+-- Map ShortName / aliases → LazBiS catalog keys ("Shadow Knight", not "SHD").
+local CLASS_CANON = {
+    war = "Warrior", warrior = "Warrior",
+    clr = "Cleric", cleric = "Cleric",
+    pal = "Paladin", paladin = "Paladin",
+    rng = "Ranger", ranger = "Ranger",
+    shd = "Shadow Knight", shadowknight = "Shadow Knight", shadow = "Shadow Knight", sk = "Shadow Knight",
+    dru = "Druid", druid = "Druid",
+    mnk = "Monk", monk = "Monk",
+    brd = "Bard", bard = "Bard",
+    rog = "Rogue", rogue = "Rogue",
+    shm = "Shaman", shaman = "Shaman",
+    nec = "Necromancer", necromancer = "Necromancer",
+    wiz = "Wizard", wizard = "Wizard",
+    mag = "Magician", mage = "Magician", magician = "Magician",
+    enc = "Enchanter", enchanter = "Enchanter",
+    bst = "Beastlord", beastlord = "Beastlord",
+    ber = "Berserker", brs = "Berserker", berserker = "Berserker",
+}
+
+function M.canonical_class(class_name)
+    local c = M.known_class(class_name)
+    if not c then return nil end
+    local key = c:lower():gsub("%s+", ""):gsub("[^%w]", "")
+    return CLASS_CANON[key] or c
 end
 
 return M

@@ -12,7 +12,9 @@ local M = {}
 local catalog = nil
 local by_class = nil          -- className -> sorted ability list
 local by_slot = nil           -- className -> { [slot_key] = ability }
-local by_teach_id = nil       -- teaching item id -> ability (any class; for is_learn)
+local by_teach_id = nil       -- teaching item id -> true (is_learn)
+local by_teach_ability = nil  -- teaching item id -> ability row (O(1) lookup_entry)
+local by_display_norm = nil   -- norm(display_name) -> ability row
 local by_container_id = nil   -- container id -> true
 local by_spell_id = nil       -- learned spell id -> true
 
@@ -58,6 +60,8 @@ local function ensure_index()
         by_class = {}
         by_slot = {}
         by_teach_id = {}
+        by_teach_ability = {}
+        by_display_norm = {}
         by_container_id = {}
         by_spell_id = {}
         return false
@@ -66,6 +70,8 @@ local function ensure_index()
     by_class = {}
     by_slot = {}
     by_teach_id = {}
+    by_teach_ability = {}
+    by_display_norm = {}
     by_container_id = {}
     by_spell_id = {}
     for className, list in pairs(data) do
@@ -77,11 +83,21 @@ local function ensure_index()
                     abilities[#abilities + 1] = rec
                     local sk = slot_key(rec)
                     if sk ~= '' then slots[sk] = rec end
+                    local dn = norm(rec.display_name)
+                    if dn ~= '' and not by_display_norm[dn] then
+                        by_display_norm[dn] = rec
+                    end
                     local tid = tonumber(rec.primary_teaching_item_id)
-                    if tid and tid > 0 then by_teach_id[tid] = true end
+                    if tid and tid > 0 then
+                        by_teach_id[tid] = true
+                        if not by_teach_ability[tid] then by_teach_ability[tid] = rec end
+                    end
                     for _, alt in ipairs(rec.alternate_teaching_item_ids or {}) do
                         alt = tonumber(alt)
-                        if alt and alt > 0 then by_teach_id[alt] = true end
+                        if alt and alt > 0 then
+                            by_teach_id[alt] = true
+                            if not by_teach_ability[alt] then by_teach_ability[alt] = rec end
+                        end
                     end
                     local cid = tonumber(rec.source_container_item_id)
                     if cid and cid > 0 then by_container_id[cid] = true end
@@ -187,13 +203,14 @@ function M.bis_entry_for_ability(ability)
 end
 
 --- Resolve a BiS entry to a catalog ability, or nil.
+-- O(1) via by_display_norm / by_teach_ability (was a full catalog scan per entry
+-- and dominated needs-index warm at ~1–2s/entry worst case).
 function M.lookup_entry(entry)
     if type(entry) ~= 'table' then return nil end
     if type(entry.don_ability) == 'table' then
         return { kind = 'ability', row = entry.don_ability }
     end
     if not ensure_index() then return nil end
-    -- Prefer explicit spell_ids + display name match across classes (rare).
     local sid = nil
     if type(entry.spell_ids) == 'table' then
         sid = tonumber(entry.spell_ids[1])
@@ -203,33 +220,17 @@ function M.lookup_entry(entry)
         want = norm(entry.spells[1])
     end
     if want ~= '' then
-        for _, list in pairs(by_class or {}) do
-            for _, ab in ipairs(list) do
-                if norm(ab.display_name) == want then
-                    if not sid or tonumber(ab.learned_spell_id) == sid then
-                        return { kind = 'ability', row = ab }
-                    end
-                end
-            end
+        local ab = by_display_norm[want]
+        if ab and (not sid or tonumber(ab.learned_spell_id) == sid) then
+            return { kind = 'ability', row = ab }
         end
     end
-    -- Teaching / container id fallback (legacy Pack rows).
+    -- Teaching-id fallback (legacy Pack rows). Container ids stay ambiguous.
     for _, id in ipairs(entry.ids or {}) do
         id = tonumber(id)
         if id then
-            for _, list in pairs(by_class or {}) do
-                for _, ab in ipairs(list) do
-                    if tonumber(ab.primary_teaching_item_id) == id then
-                        return { kind = 'ability', row = ab }
-                    end
-                    for _, alt in ipairs(ab.alternate_teaching_item_ids or {}) do
-                        if tonumber(alt) == id then
-                            return { kind = 'ability', row = ab }
-                        end
-                    end
-                end
-            end
-            -- Container-only: do not map pack id to a single ability (ambiguous).
+            local ab = by_teach_ability[id]
+            if ab then return { kind = 'ability', row = ab } end
         end
     end
     return nil
@@ -261,6 +262,10 @@ local function snap_knows(snap, ability)
     end
     local want = norm(ability.display_name or ability.ability)
     if want == '' then return false end
+    local idx = snap._bis_index
+    if type(idx) == 'table' and type(idx.known_spells) == 'table' then
+        return idx.known_spells[want] == true
+    end
     local spells = snap.spells
     if type(spells) ~= 'table' then return false end
     local row = spells[want]

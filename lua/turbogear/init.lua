@@ -531,18 +531,35 @@ local function tgear_command(...)
                 print("[TurboGear] research_catalog.lua not found in turbogear folder")
             end
         end
+    elseif arg == "bissearch" or arg == "bis_search" then
+        local list_id = tostring(args[2] or rest or ""):match("^%s*(%S+)") or ""
+        if list_id == "" then
+            list_id = tostring(cfg.Settings.bisSelectedList or "")
+        end
+        if list_id == "" then
+            print("[TurboGear] bissearch: pass a catalog id (e.g. anguish)")
+        elseif not state.bg then
+            request_local_bg_start("bissearch command")
+            mq.cmd('/timed 2 /squelch /tgearbg bissearch ' .. list_id)
+        else
+            local ok = Engine.request_bis_search and Engine.request_bis_search(list_id, { force = true })
+            if not ok then
+                print("[TurboGear] bissearch: engine not ready")
+            end
+        end
     elseif arg == "sync" then
+        local quiet = tostring(args[2] or ""):lower() == "quiet"
         require('snapshot').invalidate()
         if not state.bg then
             request_local_bg_start("sync command")
-            mq.cmd('/timed 5 /squelch /tgearbg sync')
-            print("[TurboGear] sync: delegated to local bg responder")
+            mq.cmd('/timed 5 /squelch /tgearbg sync' .. (quiet and " quiet" or ""))
+            if not quiet then print("[TurboGear] sync: delegated to local bg responder") end
         else
             -- Sync is publish + request only. Peer wake is Launch Group Peers /
             -- Launch All Online (or UI-open group soft-wake) -- never rebroadcast
             -- turbogear_autostart from sync (launch-storm footgun).
             Engine.publish(true, "full", { reason = "manual_sync" }); Engine.request_all(true)
-            print("[TurboGear] sync: full publish + requested peers")
+            if not quiet then print("[TurboGear] sync: full publish + requested peers") end
         end
     elseif arg == "publish" or arg == "publishnow" or arg == "inventory" then
         require('snapshot').invalidate()
@@ -785,6 +802,15 @@ local function unbind_all(stop_peers)
     if stop_peers and not state.bg and cfg.Settings.autoStopPeers == true then
         pcall(function() cfg.stop_peers() end)
     end
+    -- Shutdown flushes pending inventory to disk (may hitch once on unload).
+    pcall(function()
+        if Engine and Engine.shutdown then
+            Engine.shutdown()
+        else
+            local Store = require('store').Store
+            if Store and Store.flush_pending then Store.flush_pending() end
+        end
+    end)
     pcall(function() require('inspect_dock').cancel() end)
     if not state.bg then
         pcall(function() mq.imgui.destroy('TurboGearUI') end)
@@ -902,7 +928,7 @@ local function tick_peer_autostart()
             Engine.request_all(true)
         else
             -- Viewer UI: the local bg responder owns actor sync.
-            mq.cmd('/squelch /tgearbg sync')
+            mq.cmd('/squelch /tgearbg sync quiet')
         end
     end
     local sig = group_roster_sig()
@@ -958,7 +984,7 @@ local function run_loop(inspect_tick, peer_refresh)
             local age = cfg.bg_ready_age()
             local ready = age ~= nil and age <= (tonumber(CFG.bg_ready_ttl_s) or 90.0)
             if guard.should_request_bg_sync({ bg_ready = ready, now = os.clock(), deadline = startup_bg_sync.deadline }) then
-                mq.cmd('/squelch /tgearbg sync')
+                mq.cmd('/squelch /tgearbg sync quiet')
                 startup_bg_sync.pending = false
                 startup_bg_sync.sent = true
             end
@@ -977,6 +1003,17 @@ local function run_loop(inspect_tick, peer_refresh)
             -- the shared cache the bg responder writes (cheap file-attr check).
             if not state.bg and Store.reload_cache_if_changed then
                 Store.reload_cache_if_changed(false)
+            end
+            -- Keep peer class labels fresh from Group/Spawn (inventory comes from
+            -- cache reload after the local bg mirrors actor SNAPSHOTs).
+            if not state.bg and Store.enrich_class then
+                for _, key in ipairs(Store.peer_keys and Store.peer_keys() or {}) do
+                    local snap = Store.sources and Store.sources[key]
+                    if snap then Store.enrich_class(snap) end
+                end
+            end
+            if not state.bg then
+                pcall(function() require('bis_search').reload_if_changed() end)
             end
         end
         if not state.bg then peer_discovery.tick(Engine) end

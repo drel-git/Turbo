@@ -132,18 +132,31 @@ function Backend:reload()
 end
 
 -- Persist the full stripped source set. Read-merge avoids clobbering another
--- box that wrote since our last write; skipped when we're the sole writer.
-function Backend:save(out)
+-- box that wrote since our last write. Sole-writer skip is ONLY safe for a
+-- full-fleet `out`; partial saves (dirty keys / only_self) must always merge
+-- or they pickle 1–2 rows and wipe every offline peer from the cache file.
+function Backend:save(out, _save_opts)
+    _save_opts = type(_save_opts) == "table" and _save_opts or {}
+    local partial = _save_opts.partial == true
     local disk_sig = signature()
-    if self.last_written_sig == nil or disk_sig ~= self.last_written_sig then
+    local must_merge = partial
+        or self.last_written_sig == nil
+        or disk_sig ~= self.last_written_sig
+    if must_merge then
         diag.count("store.save_merge")
+        local my_key = ""
+        pcall(function() my_key = tostring(self.key_fn() or "") end)
         local ok_existing, existing = safe_load_lua_table(cfg.CacheFile)
         if ok_existing and type(existing) == "table" then
             for k, disk in pairs(existing) do
                 if type(disk) == "table" then
                     local mem = out[k]
-                    if type(mem) ~= "table" or self.newer(disk, mem) then
+                    -- Own row: memory wins (local worn/inventory is authoritative).
+                    -- Missing mem (partial only_self save): keep the disk peer row.
+                    if type(mem) ~= "table" then
                         out[k] = disk
+                    elseif my_key == "" or tostring(k) ~= my_key then
+                        if self.newer(disk, mem) then out[k] = disk end
                     end
                 end
             end

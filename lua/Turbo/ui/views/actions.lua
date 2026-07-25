@@ -874,6 +874,15 @@ function M.render(state, actions)
                 tooltip = 'Print Turbo diagnostics to chat: installed versions, expected macro files, active profile paths, and common setup checks. For auto-loot gates only: /turbodoctor loot or /tlootwhy.',
                 onClick = function() if actions.runDoctor then actions.runDoctor() end end,
             },
+            {
+                label = 'Record Hitch Log (3 min)##tools_hitchlog',
+                shortLabel = 'Hitch Log',
+                intent = 'info',
+                tooltip = 'Record a timed Turbo UI hitch log for ~3 minutes (same as /turbo hitchlog). Sit with the UI open; the file path prints to chat when done.',
+                onClick = function()
+                    if actions.startHitchlog then actions.startHitchlog() end
+                end,
+            },
         }, 2, 128, ACTION_BTN_H)
     end
 
