@@ -10635,9 +10635,15 @@ function TG.renderWindow()
         return
     end
 
+    if TG.hitchlog then TG.hitchlog.span_begin('ensure_e3') end
     ensureE3Vars()
-    TG.refreshSharedControl(false)
+    if TG.hitchlog then TG.hitchlog.span_end() end
 
+    if TG.hitchlog then TG.hitchlog.span_begin('shared_control') end
+    TG.refreshSharedControl(false)
+    if TG.hitchlog then TG.hitchlog.span_end() end
+
+    if TG.hitchlog then TG.hitchlog.span_begin('route_restore') end
     if g.statusMessage == '' then
         g.lastStatusMessageText = ''
         g.statusMessageShownAtMS = 0
@@ -10659,6 +10665,7 @@ function TG.renderWindow()
     if g.tickPendingSetupRestore then
         g.tickPendingSetupRestore()
     end
+    if TG.hitchlog then TG.hitchlog.span_end() end
 
     local t = nowMS()
     if (t - g.lastRefreshMS) >= AUTO_REFRESH_MS then
@@ -10696,6 +10703,7 @@ function TG.renderWindow()
     end
     if TG.hitchlog then TG.hitchlog.span_end() end
 
+    if TG.hitchlog then TG.hitchlog.span_begin('state_tlo') end
     local currentLooter = getCurrentLooter()
     local liveMainLooter = g.getLiveMainLooter and g.getLiveMainLooter() or currentLooter
     if not g.selectedChar or g.selectedChar == '' then
@@ -10715,16 +10723,23 @@ function TG.renderWindow()
     end
     local multiModeOn = (not lootAllOn) and isMultiLootMode()
     local multiLooters = getMultiLooters()
+    if TG.hitchlog then TG.hitchlog.span_end() end
+
+    if TG.hitchlog then TG.hitchlog.span_begin('loot_ready') end
     local lootReady, lootReadyReason = true, ''
     if g.getLootReadiness then
         lootReady, lootReadyReason = g.getLootReadiness(lootAllOn, multiModeOn, currentLooter, liveMainLooter)
     end
     local eventLootRadius = getEventLootRadius(lootAllOn, multiModeOn, currentLooter)
+    if TG.hitchlog then TG.hitchlog.span_end() end
+
     if skipTracker and skipTracker.is_ready() and g.skipDisplayRows == nil then
         if TG.hitchlog then TG.hitchlog.span_begin('skip_display_rebuild') end
         rebuildSkipDisplayRows()
         if TG.hitchlog then TG.hitchlog.span_end() end
     end
+
+    if TG.hitchlog then TG.hitchlog.span_begin('loot_anim') end
     local skipPendingCount = 0
     if skipTracker and skipTracker.is_ready() then
         if g.skipDisplayTotal ~= nil then
@@ -10741,6 +10756,9 @@ function TG.renderWindow()
         g.slimGUI = false
         g.slimWhenExpanded = false
     end
+    if TG.hitchlog then TG.hitchlog.span_end() end
+
+    if TG.hitchlog then TG.hitchlog.span_begin('view_state') end
     g.activeTab = UiState.normalizeActiveTab(g.activeTab)
     g.lastRelevantTab = UiState.normalizeRelevantTab(g.lastRelevantTab)
     g.lootManagerPage = UiState.normalizeLootManagerPage(g.lootManagerPage)
@@ -10817,6 +10835,7 @@ function TG.renderWindow()
         profileContextMenu = profileContextMenu, setProfileLootDistance = setProfileLootDistance,
     }
     renderFrameOuter.activeProfile = activeProfile;
+    if TG.hitchlog then TG.hitchlog.span_end() end
     (function()
     local o = renderFrameOuter
     local g, mq, ImGui, Theme, Ui, UiState = o.g, o.mq, o.ImGui, o.Theme, o.Ui, o.UiState

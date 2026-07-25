@@ -1,3 +1,9 @@
+1.2.90
+- Turbo UI hitchlog: finer timing buckets in the hub prep path (ensure_e3,
+  shared_control, route_restore, state_tlo, loot_ready, loot_anim, view_state)
+  plus an unaccounted gap so freeze reports can name the stall instead of only
+  showing a bare renderWindow spike.
+
 1.2.89
 - Turbo UI hitchlog: /turbo hitchlog [seconds] (or More -> Record Hitch Log)
   times the hub ImGui loop and writes Config\Turbo\Turbo_hitchlog_*.txt for

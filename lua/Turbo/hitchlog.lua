@@ -117,12 +117,14 @@ function M.span_end()
     local label = capture.span_label or 'span'
     capture.span_t0 = nil
     capture.span_label = nil
+    capture.frame_accounted = (tonumber(capture.frame_accounted) or 0) + ms
     bump_sample(label, ms)
 end
 
 function M.on_frame_begin()
     if not capture then return end
     capture.frame_t0 = now_ms()
+    capture.frame_accounted = 0
 end
 
 function M.on_frame_end(tg)
@@ -133,6 +135,12 @@ function M.on_frame_end(tg)
     capture.sum = capture.sum + ms
     if ms > capture.max then capture.max = ms end
     bump_sample('renderWindow', ms)
+    -- Time not covered by named spans (prep gaps, GC, MQ stalls mid-callback).
+    local accounted = tonumber(capture.frame_accounted) or 0
+    local gap = ms - accounted
+    if gap < 0 then gap = 0 end
+    bump_sample('unaccounted', gap)
+    capture.frame_accounted = 0
     if tg and type(tg) == 'table' then
         capture.ctx.windowOpen = tg.windowOpen
         capture.ctx.minimizedGUI = tg.minimizedGUI
@@ -231,6 +239,9 @@ local function build_lines(reason)
         add('  %s  %-22s  %.1fms', tostring(e.t), tostring(e.label), tonumber(e.ms) or 0)
     end
     add('')
+    add('')
+    add('Notes: named sections are sequential prep/draw buckets. unaccounted is')
+    add('frame time not covered by those buckets (gaps, GC, or stalls mid-callback).')
     add('How to use: sit with Turbo UI open, reproduce freezes, send this file.')
     return lines
 end
