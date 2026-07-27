@@ -166,6 +166,23 @@ do
         coordinators = {}, legacy_seen_at = 1000,
     })
     check(defer == true and dreason == "legacy_beacon", 'defer: bg uses legacy stamp')
+    -- Fail-closed: bg with no fresh beacon must not announce (no N-way [TG] spam).
+    defer, dreason = R.should_defer_announce({
+        is_bg = true, me_name = "Bot", group_sig = sig, now = 2000, ttl_s = 90,
+        coordinators = {}, legacy_seen_at = 0,
+    })
+    check(defer == true and dreason == "no_ui_driver", 'defer: bg empty coords fail-closed')
+    defer, dreason = R.should_defer_announce({
+        is_bg = true, me_name = "Bot", group_sig = sig, now = 2000, ttl_s = 90,
+        coordinators = { [sig] = { name = "Alghol", seenAt = 1000 } }, legacy_seen_at = 1000,
+    })
+    check(defer == true and dreason == "no_ui_driver", 'defer: bg stale beacon fail-closed')
+    -- Lone UI with no beacon may still claim/speak.
+    defer, dreason = R.should_defer_announce({
+        is_bg = false, me_name = "Alghol", group_sig = sig, now = 2000, ttl_s = 90,
+        coordinators = {}, legacy_seen_at = 0,
+    })
+    check(defer == false and dreason == "no_beacon", 'defer: UI no beacon still speaks')
     local next_coords, changed = R.apply_coordinator_stamp({}, sig, "Alghol", 1000)
     check(changed and next_coords[sig].name == "Alghol", 'stamp: writes record')
 end

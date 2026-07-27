@@ -213,6 +213,9 @@ local function coordinator_status_label()
         legacy_seen_at = SharedSettings.announceCoordinatorSeenAt,
     })
     if state.bg == true then
+        if reason == "no_ui_driver" then
+            return "muted (open TurboGear UI on one box)"
+        end
         if defer then
             return holder ~= "" and ("deferring to " .. holder) or "deferring to driver"
         end
@@ -268,8 +271,10 @@ local function tick_coordinator_beacon()
     end
 end
 
+local no_ui_driver_warn_printed = false
+
 local function should_defer_chat_announce()
-    local defer = rules.should_defer_announce({
+    local defer, reason = rules.should_defer_announce({
         is_bg = state.bg == true,
         me_name = me_name(),
         group_sig = settled_group_sig(),
@@ -278,7 +283,24 @@ local function should_defer_chat_announce()
         coordinators = SharedSettings.announceCoordinators,
         legacy_seen_at = SharedSettings.announceCoordinatorSeenAt,
     })
-    return defer == true
+    return defer == true, reason
+end
+
+local function warn_no_ui_driver_once(reason)
+    if reason ~= "no_ui_driver" or no_ui_driver_warn_printed then return end
+    no_ui_driver_warn_printed = true
+    print("\at[TurboGear]\ax [TG] chat muted: open TurboGear UI on one box (full, docked mini, or minimized icon). Alts on turbogear_bg stay quiet.")
+end
+
+--- Fail-closed gate before any [TG] chat emit on bg (chat, actor, pending drain).
+local function should_mute_bg_announce()
+    if state.bg ~= true then return false end
+    local defer, reason = should_defer_chat_announce()
+    if defer then
+        warn_no_ui_driver_once(reason)
+        return true
+    end
+    return false
 end
 
 function M.become_announce_driver()
@@ -1161,6 +1183,10 @@ local function send_group_announce(bucket, opts)
     if type(bucket) ~= "table" or type(bucket.order) ~= "table" or #bucket.order == 0 then
         return false
     end
+    if should_mute_bg_announce() then
+        note_skip(bucket.item_name, "no ui driver")
+        return false
+    end
     local dedupe = {
         key = tostring(mq.TLO.MacroQuest.Server() or "?") .. ":group:" .. tostring(bucket.key or ""),
         source = bucket.source or "group",
@@ -1723,6 +1749,10 @@ note_sent = function(item_name)
 end
 
 local function send_announce_now(item_name, item_link, dedupe)
+    if should_mute_bg_announce() then
+        note_skip(item_name, "no ui driver")
+        return false
+    end
     if dedupe and dedupe.key and dedupe.respect_recent and recently_sent(dedupe.key) then
         runtime.duplicate_suppressed = (runtime.duplicate_suppressed or 0) + 1
         diag.count("announce.duplicates_suppressed")
@@ -2059,9 +2089,11 @@ local function try_process_chat(line, allow_queue, opts)
     end
     -- Sticky per-group driver-first: same-group non-holders (UI or bg) stay
     -- quiet for chat-triggered needs. Link capture / replay / [TG] dedupe above
-    -- still ran.
-    if should_defer_chat_announce() then
-        runtime.last_chat_note = "driver coordinator"
+    -- still ran. Bg with no fresh UI beacon fail-closes (no_ui_driver).
+    local defer_chat, defer_reason = should_defer_chat_announce()
+    if defer_chat then
+        warn_no_ui_driver_once(defer_reason)
+        runtime.last_chat_note = defer_reason == "no_ui_driver" and "no ui driver" or "driver coordinator"
         return false
     end
     if #links > 0 then

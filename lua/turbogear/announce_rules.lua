@@ -275,7 +275,9 @@ end
 
 --- Should this process defer chat-triggered [TG] emission?
 --- UI defers only when another same-group holder is fresh.
---- Bg defers when same-group holder is fresh, or (fallback) legacy machine stamp.
+--- Bg defers when same-group holder is fresh, or (fallback) legacy machine stamp;
+--- without a fresh UI driver beacon, bg fail-closes (no_ui_driver) so fleets
+--- with only turbogear_bg do not N-way spam identical [TG] chat.
 --- Returns defer(bool), reason, holder_name
 function M.should_defer_announce(opts)
     opts = opts or {}
@@ -302,6 +304,10 @@ function M.should_defer_announce(opts)
     local legacy = tonumber(opts.legacy_seen_at) or 0
     if is_bg and M.beacon_fresh(legacy, now, ttl) then
         return true, "legacy_beacon", holder
+    end
+    -- No fresh UI beacon: UI may still claim/speak; bg fail-closed.
+    if is_bg then
+        return true, "no_ui_driver", holder
     end
     return false, "no_beacon", holder
 end

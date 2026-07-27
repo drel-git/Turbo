@@ -1,3 +1,10 @@
+1.2.91
+- [TG] multi-box spam fix: if every box is only on turbogear_bg (no Gear UI),
+  alts no longer all spam the same [TG] line when loot is announced.
+- Keep TurboGear UI open on one driver (full UI, docked mini UI, or minimized
+  icon UI). That box speaks; the rest stay quiet.
+- Alts without a driver show a one-time notice: open Gear UI on one box.
+
 1.2.90
 - Turbo UI hitchlog: finer timing buckets in the hub prep path (ensure_e3,
   shared_control, route_restore, state_tlo, loot_ready, loot_anim, view_state)
