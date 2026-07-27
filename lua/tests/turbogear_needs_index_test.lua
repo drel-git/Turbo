@@ -127,6 +127,26 @@ check(#hits3 == 1, 'text: limit respected')
 -- no needed items in line
 check(#core.text_candidates(merged2, "hello there", 8) == 0, 'text: clean line yields nothing')
 
+-- Word boundary: combat "Decapitated" must not match needed item "Capitate".
+do
+    local entry_cap = { item = "Capitate", names = { "Capitate" }, ids = { 777 } }
+    local cap_chars = {
+        Srv_Augur = {
+            name = "Augur",
+            needs = core.build_char_needs(
+                { { entry = entry_cap, item_name = "Capitate", list_id = "jonas" } },
+                function() return "missing" end),
+        },
+    }
+    local cap_merged = core.merge(cap_chars)
+    check(#core.text_candidates(cap_merged, "Ahffrait tells the group, 'I Decapitated Ashen Sorcerer of Di'zok for 1753 dmg'", 8) == 0,
+        'text: Decapitated does not match Capitate')
+    check(#core.text_candidates(cap_merged, "Anyone need Capitate before I vendor?", 8) == 1,
+        'text: standalone Capitate still matches')
+    check(#core.text_candidates_chars(cap_chars, "I Decapitated the mob", 8) == 0,
+        'text_chars: Decapitated does not match Capitate')
+end
+
 -- Display-name rules for multi-alias entries (fungal-chain regression):
 -- id hits must show the canonical item name; name hits must show the alias
 -- that matched, never an arbitrary sibling alias like "... - Tier II".

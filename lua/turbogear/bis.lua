@@ -518,15 +518,23 @@ local function entry_matches_item(entry, it)
     return false
 end
 
--- LazBiS-style live ownership check (FindItem scans worn, bags, and bank).
+-- LazBiS-style live ownership check (FindItem + FindItemBank).
 -- BOUNDED by design: this confirm exists to catch an item looted SECONDS ago
 -- (snapshot lag) - and that item is by definition the linked/looted one, so
 -- checking the entry ids + the linked name + the canonical entry name is
 -- semantically complete. Iterating every alias name (80+ on expanded
 -- fungal/Jonas entries) ran hundreds of FindItem/FindItemBank scans per call
 -- and froze the game for 29-39s when chat hit a warm-up fallback scan.
-local function find_item_tlo(id_or_name)
+local function find_item_tlo(id_or_name, bank)
     local ok, fi = pcall(function()
+        if bank then
+            if type(id_or_name) == "number" then
+                return mq.TLO.FindItemBank and mq.TLO.FindItemBank(id_or_name) or nil
+            end
+            local name = trim(id_or_name)
+            if name == "" then return nil end
+            return mq.TLO.FindItemBank and mq.TLO.FindItemBank("=" .. name) or nil
+        end
         if type(id_or_name) == "number" then
             return mq.TLO.FindItem and mq.TLO.FindItem(id_or_name) or nil
         end
@@ -538,8 +546,9 @@ local function find_item_tlo(id_or_name)
     return fi
 end
 
-local function live_status_from_fi(fi)
+local function live_status_from_fi(fi, bank)
     if not fi then return nil end
+    if bank then return "carried" end
     local slot = nil
     pcall(function() slot = tonumber(fi.ItemSlot()) end)
     -- InvSlots 0-22 are worn; bag/bank pack slots are higher.
@@ -550,24 +559,31 @@ end
 --- Returns "equipped", "carried", or nil (not owned on this box).
 function M.live_item_status(entry, item_name, item_id)
     entry = entry and M.normalize_entry(entry) or {}
+    local function try(v)
+        local fi = find_item_tlo(v, false)
+        if fi then return live_status_from_fi(fi, false) end
+        fi = find_item_tlo(v, true)
+        if fi then return live_status_from_fi(fi, true) end
+        return nil
+    end
     for _, id in ipairs(entry.ids or {}) do
-        local fi = find_item_tlo(tonumber(id) or 0)
-        if fi then return live_status_from_fi(fi) end
+        local st = try(tonumber(id) or 0)
+        if st then return st end
     end
     item_id = tonumber(item_id) or 0
     if item_id > 0 then
-        local fi = find_item_tlo(item_id)
-        if fi then return live_status_from_fi(fi) end
+        local st = try(item_id)
+        if st then return st end
     end
     item_name = trim(item_name)
     if item_name ~= "" then
-        local fi = find_item_tlo(item_name)
-        if fi then return live_status_from_fi(fi) end
+        local st = try(item_name)
+        if st then return st end
     end
     local canonical = trim(entry.item)
     if canonical ~= "" and canonical ~= item_name then
-        local fi = find_item_tlo(canonical)
-        if fi then return live_status_from_fi(fi) end
+        local st = try(canonical)
+        if st then return st end
     end
     return nil
 end

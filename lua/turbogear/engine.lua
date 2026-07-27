@@ -969,7 +969,7 @@ function Engine.sync_bank_now()
         return false
     end
     snapshot.invalidate()
-    local ok = Engine.publish(true, "full", { reason = "manual_bank_sync" })
+    local ok = Engine.publish(true, "full", { reason = "manual_bank_sync", saveNow = true })
     Engine.last_bank_capture = os.clock()
     set_sync_hint(ok and "Bank contents synced." or "Bank sync requested.", 3.0)
     return ok
@@ -979,7 +979,7 @@ function Engine.sync_banks_network()
     local local_open = snapshot.bank_window_open and snapshot.bank_window_open() or false
     if local_open then
         snapshot.invalidate()
-        Engine.publish(true, "full", { reason = "network_bank_sync" })
+        Engine.publish(true, "full", { reason = "network_bank_sync", saveNow = true })
         Engine.last_bank_capture = os.clock()
     end
     Engine.request_all(true, { depth = "full" })
@@ -991,7 +991,12 @@ end
 local function capture_open_bank(reason, hint_seconds)
     if not snapshot.bank_window_open or not snapshot.bank_window_open() then return false end
     snapshot.invalidate()
-    local ok = Engine.publish(true, "full", { skipLockouts = true, skipLiveStats = true, reason = reason or "bank_capture" })
+    local ok = Engine.publish(true, "full", {
+        skipLockouts = true,
+        skipLiveStats = true,
+        reason = reason or "bank_capture",
+        saveNow = true,
+    })
     Engine.last_bank_capture = os.clock()
     if reason and reason ~= "" then
         set_sync_hint(reason, hint_seconds or 2.5)

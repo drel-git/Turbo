@@ -290,10 +290,15 @@ local function try_tlo_value(fn)
 end
 
 local function bank_window_open()
+    local function is_open(v)
+        if v == true or v == 1 then return true end
+        local s = tostring(v or ""):lower()
+        return s == "true" or s == "1"
+    end
     local value = try_tlo_value(function() return mq.TLO.Window("BigBankWnd").Open() end)
-    if value == true or tostring(value):lower() == "true" then return true end
+    if is_open(value) then return true end
     value = try_tlo_value(function() return mq.TLO.Window("BankWnd").Open() end)
-    return value == true or tostring(value):lower() == "true"
+    return is_open(value)
 end
 
 M.bank_window_open = bank_window_open

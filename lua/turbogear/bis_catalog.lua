@@ -1842,14 +1842,24 @@ function M.find_announce_needs_in_line(snap, line)
         return {}
     end
     local idx = static_catalog
-    line = tostring(line or "")
+    line = tostring(line or ""):lower()
+    local text_has_name = nil
+    pcall(function()
+        local ni = require('needs_index')
+        text_has_name = ni.core and ni.core.text_has_name
+    end)
     local out, seen, seen_entry = {}, {}, {}
     for key, recs in pairs(idx.by_name or {}) do
         if not seen[key] then
             for _, rec in ipairs(recs) do
                 if M.list_announce_enabled(rec.list_id) then
-                    local name = rec.item_name
-                    if name ~= "" and line:find(name, 1, true) then
+                    local name = tostring(rec.item_name or "")
+                    local name_l = name:lower()
+                    local hit = name_l ~= "" and (
+                        (text_has_name and text_has_name(line, name_l))
+                        or ((not text_has_name) and line:find(name_l, 1, true))
+                    )
+                    if hit then
                         seen[key] = true
                         local entry_key = announce_entry_key(rec)
                         if seen_entry[entry_key] then break end

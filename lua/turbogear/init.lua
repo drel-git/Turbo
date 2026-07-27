@@ -561,6 +561,26 @@ local function tgear_command(...)
             Engine.publish(true, "full", { reason = "manual_sync" }); Engine.request_all(true)
             if not quiet then print("[TurboGear] sync: full publish + requested peers") end
         end
+    elseif arg == "syncbank" or arg == "banksync" then
+        -- Bank-aware sync for viewer UIs: capture+save when BigBank is open on
+        -- this box, then request peer full snaps (same as Sync Banks button).
+        local quiet = tostring(args[2] or ""):lower() == "quiet"
+        if not state.bg then
+            request_local_bg_start("syncbank command")
+            mq.cmd('/timed 5 /squelch /tgearbg syncbank' .. (quiet and " quiet" or ""))
+            if not quiet then print("[TurboGear] syncbank: delegated to local bg responder") end
+        else
+            local snap_mod = require('snapshot')
+            local open = snap_mod.bank_window_open and snap_mod.bank_window_open() or false
+            if open then
+                snap_mod.invalidate()
+                Engine.publish(true, "full", { reason = "manual_bank_sync", saveNow = true })
+                if not quiet then print("[TurboGear] syncbank: bank captured and saved") end
+            else
+                if not quiet then print("[TurboGear] syncbank: open the bank window on this character first") end
+            end
+            Engine.request_all(true, { depth = "full" })
+        end
     elseif arg == "publish" or arg == "publishnow" or arg == "inventory" then
         require('snapshot').invalidate()
         local ok = false
@@ -1003,6 +1023,17 @@ local function run_loop(inspect_tick, peer_refresh)
             -- the shared cache the bg responder writes (cheap file-attr check).
             if not state.bg and Store.reload_cache_if_changed then
                 Store.reload_cache_if_changed(false)
+            end
+            local bank_reload_until = tonumber(state.bank_sync_reload_until) or 0
+            if not state.bg and bank_reload_until > 0 then
+                if os.clock() <= bank_reload_until then
+                    pcall(function()
+                        if Store.reload_cache_if_changed then Store.reload_cache_if_changed(false)
+                        else Store.reload_cache() end
+                    end)
+                else
+                    state.bank_sync_reload_until = nil
+                end
             end
             -- Keep peer class labels fresh from Group/Spawn (inventory comes from
             -- cache reload after the local bg mirrors actor SNAPSHOTs).

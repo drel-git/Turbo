@@ -1,3 +1,21 @@
+1.2.93
+- Bank cache UI: Setup status uses a live self snap when the bank is open
+  (was reading a stale Store row, so it stayed "Xh ago" even with BigBank open).
+- Opening the bank on a viewer UI writes the local bank row immediately so age
+  flips without waiting on bg persist.
+- Sync Banks reloads the shared cache into the UI after capture.
+- Announce text scan: item names must match as whole tokens, so combat
+  "Decapitated" no longer false-triggers Jonas "Capitate".
+
+1.2.92
+- Bank cache: re-opening the bank (same items) now updates age/live state in
+  the shared cache so Inventory no longer sticks on "cached Xh old".
+- Inventory self view shows Bank: live now whenever BigBank is open on that
+  box (no Sync Banks ritual).
+- Sync Banks / auto bank-open capture force-save so the UI process sees it;
+  viewer Sync Banks uses /tgearbg syncbank.
+- BiS live ownership also checks FindItemBank so bank-only items count as owned.
+
 1.2.91
 - [TG] multi-box spam fix: if every box is only on turbogear_bg (no Gear UI),
   alts no longer all spam the same [TG] line when loot is announced.

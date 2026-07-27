@@ -373,9 +373,14 @@ local function draw_global_search_bar()
                 if state.engine_claim_disabled then
                     local bg_name = tostring((cfg.CFG and cfg.CFG.bg_lua_name) or 'turbogear_bg')
                     mq.cmd('/squelch /lua run ' .. bg_name)
-                    mq.cmd('/timed 5 /squelch /tgearbg sync')
+                    mq.cmd('/timed 5 /squelch /tgearbg syncbank')
+                    state.bank_sync_reload_until = os.clock() + 10.0
                 else
                     Engine.sync_banks_network()
+                    pcall(function()
+                        if Store.reload_cache_if_changed then Store.reload_cache_if_changed(false)
+                        else Store.reload_cache() end
+                    end)
                 end
             end
             if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
@@ -408,9 +413,14 @@ local function draw_global_search_bar()
         if state.engine_claim_disabled then
             local bg_name = tostring((cfg.CFG and cfg.CFG.bg_lua_name) or 'turbogear_bg')
             mq.cmd('/squelch /lua run ' .. bg_name)
-            mq.cmd('/timed 5 /squelch /tgearbg sync')
+            mq.cmd('/timed 5 /squelch /tgearbg syncbank')
+            state.bank_sync_reload_until = os.clock() + 10.0
         else
             Engine.sync_banks_network()
+            pcall(function()
+                if Store.reload_cache_if_changed then Store.reload_cache_if_changed(false)
+                else Store.reload_cache() end
+            end)
         end
     end
 end

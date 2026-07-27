@@ -632,6 +632,26 @@ function M.source_snapshot(key)
     if key == "__self__" then
         local depth = snapshot.depth_for_settings()
         local cached = snapshot.cached()
+        -- Bank open on this box: never prefer a preserved Store row over a live
+        -- walk. That is what left Inventory stuck on "cached 6h old" while
+        -- BigBankWnd was already TRUE.
+        local bank_open = snapshot.bank_window_open and snapshot.bank_window_open() == true
+        if bank_open then
+            if not (cached and cached.bankLive == true) then
+                local live = snapshot.gather({ force = true, depth = depth })
+                -- Viewer UI is cache-only for actors, but it can still write the
+                -- local bank row so Setup/BiS see a fresh stamp without waiting
+                -- on bg persist + reload.
+                if type(live) == "table" and live.bankLive == true then
+                    pcall(function()
+                        Store.put(live, "client")
+                        if Store.save then Store.save({ only_self = true }) end
+                    end)
+                end
+                return live, true, "Self"
+            end
+            return cached, true, "Self"
+        end
         -- UI is a viewer: bg may have saved a fresher self snap after Give Now.
         -- Prefer Store self when inventoryUpdated is newer so counts update
         -- without waiting for a local TLO gather.

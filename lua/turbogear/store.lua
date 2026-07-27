@@ -241,6 +241,8 @@ end
 
 local function snapshot_content_sig(snap)
     if type(snap) ~= "table" then return "" end
+    -- bankLive + bankCapturedAt: stamp-only bank refreshes (re-open with same
+    -- items) must dirty persist so the UI process can reload age/live state.
     return table.concat({
         tostring(snap.server or ""),
         tostring(snap.name or ""),
@@ -249,6 +251,8 @@ local function snapshot_content_sig(snap)
         item_list_sig(snap.equipped),
         item_list_sig(snap.bags),
         item_list_sig(snap.bank),
+        snap.bankLive == true and "1" or "0",
+        tostring(tonumber(snap.bankCapturedAt) or 0),
     }, "\31")
 end
 

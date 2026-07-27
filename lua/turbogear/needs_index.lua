@@ -63,6 +63,27 @@ function core.norm_text(s)
     return out
 end
 
+--- True when `needle` appears in `hay` as its own token (not inside a longer
+--- word). Stops "capitate" matching inside combat "Decapitated ...".
+--- Both strings should already be lowercased (norm_text / strip_key).
+function core.text_has_name(hay, needle)
+    hay = tostring(hay or "")
+    needle = tostring(needle or "")
+    if needle == "" or #needle < 3 or hay == "" then return false end
+    local i = 1
+    while true do
+        local a, b = hay:find(needle, i, true)
+        if not a then return false end
+        local before = a > 1 and hay:sub(a - 1, a - 1) or ""
+        local after = b < #hay and hay:sub(b + 1, b + 1) or ""
+        -- Alphanumeric on either side means we are inside a longer word.
+        if (before == "" or not before:match("%w")) and (after == "" or not after:match("%w")) then
+            return true
+        end
+        i = a + 1
+    end
+end
+
 local function strip_key_uncached(name)
     local s = core.norm_key(name)
     s = s:gsub("%s*%(%s*[^%)]-%s*%)%s*$", "")
@@ -249,7 +270,7 @@ function core.text_candidates_chars(chars, line, limit)
         local needs = rec and rec.needs
         if needs then
             for key, need in pairs(needs.by_name or {}) do
-                if key ~= "" and #key >= 3 and line:find(key, 1, true) then
+                if key ~= "" and #key >= 3 and core.text_has_name(line, key) then
                     matches[#matches + 1] = { key = key, need = need }
                 end
             end
@@ -313,7 +334,7 @@ function core.text_candidates(merged, line, limit)
     if line == "" or not merged then return out end
     local matches = {}
     for key, list in pairs(merged.by_name or {}) do
-        if key ~= "" and #key >= 3 and line:find(key, 1, true) then
+        if key ~= "" and #key >= 3 and core.text_has_name(line, key) then
             local first = list and list[1]
             if first then matches[#matches + 1] = { key = key, first = first } end
         end

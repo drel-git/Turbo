@@ -1030,7 +1030,9 @@ function M.draw()
     end
     local s = Engine.stats
     col_text(Theme.dim, string.format("traffic  tx: req %d / snap %d    rx: req %d / snap %d / bad %d", s.tx_req, s.tx_snap, s.rx_req, s.rx_snap, s.rx_bad))
-    local local_bank_text, local_bank_color = bank_label(Store.get(my_key()))
+    -- Prefer live self snap when bank is open; Store alone can stay on a
+    -- preserved "Xh ago" row until bg persist + cache reload lands.
+    local local_bank_text, local_bank_color = bank_label(select(1, views.source_snapshot("__self__")))
     col_text(local_bank_color, local_bank_text)
     if Settings.peerDiscoveryEnabled ~= false then
         col_text(Theme.dim, "discovery: " .. tostring(peer_discovery.status()))
@@ -1099,10 +1101,15 @@ function M.draw()
         if runtime_state.engine_claim_disabled then
             local bg_name = tostring((cfg.CFG and cfg.CFG.bg_lua_name) or 'turbogear_bg')
             mq.cmd('/squelch /lua run ' .. bg_name)
-            mq.cmd('/timed 5 /squelch /tgearbg sync')
+            mq.cmd('/timed 5 /squelch /tgearbg syncbank')
+            runtime_state.bank_sync_reload_until = os.clock() + 10.0
             ul_status = "Bank sync requested through the local TurboGear bg responder."
         else
             Engine.sync_banks_network()
+            pcall(function()
+                if Store.reload_cache_if_changed then Store.reload_cache_if_changed(false)
+                else Store.reload_cache() end
+            end)
         end
     end
     if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
