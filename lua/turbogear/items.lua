@@ -240,12 +240,47 @@ local function collect_classes(item)
     return classes, all_classes
 end
 
+-- InvSlot name keys from MQ slot-names (WornSlot["ranged"] bool form).
+local WORN_SLOT_NAMES = {
+    { id = 0, name = "charm" }, { id = 1, name = "leftear" },
+    { id = 2, name = "head" }, { id = 3, name = "face" },
+    { id = 4, name = "rightear" }, { id = 5, name = "neck" },
+    { id = 6, name = "shoulder" }, { id = 7, name = "arms" },
+    { id = 8, name = "back" }, { id = 9, name = "leftwrist" },
+    { id = 10, name = "rightwrist" }, { id = 11, name = "ranged" },
+    { id = 12, name = "hands" }, { id = 13, name = "mainhand" },
+    { id = 14, name = "offhand" }, { id = 15, name = "leftfinger" },
+    { id = 16, name = "rightfinger" }, { id = 17, name = "chest" },
+    { id = 18, name = "legs" }, { id = 19, name = "feet" },
+    { id = 20, name = "waist" }, { id = 21, name = "powersource" },
+    { id = 22, name = "ammo" },
+}
+
 local function collect_slots(item)
     local slots = {}
+    local seen = {}
+    local function add(sid)
+        sid = tonumber(sid)
+        if sid == nil or seen[sid] then return end
+        seen[sid] = true
+        slots[#slots + 1] = sid
+    end
     local count = safe_num(item, "WornSlots")
     for i = 1, count do
-        local ok, sid = pcall(function() return item.WornSlot(i).ID() end)
-        if ok and sid ~= nil then slots[#slots+1] = tonumber(sid) or sid end
+        local ok, sid = pcall(function()
+            local inv = item.WornSlot(i)
+            if inv == nil then return nil end
+            if inv.ID ~= nil then return inv.ID() end
+            return inv()
+        end)
+        if ok then add(sid) end
+    end
+    -- Fallback: some item TLOs report WornSlots=0 but answer WornSlot["ranged"].
+    if #slots == 0 then
+        for _, slot in ipairs(WORN_SLOT_NAMES) do
+            local ok, can = pcall(function() return item.WornSlot(slot.name)() end)
+            if ok and can then add(slot.id) end
+        end
     end
     return slots
 end

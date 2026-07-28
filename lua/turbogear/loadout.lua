@@ -965,6 +965,28 @@ end
 
 local function snapshot_stats_ok(snap)
     if not snap then return false end
+    local snap_mod = package.loaded.snapshot
+    if type(snap_mod) ~= "table" then
+        local ok, mod = pcall(require, 'snapshot')
+        if ok then snap_mod = mod end
+    end
+    -- Lite or unusable worn: don't trust snap.depth alone (silent AC: 0 case).
+    if type(snap.equipped) == "table" then
+        local any_usable = false
+        for _, it in ipairs(snap.equipped) do
+            if it and tostring(it.depth or "") == "lite" then return false end
+            if it and it.name and it.name ~= "" then
+                if snap_mod and snap_mod.item_has_populated_stats
+                    and snap_mod.item_has_populated_stats(it) then
+                    any_usable = true
+                elseif (tonumber(it.stats and it.stats.ac) or 0) > 0
+                    or (tonumber(it.stats and it.stats.hp) or 0) > 0 then
+                    any_usable = true
+                end
+            end
+        end
+        if #snap.equipped > 0 and not any_usable then return false end
+    end
     if tostring(snap.depth or "") == "full" then return true end
     local totals = M.total_stats(snap)
     for _, def in ipairs(stat_defs.stats) do

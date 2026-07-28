@@ -558,7 +558,8 @@ local function tgear_command(...)
             -- Sync is publish + request only. Peer wake is Launch Group Peers /
             -- Launch All Online (or UI-open group soft-wake) -- never rebroadcast
             -- turbogear_autostart from sync (launch-storm footgun).
-            Engine.publish(true, "full", { reason = "manual_sync" }); Engine.request_all(true)
+            Engine.publish(true, "full", { reason = "manual_sync" })
+            Engine.request_all(true, { depth = "full", fastInventory = true })
             if not quiet then print("[TurboGear] sync: full publish + requested peers") end
         end
     elseif arg == "syncbank" or arg == "banksync" then
@@ -1086,6 +1087,11 @@ local function run_loop(inspect_tick, peer_refresh)
                 budget = tonumber(CFG.item_index_budget_bg_ms) or 20
             elseif state.lean and state.lean() then
                 budget = tonumber(CFG.item_index_budget_lean_ms) or 2
+            elseif tostring(cfg.Settings.mainTab or "") == "upgrade"
+                and tostring(cfg.Settings.upgradeTab or "suggestions") == "suggestions" then
+                -- Only while looking at Upgrade > Suggestions: finish the fleet
+                -- index faster. Other tabs keep the tiny hitch-safe budget.
+                budget = tonumber(CFG.item_index_budget_suggest_ms) or 24
             else
                 budget = tonumber(CFG.item_index_budget_ms) or 4
             end

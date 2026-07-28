@@ -133,8 +133,74 @@ function M.find_bag_slot_by_id(item_id)
     return nil
 end
 
+-- True when an item row has any non-zero base/effective stat (or class/slot
+-- meta). Used to reject EQ "not loaded yet" full builds that would stamp
+-- depth=full with all-zero stats. Do NOT use AC==0 alone — many worn items
+-- legitimately have 0 AC.
+function M.item_has_populated_stats(it)
+    if type(it) ~= "table" then return false end
+    local s = it.baseStats or it.stats
+    if type(s) == "table" then
+        for _, key in ipairs({
+            "ac", "hp", "mana", "endurance",
+            "str", "sta", "agi", "dex", "wis", "int", "cha",
+            "attack", "hpRegen", "manaRegen", "healAmount", "spellDamage",
+            "shielding", "spellShield", "dotShielding", "damageShield",
+            "avoidance", "accuracy", "stunResist", "strikeThrough",
+        }) do
+            if (tonumber(s[key]) or 0) ~= 0 then return true end
+        end
+    end
+    if type(it.classes) == "table" then
+        if it.classes[1] ~= nil or next(it.classes) ~= nil then return true end
+    end
+    if type(it.slots) == "table" and #it.slots > 0 then return true end
+    if it.allClasses == true then return true end
+    if type(it.focusEffects) == "table" and (it.focusEffects[1] ~= nil or next(it.focusEffects) ~= nil) then
+        return true
+    end
+    if type(it.wornFocusEffects) == "table" and (it.wornFocusEffects[1] ~= nil or next(it.wornFocusEffects) ~= nil) then
+        return true
+    end
+    if it.clicky ~= nil then return true end
+    return false
+end
+
+-- Reuse unchanged slot+id rows. When want_depth is "full", also rebuild rows
+-- still stamped depth=lite (or legacy rows with no depth and no stats) so a
+-- poisoned worn set heals without a full 22-slot walk when most rows are full.
+-- Worst case one pass ≈ all worn slots full-build off-UI — rare; typical equip
+-- is ~1 full make_item.
+function M.worn_entry_needs_rebuild(prev, live_id, want_depth)
+    live_id = tonumber(live_id) or 0
+    if live_id <= 0 then return false end
+    if type(prev) ~= "table" or tonumber(prev.id) ~= live_id then return true end
+    if want_depth == "full" then
+        local d = tostring(prev.depth or "")
+        if d == "lite" then return true end
+        -- Legacy / false-full poison: no usable meta yet (not the same as AC==0).
+        if not M.item_has_populated_stats(prev) then return true end
+    end
+    return false
+end
+
+function M.equipped_has_lite_items(snap)
+    if type(snap) ~= "table" or type(snap.equipped) ~= "table" then return false end
+    for _, it in ipairs(snap.equipped) do
+        if not it then goto continue end
+        local d = tostring(it.depth or "")
+        if d == "lite" then return true end
+        -- Named worn with no usable stats (missing depth or false full zeros).
+        if (it.name and it.name ~= "") and not M.item_has_populated_stats(it) then
+            return true
+        end
+        ::continue::
+    end
+    return false
+end
+
 -- Phase 2: re-read worn slots and patch the cached snap in place.
--- Reuses cached entries by slot+id (typical equip = ~1 make_item_lite).
+-- Reuses cached entries by slot+id (typical equip = ~1 make_item when depth=full).
 -- Removes newly-worn IDs from bags (equip-from-bags ghost).
 -- Relocates departed worn IDs into bags (keeps ownership; BiS stays blue not red).
 -- Bumps seq so peer cache-newer / is_newer accepts the patch.
@@ -142,9 +208,7 @@ end
 function M.refresh_equipped(depth)
     local snap = M.cached()
     if type(snap) ~= "table" or type(snap.equipped) ~= "table" then return nil end
-    -- Hard lite in this path — never a full stats/aug walk for worn refresh.
-    local mk = make_item_lite
-    if depth == "full" then mk = make_item end -- reserved; callers should pass lite/nil
+    local want_full = depth == "full"
 
     local old_by_slot_id = {}
     local old_by_id = {}
@@ -165,12 +229,22 @@ function M.refresh_equipped(depth)
         end)
         if live_id ~= 0 then
             local prev = old_by_slot_id[slot.id]
-            if prev and tonumber(prev.id) == live_id then
-                new_equipped[#new_equipped + 1] = prev
+            local entry
+            if not M.worn_entry_needs_rebuild(prev, live_id, want_full and "full" or "lite") then
+                entry = prev
+            elseif want_full then
+                -- Full stats/aug walk for this slot only (bg thread). If EQ has
+                -- not loaded item meta yet, keep depth=lite so UI stays honest
+                -- and a later heal can retry — never stamp false full zeros.
+                entry = make_item(item, "Equipped", slot.name, slot.id, slot.name)
+                if not M.item_has_populated_stats(entry) then
+                    entry = make_item_lite(item, "Equipped", slot.name, slot.id, slot.name)
+                    diag.count("snapshot.equipped_full_empty")
+                end
             else
-                new_equipped[#new_equipped + 1] =
-                    mk(item, "Equipped", slot.name, slot.id, slot.name)
+                entry = make_item_lite(item, "Equipped", slot.name, slot.id, slot.name)
             end
+            new_equipped[#new_equipped + 1] = entry
             now_ids[live_id] = true
         end
     end

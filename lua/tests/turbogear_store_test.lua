@@ -18,6 +18,11 @@ package.preload['mq'] = function()
     }
 end
 local shared = { ignoredChars = {} }
+local function stub_known_class(c)
+    c = tostring(c or "")
+    if c == "" or c == "?" then return nil end
+    return c
+end
 package.preload['config'] = function()
     return {
         CFG = {
@@ -30,6 +35,8 @@ package.preload['config'] = function()
         LegacyCacheFile = "/tmp/turbogear_store_test_legacy.lua",
         SaveSharedSettings = function() end,
         LoadSharedSettings = function() end,
+        known_class = stub_known_class,
+        canonical_class = stub_known_class,
     }
 end
 package.preload['state'] = function()
@@ -161,10 +168,10 @@ end
 Store.put(snap("Srv", "Dan", {
     depth = "full", equipped = { eqitem(501, "Ring", "Ring1") },
 }), "client")
-Store.touch({ name = "Dan", server = "Srv", class = "Clr", level = 71, depth = "meta", updated = now_time + 30 }, "client")
+Store.touch({ name = "Dan", server = "Srv", class = "Cleric", level = 71, depth = "meta", updated = now_time + 30 }, "client")
 do
     local d = Store.get("Srv_Dan")
-    check(d.class == "Clr" and d.level == 71, "touch updated class/level")
+    check(d.class == "Cleric" and d.level == 71, "touch updated class/level")
     check(d.equipped and #d.equipped == 1, "touch preserved inventory")
 end
 
@@ -236,6 +243,32 @@ end
 do
     local st = Store.cache_status()
     check(st.backend == "file", "store falls back to file backend when lsqlite3 absent (got " .. tostring(st.backend) .. ")")
+end
+
+-- ---- 12. lite->full meta enrich dirties content (Suggestions rebuild) ------
+do
+    local cv0 = Store.content_version or 0
+    Store.put(snap("Srv", "Meta", {
+        depth = "lite",
+        bags = { {
+            id = 900, name = "Test Bow", location = "Bags", where = "Bag1 #1",
+            slots = {}, stats = {}, depth = "lite",
+        } },
+    }), "client")
+    local cv1 = Store.content_version or 0
+    check(cv1 > cv0, "lite put bumps content_version")
+    Store.put(snap("Srv", "Meta", {
+        depth = "full",
+        bags = { {
+            id = 900, name = "Test Bow", location = "Bags", where = "Bag1 #1",
+            slots = { 11 }, stats = { ac = 10, hp = 50 }, depth = "full",
+            classes = { "Berserker" },
+        } },
+    }), "client")
+    local cv2 = Store.content_version or 0
+    check(cv2 > cv1, "lite->full meta enrich bumps content_version (same bag id)")
+    local bow = Store.get("Srv_Meta").bags[1]
+    check(type(bow.slots) == "table" and tonumber(bow.slots[1]) == 11, "full put keeps ranged wear slot")
 end
 
 -- ---- results --------------------------------------------------------------

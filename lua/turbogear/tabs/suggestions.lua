@@ -48,11 +48,20 @@ local TARGET = {
     REPAIR_AFTER_S = 2,
     REPAIR_GAP_S = 90.0,
     HEARTBEAT_FRESH_S = 30,
+    -- Warn (do not hard-hide) when peer inventory is older than this.
     ACTIONABLE_MAX_AGE_S = 300,
+    -- Only blank the Suggestions UI past this age (or when depth is not full).
+    -- 5m hard-hide made the tab vanish mid-use when actors flapped.
+    HARD_HIDE_MAX_AGE_S = 7200,
+    -- Background re-request while viewing a stale-but-shown full snap.
+    STALE_REFRESH_GAP_S = 45.0,
 }
-M.CACHE_WATCH_S = 10.0
+-- Peer full snaps often land 15-45s after Request/Sync; keep polling the shared
+-- cache that long so late replies show up without another button press.
+M.CACHE_WATCH_S = 90.0
 M.CACHE_WATCH_INTERVAL_S = 0.25
 M.last_cache_reload_reason = ""
+local global_cache_watch_until = 0
 
 local SUGGEST_COLORS = {
     UPGRADE_ROW = { 0.10, 0.17, 0.13, 0.70 },
@@ -352,6 +361,27 @@ local function maybe_reload_store_cache(force, active_watch)
     return false
 end
 
+--- Start (or extend) a global cache watch — used by Sync Now and Request so
+--- late peer publishes are picked up without sitting on a stale in-memory row.
+function M.begin_cache_watch(seconds)
+    local dur = tonumber(seconds) or M.CACHE_WATCH_S
+    if dur < 5 then dur = 5 end
+    local until_t = os.clock() + dur
+    if until_t > (global_cache_watch_until or 0) then
+        global_cache_watch_until = until_t
+    end
+end
+
+function M.cache_watch_active()
+    return os.clock() < (tonumber(global_cache_watch_until) or 0)
+end
+
+--- Call once per UI frame (cheap no-op when watch is idle).
+function M.tick_cache_watch()
+    if not M.cache_watch_active() then return false end
+    return maybe_reload_store_cache(false, true)
+end
+
 local function maybe_refresh_selected_target(snap)
     local key = selected_target_key()
     if type(snap) ~= "table" then return nil end
@@ -480,17 +510,32 @@ local function draw_target_freshness_warning(snap)
     end
 end
 
+local function snap_has_inventory(snap)
+    if type(snap) ~= "table" then return false end
+    return (#(snap.equipped or {}) > 0) or (#(snap.bags or {}) > 0) or (#(snap.bank or {}) > 0)
+end
+
+-- Ready enough to draw Suggestions (not the blank wait panel).
 local function selected_target_inventory_ready(snap)
     if selected_target_key() == "__self__" then return true end
     if type(snap) ~= "table" then return false end
+    if snap.depth ~= "full" or not snap_has_inventory(snap) then return false end
     local age = snapshot_inventory_age(snap) or 999999
-    return snap.depth == "full" and age <= TARGET.ACTIONABLE_MAX_AGE_S
+    return age <= TARGET.HARD_HIDE_MAX_AGE_S
+end
+
+local function selected_target_inventory_fresh(snap)
+    if not selected_target_inventory_ready(snap) then return false end
+    local age = snapshot_inventory_age(snap) or 999999
+    return age <= TARGET.ACTIONABLE_MAX_AGE_S
 end
 
 local function draw_target_inventory_wait(snap)
     local key = selected_target_key()
     local rec = target_refresh_requests[key]
-    maybe_reload_store_cache(false, rec and (tonumber(rec.cache_watch_until) or 0) > os.clock())
+    local watching = (rec and (tonumber(rec.cache_watch_until) or 0) > os.clock())
+        or M.cache_watch_active()
+    maybe_reload_store_cache(false, watching)
     snap = views.source_snapshot(key)
     if selected_target_inventory_ready(snap) then return false end
     local target_name = tostring((snap and snap.name) or views.source_owner_name(key) or "target")
@@ -498,11 +543,18 @@ local function draw_target_inventory_wait(snap)
     local age_line = age and ("Last inventory cache: " .. age_text(age) .. " old.") or "No inventory cache yet."
     local state = views.source_state and views.source_state(key) or nil
     local actor_live = state and state.actorLive == true
+    local had_full = snap and snap.depth == "full" and snap_has_inventory(snap)
 
-    col_text(Theme.amber or Theme.gold,
-        target_name .. " is visible, but TurboGear does not have a fresh full inventory snapshot yet.")
-    col_text(Theme.dim,
-        "Suggestions are hidden until the background responder publishes a fresh inventory snapshot.")
+    if had_full then
+        col_text(Theme.amber or Theme.gold,
+            target_name .. " inventory is too old to trust (" .. (age and age_text(age) or "?")
+            .. "). Request a fresh full snapshot.")
+    else
+        col_text(Theme.amber or Theme.gold,
+            target_name .. " is visible, but TurboGear does not have a fresh full inventory snapshot yet.")
+        col_text(Theme.dim,
+            "Suggestions stay hidden until a full inventory lands (often 15-45s after Request).")
+    end
     col_text(Theme.dim, age_line)
     if state then
         col_text(actor_live and (Theme.online or Theme.green) or Theme.dim,
@@ -510,25 +562,40 @@ local function draw_target_inventory_wait(snap)
     elseif not actor_live then
         col_text(Theme.dim, "Responder: not answering yet.")
     end
+    if not actor_live then
+        col_text(Theme.amber or Theme.gold,
+            "In-game visible, but TurboGear actor is not live yet - Start/Repair bg on "
+            .. target_name .. ", then Request again. Inventory sync uses Actors (not just E3/DanNet).")
+    end
     local refresh = target_refresh_requests[key]
     if refresh then
         local reply = Engine.last_source_reply
         local parts = {}
         if refresh.request_id and refresh.request_id ~= "" then parts[#parts + 1] = "request " .. tostring(refresh.request_id) end
+        local waited = nil
         if tonumber(refresh.requested) and tonumber(refresh.requested) > 0 then
-            parts[#parts + 1] = "sent " .. age_text(os.time() - tonumber(refresh.requested)) .. " ago"
+            waited = math.max(0, os.time() - tonumber(refresh.requested))
+            parts[#parts + 1] = "sent " .. age_text(waited) .. " ago"
         end
         if reply and refresh.request_id and reply.id == refresh.request_id then
             parts[#parts + 1] = "reply " .. age_text(os.time() - (tonumber(reply.received) or os.time())) .. " ago"
         end
         local cache_reason = tostring(refresh.cache_reason or M.last_cache_reload_reason or "")
-        if cache_reason ~= "" then parts[#parts + 1] = "cache " .. cache_reason end
+        -- Reason already includes "cache …"; don't prefix again ("cache cache …").
+        if cache_reason ~= "" then parts[#parts + 1] = cache_reason end
         if #parts > 0 then col_text(Theme.dim, "Target sync: " .. table.concat(parts, " | ")) end
+        if actor_live and waited and waited >= 15 and not selected_target_inventory_ready(snap) then
+            col_text(Theme.dim,
+                "Still waiting for a newer snapshot - keep this tab open; cache is polled automatically for a bit.")
+        end
+    elseif M.cache_watch_active() then
+        col_text(Theme.dim, "Sync watch active - polling shared cache for peer replies...")
     end
 
     if themed_button("Request inventory now##tg_request_target_inventory", Theme.blue, 150, 0) then
         target_refresh_requests[key] = nil
         maybe_reload_store_cache(true)
+        M.begin_cache_watch(M.CACHE_WATCH_S)
         local rec = {
             last = os.clock(),
             requested = os.time(),
@@ -543,24 +610,31 @@ local function draw_target_inventory_wait(snap)
         else
             target_refresh_requests[key] = nil
             maybe_refresh_selected_target(snap)
+            M.begin_cache_watch(M.CACHE_WATCH_S)
         end
     end
     ImGui.SameLine()
     if themed_button("Start bg on " .. target_name .. "##tg_start_target_bg", Theme.purple, 170, 0) then
         local cmd = cfg.soft_start_bg_command_for(target_name)
         if cmd ~= "" then mq.cmd(cmd) end
+        M.begin_cache_watch(M.CACHE_WATCH_S)
     end
     ImGui.SameLine()
     if themed_button("Repair bg##tg_repair_target_bg", Theme.amber or Theme.gold, 100, 0) then
         local cmd = cfg.repair_bg_command_for and cfg.repair_bg_command_for(target_name) or ""
         if cmd ~= "" then mq.cmd(cmd) end
+        -- After repair settles, ask again and watch for the publish.
+        mq.cmd('/timed 20 /squelch /tgearbg sync')
+        M.begin_cache_watch(M.CACHE_WATCH_S)
         local rec = target_refresh_requests[key] or {}
         rec.last_repair = os.clock()
         rec.waiting_since = os.time()
+        rec.requested = os.time()
+        rec.cache_watch_until = os.clock() + M.CACHE_WATCH_S
         target_refresh_requests[key] = rec
     end
     ImGui.SameLine()
-    col_text(Theme.dim, "This prevents 14h-old gear from being treated as current.")
+    col_text(Theme.dim, "Hides Suggestions only when there is no usable full inventory (or it is hours old).")
     return true
 end
 
@@ -781,8 +855,9 @@ local function draw_detail_result_cell(wrapped)
     if stat_line ~= "" then col_text(Theme.dim, "Base: " .. stat_line) end
 end
 
-local function draw_candidate_result(wrapped, pick_kind)
+local function draw_candidate_result(wrapped, pick_kind, opts)
     pick_kind = pick_kind or "best"
+    opts = type(opts) == "table" and opts or {}
     if not wrapped then
         col_text(Theme.placeholder or Theme.dim, "-")
         return
@@ -790,15 +865,31 @@ local function draw_candidate_result(wrapped, pick_kind)
     local delta = wrapped.delta
     local stat = compare_stat_compact_label(compare_primary_key())
     local value_text, value_color = format_delta(delta)
+    local empty_slot = opts.emptySlot == true
     if delta == nil then
-        if pick_kind == "alt" then
-            col_text(Theme.dim, "Closest: —")
+        if empty_slot then
+            col_text(Theme.green or Theme.valueTop, "Empty-slot fill")
+        elseif pick_kind == "alt" then
+            col_text(Theme.dim, "Closest: -")
         else
-            col_text(Theme.dim, "Best available: —")
+            col_text(Theme.dim, "Best available: -")
         end
         return
     end
     local n = math.floor(delta)
+    if empty_slot then
+        col_text(Theme.green or Theme.valueTop, "Empty-slot fill:")
+        ImGui.SameLine()
+        if n ~= 0 then
+            col_text(SUGGEST_COLORS.RESULT_VALUE, string.format("%s %s", stat, value_text))
+        else
+            col_text(Theme.dim, "(no " .. stat .. " on item yet)")
+        end
+        local stat_line = M.format_item_primary_stat(wrapped.row)
+        if stat_line ~= "" then col_text(Theme.dim, "Base: " .. stat_line) end
+        draw_secondary_also_line(wrapped, true)
+        return
+    end
     if n > 0 then
         col_text(Theme.green or Theme.valueTop, "Upgrade:"); ImGui.SameLine()
         col_text(SUGGEST_COLORS.RESULT_VALUE, string.format("%s %s", stat, value_text))
@@ -1179,8 +1270,19 @@ local function visible_detail_rows()
 end
 
 local function visible_overview()
-    local _, index_version = item_index.get(false)
-    local key = shared_controls_key(index_version, "overview")
+    local target_name = ""
+    pcall(function()
+        local snap = views.source_snapshot(Settings.suggestTargetKey or "__self__")
+        target_name = tostring(snap and snap.name or "")
+    end)
+    if item_index.set_priority_owner then item_index.set_priority_owner(target_name) end
+    item_index.get(false)
+    -- Include Store content_version: Suggestions may use a Store flatten while
+    -- the budgeted fleet index is still building (version stays 0 for minutes).
+    local cv = Store.content_version or 0
+    local idx_ver = item_index.version or 0
+    local building = item_index.building and item_index.building() and 1 or 0
+    local key = shared_controls_key(tostring(idx_ver) .. ":" .. tostring(cv) .. ":" .. tostring(building), "overview")
     if overview_key == key then return overview_slots, overview_meta end
 
     return M._diag.time("ui.suggestions.visible_overview", function()
@@ -1520,7 +1622,8 @@ local function draw_worn_totals_bar(meta)
     local keys = compare_stat_keys()
     if #keys == 0 then return end
     if meta and meta.wornTotalsAvailable == false then
-        col_text(Theme.section or Theme.header, "Worn totals: unavailable (offline or lite snapshot — Sync Now for full stats)")
+        col_text(Theme.section or Theme.header,
+            "Worn totals: unavailable (worn stats incomplete - Sync Now / Request inventory for full stats)")
         return
     end
     local totals = meta and meta.wornTotals
@@ -1619,7 +1722,7 @@ local function draw_equipped_cell(slot_rec)
     end
 end
 
-local function draw_compact_candidate(wrapped, suffix, slot_id)
+local function draw_compact_candidate(wrapped, suffix, slot_id, slot_rec)
     if not wrapped then
         col_text(Theme.placeholder or Theme.dim, upgrades_focus_on() and "-" or "none")
         return
@@ -1631,7 +1734,9 @@ local function draw_compact_candidate(wrapped, suffix, slot_id)
         slotid = slot_id,
         slotname = slot_label(slot_id),
     }, row))
-    draw_candidate_result(wrapped, suffix == "alt" and "alt" or "best")
+    local eq = slot_rec and slot_rec.equipped
+    local empty_slot = not (eq and eq.name and eq.name ~= "")
+    draw_candidate_result(wrapped, suffix == "alt" and "alt" or "best", { emptySlot = empty_slot })
     col_text(theme.location_color(row.locationGroup, row.location), compact_location(row))
 end
 
@@ -1640,11 +1745,11 @@ local function draw_best_pick_cell(slot_rec)
         col_text(Theme.placeholder or Theme.dim, upgrades_focus_on() and "No upgrades" or "No candidates")
         return
     end
-    draw_compact_candidate(slot_rec.best, "best", slot_rec.slotId)
+    draw_compact_candidate(slot_rec.best, "best", slot_rec.slotId, slot_rec)
 end
 
 local function draw_alt_pick_cell(slot_rec)
-    draw_compact_candidate(slot_rec.alt, "alt", slot_rec.slotId)
+    draw_compact_candidate(slot_rec.alt, "alt", slot_rec.slotId, slot_rec)
 end
 
 local function highlight_upgrade_row(slot_rec)
@@ -2887,6 +2992,18 @@ function M.draw()
     if draw_target_inventory_wait(selected_snap) then
         return
     end
+    -- Keep a usable full snap on screen, but quietly re-request when it goes stale
+    -- so Suggestions do not sit on a 5m+ cache until the user notices.
+    selected_snap = views.source_snapshot(Settings.suggestTargetKey or "__self__")
+    if selected_snap and not selected_target_inventory_fresh(selected_snap) then
+        local key = selected_target_key()
+        local rec = target_refresh_requests[key]
+        local now = os.clock()
+        if not rec or (now - (tonumber(rec.last) or 0)) >= TARGET.STALE_REFRESH_GAP_S then
+            maybe_refresh_selected_target(selected_snap)
+            M.begin_cache_watch(M.CACHE_WATCH_S)
+        end
+    end
 
     if mode == "overview" then
         local slots, meta = visible_overview()
@@ -2900,6 +3017,24 @@ function M.draw()
             meta and meta.totalUpgrades or 0,
             (meta and meta.totalUpgrades or 0) == 1 and "" or "s",
             compare_stats_summary()))
+        local bag_n = tonumber(meta and meta.indexBagRows) or 0
+        local wear_n = tonumber(meta and meta.indexWearSlotRows) or 0
+        local eq_n = tonumber(meta and meta.indexEquipRows) or 0
+        if (meta and (meta.totalUpgrades or 0) or 0) == 0 and bag_n > 0 and wear_n == 0 then
+            col_text(Theme.amber or Theme.gold,
+                string.format(
+                    "Indexed %d gear rows for this toon (%d in bags/bank) but none have wear-slot meta yet - Discord needs a live full publish (Start/Repair bg, then Sync). Until then bag upgrades cannot match slots.",
+                    eq_n, bag_n))
+        elseif bag_n == 0 and eq_n > 0 then
+            col_text(Theme.amber or Theme.gold,
+                "Index has equipped gear but no bag/bank rows for this toon - Sync/Request a full inventory.")
+        elseif eq_n == 0 then
+            col_text(Theme.amber or Theme.gold,
+                "No gear rows in cache for this toon yet - waiting on inventory sync.")
+        end
+        if meta and meta.rowSource == "store" then
+            col_text(Theme.dim, "Using live cache (fleet index still building in background).")
+        end
         col_text(Theme.dim, "Green = better than worn on primary stat | Secondary stat deltas shown when multi-compare | Highlighted rows have upgrades")
         if theme.collapsing_section("Why not shown?", false) then
             ImGui.SetNextItemWidth(220.0)

@@ -203,21 +203,44 @@ local function apply_worn_ui_only()
     return true
 end
 
+local last_lite_heal_at = 0
+
 local function apply_worn_refresh(now, reason)
     -- UI path: zero persist cost.
     if state.engine_claim_disabled == true then
         return apply_worn_ui_only()
     end
     if not snapshot.refresh_equipped or not snapshot.cached() then return false end
-    local snap = snapshot.refresh_equipped("lite")
+    -- Full-build changed (and still-lite) slots only; unchanged full rows reuse.
+    -- Keeps Suggestions worn AC correct without a UI-thread stats walk.
+    local snap = snapshot.refresh_equipped("full")
     if not snap then return false end
     if snapshot.worn_signature then
         last_worn_sig = snapshot.worn_signature()
     end
     note_worn_sig_changed()
     diag.count("inventory_watch.worn_refresh")
+    if reason and reason ~= "" then
+        diag.count("inventory_watch.worn_refresh_" .. tostring(reason))
+    end
     schedule_worn_persist(snap)
     return true
+end
+
+-- Rate-limited heal: if any worn row is still depth=lite under a cached snap,
+-- rebuild those slots full on bg (reuse leaves already-full rows alone).
+local function maybe_heal_lite_worn(now)
+    if state.engine_claim_disabled == true then return false end
+    local gap = tonumber(CFG.worn_lite_heal_gap_s)
+    if gap == nil then gap = 30.0 end
+    if gap < 5 then gap = 5 end
+    if (now - (last_lite_heal_at or 0)) < gap then return false end
+    local cached = snapshot.cached and snapshot.cached() or nil
+    if not snapshot.equipped_has_lite_items or not snapshot.equipped_has_lite_items(cached) then
+        return false
+    end
+    last_lite_heal_at = now
+    return apply_worn_refresh(now, "lite_heal")
 end
 
 local function on_worn_line(_line)
@@ -540,6 +563,7 @@ function M.tick()
     end
     diag.time("inventory_watch.tick", function()
         poll_equipped_if_due()
+        maybe_heal_lite_worn(os.clock())
         flush_worn_persist_if_due()
         flush_if_due()
         bg_poll_if_due()

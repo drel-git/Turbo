@@ -35,7 +35,7 @@ M.CFG = {
     script_name  = 'TurboGear',    -- display/settings/cache name
     lua_name     = 'turbogear',     -- folder/module name used by /lua run and /lua stop
     bg_lua_name  = 'turbogear_bg',  -- wrapper responder name; leaves /lua run turbogear free for UI
-    version      = '1.2.96',
+    version      = '1.2.106',
     mailbox      = 'turbogear',     -- shared actor mailbox name across all boxes
     proto        = 1,              -- snapshot protocol version (guards mismatched boxes)
     frame_round  = 5.0,
@@ -151,6 +151,7 @@ M.CFG = {
     item_index_budget_ms = 4,      -- fleet item-index rebuild budget per tick (UI)
     item_index_budget_lean_ms = 2, -- minimized/lean item-index tick
     item_index_budget_bg_ms = 20,  -- bg responder item-index tick
+    item_index_budget_suggest_ms = 24, -- Upgrade > Suggestions tab only
     frame_work_budget_ms = 10,     -- P5: per-tick ceiling for background build work (catalog warm + needs index) on the UI
     frame_work_budget_lean_ms = 6, -- minimized/lean: keep frames snappy while moving/zoning
     frame_work_budget_bg_ms = 40,  -- bg responder can spend more; no render to protect
@@ -161,6 +162,9 @@ M.CFG = {
     inventory_watch_debounce_s = 0.4,
     inventory_watch_publish_cooldown_s = 2.0,
     inventory_watch_bg_poll_s = 0.0,  -- disabled by default; dirty events handle normal loot/equip changes without periodic scan stalls
+    -- Bg-only: if any worn row is still depth=lite, rebuild those slots full
+    -- (changed/lite only; reuse full rows). Min effective gap is 5s.
+    worn_lite_heal_gap_s = 30.0,
     bank_open_capture_delay_s = 1.0,  -- RoF2 exposes bank reliably only while BigBankWnd is open
 }
 

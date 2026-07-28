@@ -5,6 +5,7 @@
 local item_index = require('item_index')
 local views = require('views')
 local stat_defs = require('stat_defs')
+local snapshot = require('snapshot')
 
 local M = {}
 
@@ -35,27 +36,90 @@ function M.is_same_target_equipped_in_equivalent_slot(row, target_clean, slot_id
     return false
 end
 
+local function class_list_nonempty(classes)
+    if type(classes) ~= "table" then return false end
+    if #classes > 0 then return true end
+    return next(classes) ~= nil
+end
+
+local function slot_list_contains(slots, slot_id)
+    if type(slots) ~= "table" then return false end
+    slot_id = tonumber(slot_id)
+    if not slot_id then return false end
+    for _, sid in pairs(slots) do
+        if tonumber(sid) == slot_id then return true end
+    end
+    return false
+end
+
+local function slot_list_nonempty(slots)
+    if type(slots) ~= "table" then return false end
+    if #slots > 0 then return true end
+    return next(slots) ~= nil
+end
+
 function M.can_class_use(row, target_class, opts)
     opts = type(opts) == "table" and opts or {}
     target_class = tostring(target_class or "")
     if target_class == "" or not row then return false end
     if row.allClasses then return true end
     local target_abbrev = views.class_abbrev(target_class)
-    if type(row.classes) == "table" and #row.classes > 0 then
-        for _, cls in ipairs(row.classes) do
-            if tostring(cls or "") == target_class or views.class_abbrev(cls) == target_abbrev then return true end
+    if class_list_nonempty(row.classes) then
+        for _, cls in pairs(row.classes) do
+            if tostring(cls or "") == target_class or views.class_abbrev(cls) == target_abbrev then
+                return true
+            end
         end
         return false
     end
-    return opts.allowUnknownClass == true
+    -- Missing class list (legacy slim cache / partial meta): allow in Suggestions
+    -- unless caller opts out. Present-but-wrong class lists still exclude above.
+    if opts.allowUnknownClass == false then return false end
+    return true
 end
 
 function M.is_equipment_row(row)
     if not row then return false end
     if row.kind == "aug" then return false end
     if tostring(row.itemType or "") == "aug" then return false end
+    if (tonumber(row.augType) or 0) > 0 then return false end
     if row.where == "installed_aug" or row.where == "loose_aug" then return false end
     return true
+end
+
+-- Last-resort wear-slot guess when peer meta never captured WornSlots (legacy
+-- slim cache / stalled sync). Keep this narrow — wrong-slot guesses are worse
+-- than "No candidates".
+function M.infer_wear_slots(row)
+    if not M.is_equipment_row(row) then return {} end
+    if slot_list_nonempty(row.slots) then
+        local out, seen = {}, {}
+        for _, sid in pairs(row.slots) do
+            local n = tonumber(sid)
+            if n and not seen[n] then
+                seen[n] = true
+                out[#out + 1] = n
+            end
+        end
+        return out
+    end
+    local typ = tostring(row.itemType or ""):lower()
+    local name = tostring(row.name or ""):lower()
+    if typ == "ammo" or name:find("arrow", 1, true) or name:find("quill", 1, true) then
+        return { 22 }
+    end
+    if typ == "charm" or name:find("charm", 1, true) then
+        return { 0 }
+    end
+    if typ == "weapon" or typ == "unknown" then
+        if name:find("bow", 1, true) or name:find("throwing", 1, true)
+            or name:find("javelin", 1, true) or name:find("range", 1, true)
+            or name:find("sling", 1, true)
+        then
+            return { 11 }
+        end
+    end
+    return {}
 end
 
 function M.is_usable_in_slot(row, slot_id, target_class)
@@ -66,15 +130,11 @@ function M.is_usable_in_slot(row, slot_id, target_class)
     slot_id = tonumber(slot_id)
     if not slot_id then return false end
 
-    if type(row.slots) == "table" and #row.slots > 0 then
-        for _, sid in ipairs(row.slots) do
-            if tonumber(sid) == slot_id then return true end
-        end
-        return false
+    if slot_list_nonempty(row.slots) then
+        return slot_list_contains(row.slots, slot_id)
     end
 
-    if slot_id == 22 and tostring(row.itemType or "") == "ammo" then return true end
-    return false
+    return slot_list_contains(M.infer_wear_slots(row), slot_id)
 end
 
 function M.class_info(row)
@@ -138,15 +198,22 @@ end
 
 function M.upgrade_delta(row, current, stat_key, opts)
     stat_key = tostring(stat_key or "ac")
-    if not current then return nil end
-    local cur = M.stat_value(current, stat_key, opts)
     local cand = M.stat_value(row, stat_key, opts)
+    -- Empty slot fill: any wearable candidate is a positive fill by its stat.
+    if not current then
+        if cand ~= 0 then return cand end
+        -- Statless fill (e.g. some charms): still a fill, rank neutrally.
+        return 0
+    end
+    local cur = M.stat_value(current, stat_key, opts)
     if cand == 0 and cur == 0 then return 0 end
     if stat_defs.lower_better(stat_key) then return cur - cand end
     return cand - cur
 end
 
 function M.is_upgrade(row, current, stat_key, opts)
+    -- Empty equipped slot: any usable candidate is an upgrade/fill.
+    if not current then return row ~= nil end
     local delta = M.upgrade_delta(row, current, stat_key, opts)
     return delta ~= nil and delta > 0
 end
@@ -164,10 +231,18 @@ function M.worn_stat_totals(target_key, stat_keys)
     if not snap then return nil, false end
     local equipped_map = views.index_equipped(snap) or {}
     local has_equipped = false
+    local has_lite_worn = false
+    local any_usable = false
     for _, item in pairs(equipped_map) do
         if item and item.name and item.name ~= "" then
             has_equipped = true
-            break
+            -- Per-item depth: lite means stats were never populated. Do not use
+            -- AC==0 (charms/jewelry/weapons often legitimately have 0 AC).
+            if tostring(item.depth or "") == "lite" then
+                has_lite_worn = true
+            elseif snapshot.item_has_populated_stats and snapshot.item_has_populated_stats(item) then
+                any_usable = true
+            end
         end
     end
 
@@ -178,20 +253,9 @@ function M.worn_stat_totals(target_key, stat_keys)
         return totals, true
     end
 
-    local stats_available = tostring(snap.depth or "") == "full"
-    if not stats_available then
-        for _, item in pairs(equipped_map) do
-            for _, stat_key in ipairs(stat_keys) do
-                if M.stat_value(item, stat_key) > 0 then
-                    stats_available = true
-                    break
-                end
-            end
-            if stats_available then break end
-        end
-    end
-
-    if not stats_available then
+    -- Lite worn, or a full/missing-depth snap where no worn row has usable meta
+    -- (legacy poison that printed "AC: 0").
+    if has_lite_worn or not any_usable then
         return nil, false
     end
 
@@ -260,11 +324,15 @@ function M.get_available(opts)
     local target_clean = views.clean_name(target_name)
     local current = M.target_equipped_item(target_key, slot_id)
 
-    item_index.get(false)
+    local rows = item_index.suggestion_rows and select(1, item_index.suggestion_rows()) or nil
+    if type(rows) ~= "table" then
+        item_index.get(false)
+        rows = item_index.rows or {}
+    end
     local e3_names = scope == "e3" and views.e3_connected_names() or nil
     local results = {}
 
-    for _, row in ipairs(item_index.rows or {}) do
+    for _, row in ipairs(rows) do
         if not M.is_usable_in_slot(row, slot_id, target_class) then goto continue end
         if not M.level_allowed(row, target_level) then goto continue end
         if not owner_allowed(row, scope, e3_names) then goto continue end
@@ -296,6 +364,34 @@ function M.get_available(opts)
     }
 end
 
+local WEAPON_SLOT = { [11] = true, [13] = true, [14] = true }
+
+local function row_damage(row)
+    local n = M.stat_value(row, "damage", EQUIP_REPLACE_STATS)
+    if n ~= 0 then return n end
+    return M.stat_value(row, "damage", nil)
+end
+
+function M.is_weaponish_row(row)
+    if not row then return false end
+    local typ = tostring(row.itemType or ""):lower()
+    if typ == "weapon" then return true end
+    if row_damage(row) > 0 then return true end
+    return false
+end
+
+-- Buff orbs / shards / summons often list primary/secondary wear slots but are
+-- not real weapon fills for empty MH when Compare is AC (all score 0).
+function M.is_junk_weapon_fill(row)
+    local name = tostring(row and row.name or ""):lower()
+    if name == "" then return true end
+    if name:find("^summoned:") then return true end
+    if name:find("modulation shard", 1, true) then return true end
+    if name:find("orb of buffing", 1, true) then return true end
+    if name:find("endless quiver", 1, true) then return true end
+    return false
+end
+
 local function decorate_candidate(row, current, primary_key, compare_keys)
     primary_key = tostring(primary_key or "ac")
     compare_keys = type(compare_keys) == "table" and compare_keys or { primary_key }
@@ -303,6 +399,7 @@ local function decorate_candidate(row, current, primary_key, compare_keys)
         row = row,
         delta = M.upgrade_delta(row, current, primary_key, EQUIP_REPLACE_STATS),
         stat = M.stat_value(row, primary_key, EQUIP_REPLACE_STATS),
+        damage = row_damage(row),
         stats = {},
         deltas = {},
     }
@@ -313,7 +410,17 @@ local function decorate_candidate(row, current, primary_key, compare_keys)
     return wrapped
 end
 
-local function sort_candidates(wrapped, prefer_upgrades)
+local function candidate_has_primary_stat(wrapped)
+    return (tonumber(wrapped and wrapped.stat) or 0) ~= 0
+end
+
+local function sort_candidates(wrapped, prefer_upgrades, opts)
+    opts = type(opts) == "table" and opts or {}
+    local target_clean = tostring(opts.targetClean or "")
+    local slot_id = tonumber(opts.slotId)
+    local empty_slot = opts.emptySlot == true
+    local weapon_slot = slot_id and WEAPON_SLOT[slot_id] == true
+
     table.sort(wrapped, function(a, b)
         local da = a.delta
         local db = b.delta
@@ -322,12 +429,36 @@ local function sort_candidates(wrapped, prefer_upgrades)
             local b_up = db and db > 0
             if a_up ~= b_up then return a_up end
         end
+        -- Prefer rows that actually have compare stats over legacy AC-0 bag ghosts
+        -- (Darkforge "Best known: AC -58 / Base: AC 0" noise under Filter: All Slots).
+        local a_stat = candidate_has_primary_stat(a)
+        local b_stat = candidate_has_primary_stat(b)
+        if a_stat ~= b_stat then return a_stat end
         if da ~= db then
             if da == nil then return false end
             if db == nil then return true end
             return da > db
         end
         if (a.stat or 0) ~= (b.stat or 0) then return (a.stat or 0) > (b.stat or 0) end
+
+        -- Empty weapon slots compared by AC: every real weapon ties at 0. Prefer
+        -- the target's own gear, real weapons, then higher Damage (epic > orb).
+        if empty_slot and weapon_slot then
+            local a_own = target_clean ~= "" and views.clean_name(a.row and a.row.owner) == target_clean
+            local b_own = target_clean ~= "" and views.clean_name(b.row and b.row.owner) == target_clean
+            if a_own ~= b_own then return a_own end
+            local a_w = M.is_weaponish_row(a.row)
+            local b_w = M.is_weaponish_row(b.row)
+            if a_w ~= b_w then return a_w end
+            local a_dmg = tonumber(a.damage) or 0
+            local b_dmg = tonumber(b.damage) or 0
+            if a_dmg ~= b_dmg then return a_dmg > b_dmg end
+        elseif empty_slot and target_clean ~= "" then
+            local a_own = views.clean_name(a.row and a.row.owner) == target_clean
+            local b_own = views.clean_name(b.row and b.row.owner) == target_clean
+            if a_own ~= b_own then return a_own end
+        end
+
         return tostring(a.row.name or ""):lower() < tostring(b.row.name or ""):lower()
     end)
 end
@@ -353,7 +484,15 @@ function M.build_overview(opts)
     local target_clean = views.clean_name(target_name)
     local equipped_map = snap and views.index_equipped(snap) or {}
 
-    item_index.get(false)
+    local rows, row_source
+    if item_index.suggestion_rows then
+        rows, _, row_source = item_index.suggestion_rows()
+    else
+        item_index.get(false)
+        rows = item_index.rows or {}
+        row_source = "index"
+    end
+    rows = rows or {}
     local e3_names = scope == "e3" and views.e3_connected_names() or nil
 
     local buckets = {}
@@ -374,19 +513,41 @@ function M.build_overview(opts)
             and M.location_bucket(row) == "equipped" then return end
         if exclude_same and M.is_same_target_equipped_in_equivalent_slot(row, target_clean, slot_id) then return end
         if upgrades_only and not M.is_upgrade(row, current, primary_key, EQUIP_REPLACE_STATS) then return end
+        -- Occupied slots: drop candidates with no compare stats at all (slim/lite
+        -- bag rows). Empty slots still accept fills even when AC is 0.
+        local empty_slot = not (current and current.name and current.name ~= "")
+        if not empty_slot then
+            local any_stat = false
+            for _, key in ipairs(compare_keys) do
+                if M.stat_value(row, key, EQUIP_REPLACE_STATS) ~= 0 then
+                    any_stat = true
+                    break
+                end
+            end
+            if not any_stat then return end
+        elseif WEAPON_SLOT[slot_id] then
+            if M.is_junk_weapon_fill(row) then return end
+            -- Primary/Secondary: require a real weapon (or Damage>0). Ranged keeps
+            -- bows plus typed weapons; still drops pure junk above.
+            if (slot_id == 13 or slot_id == 14) and not M.is_weaponish_row(row) then return end
+        end
         local list = bucket(slot_id)
         list[#list + 1] = row
     end
 
-    for _, row in ipairs(item_index.rows or {}) do
+    for _, row in ipairs(rows or {}) do
         if not M.is_equipment_row(row) then goto continue_row end
         if not M.can_class_use(row, target_class) then goto continue_row end
-        if type(row.slots) == "table" and #row.slots > 0 then
-            for _, sid in ipairs(row.slots) do
-                consider_row(row, tonumber(sid))
+        local wear = M.infer_wear_slots(row)
+        if #wear > 0 then
+            local seen = {}
+            for _, sid in ipairs(wear) do
+                local n = tonumber(sid)
+                if n and not seen[n] then
+                    seen[n] = true
+                    consider_row(row, n)
+                end
             end
-        elseif M.is_usable_in_slot(row, 22, target_class) then
-            consider_row(row, 22)
         end
         ::continue_row::
     end
@@ -399,14 +560,23 @@ function M.build_overview(opts)
         local slot_id = tonumber(slot_def.id)
         local current = equipped_map[slot_id]
         local wrapped = {}
+        local empty_slot = not (current and current.name and current.name ~= "")
         for _, row in ipairs(buckets[slot_id] or {}) do
             wrapped[#wrapped + 1] = decorate_candidate(row, current, primary_key, compare_keys)
         end
-        sort_candidates(wrapped, true)
+        sort_candidates(wrapped, true, {
+            targetClean = target_clean,
+            slotId = slot_id,
+            emptySlot = empty_slot,
+        })
 
         local upgrade_count = 0
         for _, cand in ipairs(wrapped) do
-            if cand.delta and cand.delta > 0 then upgrade_count = upgrade_count + 1 end
+            if empty_slot then
+                upgrade_count = upgrade_count + 1
+            elseif cand.delta and cand.delta > 0 then
+                upgrade_count = upgrade_count + 1
+            end
         end
         if upgrade_count > 0 then slots_with_upgrades = slots_with_upgrades + 1 end
         total_upgrades = total_upgrades + upgrade_count
@@ -437,6 +607,17 @@ function M.build_overview(opts)
 
     local worn_totals, worn_ok = M.worn_stat_totals(target_key, compare_keys)
 
+    -- Index health for UI diagnostics (why Suggestions can show worn AC but
+    -- still "No candidates" for every slot).
+    local idx_total, idx_stored, idx_with_slots = 0, 0, 0
+    for _, row in ipairs(rows) do
+        if views.clean_name(row.owner) == target_clean and M.is_equipment_row(row) then
+            idx_total = idx_total + 1
+            if M.location_bucket(row) ~= "equipped" then idx_stored = idx_stored + 1 end
+            if #M.infer_wear_slots(row) > 0 then idx_with_slots = idx_with_slots + 1 end
+        end
+    end
+
     return slots_out, {
         targetKey = target_key,
         targetClass = target_class,
@@ -449,6 +630,10 @@ function M.build_overview(opts)
         wornTotalsAvailable = worn_ok == true,
         slotsWithUpgrades = slots_with_upgrades,
         totalUpgrades = total_upgrades,
+        indexEquipRows = idx_total,
+        indexBagRows = idx_stored,
+        indexWearSlotRows = idx_with_slots,
+        rowSource = row_source or "index",
     }
 end
 
@@ -471,14 +656,18 @@ function M.explain(opts)
     local equipped_map = snap and views.index_equipped(snap) or {}
     local e3_names = scope == "e3" and views.e3_connected_names() or nil
 
-    item_index.get(false)
+    local explain_rows = item_index.suggestion_rows and select(1, item_index.suggestion_rows()) or nil
+    if type(explain_rows) ~= "table" then
+        item_index.get(false)
+        explain_rows = item_index.rows or {}
+    end
     local lines = {}
-    for _, row in ipairs(item_index.rows or {}) do
+    for _, row in ipairs(explain_rows) do
         if M.is_equipment_row(row) and tostring(row.name or ""):lower():find(needle, 1, true) then
             local who = string.format("%s [%s]", row.name or "?", row.owner or "?")
             local fit_slots = {}
-            if type(row.slots) == "table" then
-                for _, sid in ipairs(row.slots) do fit_slots[#fit_slots + 1] = tonumber(sid) end
+            for _, sid in ipairs(M.infer_wear_slots(row)) do
+                fit_slots[#fit_slots + 1] = tonumber(sid)
             end
             local reason
             if not M.can_class_use(row, target_class) then

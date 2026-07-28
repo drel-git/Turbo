@@ -10722,6 +10722,47 @@ local function turboMiniBarActions(ctx)
     }
 end
 
+--- Hub TurboWares sidecar (shared by Full, Mini+overlays, and lean Mini).
+--- Sidecar early-outs when MerchantWnd is closed, so idle Mini cost stays tiny.
+local function turboRenderWaresWindow(g)
+    if not g then return end
+    if not g.waresSidecarModule then
+        local okMod, WaresSidecar = pcall(require, 'Turbo.ui.wares_sidecar')
+        if not okMod or not WaresSidecar then return end
+        g.waresSidecarModule = WaresSidecar
+        WaresSidecar.setup({
+            Ui = Ui,
+            Theme = Theme,
+            TurboKeyRGB = TurboKeyRGB,
+            ACTION_BTN_H = ACTION_BTN_H,
+            writeIniKey = writeIniKey,
+            readIniKey = readIniKey,
+            readIniSectionPairs = readIniSectionPairs,
+            deleteIniKey = deleteIniKey,
+            resolveTurbolootIniPathForProfile = resolveTurbolootIniPathForProfile,
+            cleanProfileName = cleanProfileName,
+            shellOpenFile = shellOpenFile,
+            getActiveProfile = getActiveProfile,
+            openAllaItemPage = TG.openAllaItemPage,
+            canSharedControlWrite = TG.isSharedControlOwner,
+            requireSharedControl = TG.requireSharedControl,
+            creditGainsSale = function(totalCopper, itemsSold)
+                local engine = rawget(_G, 'TurboGainsEngineM')
+                if type(engine) == 'table' and type(engine.creditSale) == 'function' then
+                    return engine.creditSale(totalCopper, itemsSold, {
+                        source = 'wares',
+                        quiet = true,
+                    })
+                end
+                return false
+            end,
+            saveSettings = saveSettings,
+        })
+        g.waresSidecarReady = true
+    end
+    g.waresSidecarModule.render(g)
+end
+
 --- Lean Mini bar frame (own function so renderWindow stays under the 200-local cap).
 local function turboRenderLeanMiniBar(g, hitch)
     local mq, ensureE3Vars, nowMS = g.mq, g.ensureE3Vars, g.nowMS
@@ -10842,6 +10883,12 @@ local function turboRenderLeanMiniBar(g, hitch)
         setupExpanded = g.perCharProfile,
         saveSettings = saveSettings,
     }), Ui)
+    if TG.hitchlog then TG.hitchlog.span_end() end
+
+    -- Lean Mini used to skip this; companion yields while hub runs, so Wares
+    -- must still be hosted here (driver Mini + bots with turbo+turbowares).
+    if TG.hitchlog then TG.hitchlog.span_begin('draw_wares') end
+    turboRenderWaresWindow(g)
     if TG.hitchlog then TG.hitchlog.span_end() end
 end
 
@@ -11282,41 +11329,7 @@ function TG.renderWindow()
     end
 
     local function renderWaresWindow()
-        if not g.waresSidecarModule then
-            local okMod, WaresSidecar = pcall(require, 'Turbo.ui.wares_sidecar')
-            if not okMod or not WaresSidecar then return end
-            g.waresSidecarModule = WaresSidecar
-            WaresSidecar.setup({
-                Ui = Ui,
-                Theme = Theme,
-                TurboKeyRGB = TurboKeyRGB,
-                ACTION_BTN_H = ACTION_BTN_H,
-                writeIniKey = writeIniKey,
-                readIniKey = readIniKey,
-                readIniSectionPairs = readIniSectionPairs,
-                deleteIniKey = deleteIniKey,
-                resolveTurbolootIniPathForProfile = resolveTurbolootIniPathForProfile,
-                cleanProfileName = cleanProfileName,
-                shellOpenFile = shellOpenFile,
-                getActiveProfile = getActiveProfile,
-                openAllaItemPage = TG.openAllaItemPage,
-                canSharedControlWrite = TG.isSharedControlOwner,
-                requireSharedControl = TG.requireSharedControl,
-                creditGainsSale = function(totalCopper, itemsSold)
-                    local engine = rawget(_G, 'TurboGainsEngineM')
-                    if type(engine) == 'table' and type(engine.creditSale) == 'function' then
-                        return engine.creditSale(totalCopper, itemsSold, {
-                            source = 'wares',
-                            quiet = true,
-                        })
-                    end
-                    return false
-                end,
-                saveSettings = saveSettings,
-            })
-            g.waresSidecarReady = true
-        end
-        g.waresSidecarModule.render(g)
+        turboRenderWaresWindow(g)
     end
 
     local function hasHuntingEntries()

@@ -1,3 +1,17 @@
+1.2.106
+- Suggestions: picks show on open from live cache while the fleet index builds
+  in the background (was empty for minutes on a 4ms/tick rebuild). Higher index
+  budget only on Upgrade > Suggestions; other tabs stay light.
+- Suggestions: peer worn/bag stats survive cache persist; lite-to-full meta
+  rebuilds the index; empty slots count as fills; Filter All Slots drops
+  zero-stat bag ghosts; empty MH/Secondary prefer real weapons and Damage
+  (epics over buff orbs). Sync Now wakes a stale selected peer bg.
+- Suggestions UX: do not blank the tab when inventory is only a few minutes
+  old; hard-hide only when there is no full snap or it is hours old. ASCII
+  status copy (MQ ImGui showed "?" for Unicode dashes).
+- Turbo Mini: TurboWares merchant UI works again under lean Mini (hub draw was
+  skipped; standalone turbowares yields while Turbo runs).
+
 1.2.96
 - Search everywhere: inventory and bank matches work again. The fleet item
   index was stalling empty on the announce-driver Gear UI (tick skipped after

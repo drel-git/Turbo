@@ -285,19 +285,47 @@ end
 
 local function sync_full()
     snapshot.invalidate()
+    -- Match Suggestions Request: keep polling shared cache for late peer snaps.
+    if suggest.begin_cache_watch then
+        suggest.begin_cache_watch(suggest.CACHE_WATCH_S or 45)
+    end
+    state.sync_hint = "Sync requested - waiting for peer inventories (often 15-45s)..."
+    state.sync_hint_until = os.clock() + (tonumber(suggest.CACHE_WATCH_S) or 45)
+
+    -- Wake the Suggestions target's bg when that peer looks stale / not live.
+    -- Full-group soft-start stays Launch All Online (launch-storm footgun).
+    if Settings.autoAddOnlinePeers ~= false then
+        local tkey = Settings.suggestTargetKey or views.view_key or "__self__"
+        if tkey ~= "__self__" then
+            local snap = views.source_snapshot and views.source_snapshot(tkey)
+            local name = tostring(snap and snap.name or ""):match("^%s*(.-)%s*$") or ""
+            local state_info = views.source_state and views.source_state(tkey) or nil
+            local actor_live = state_info and state_info.actorLive == true
+            local age = 999999
+            if snap then
+                local ts = tonumber(snap.inventoryUpdated or snap.updated) or 0
+                if ts > 0 then age = math.max(0, os.time() - ts) end
+            end
+            if name ~= "" and (not actor_live or age > 120) then
+                local cmd = cfg.soft_start_bg_command_for and cfg.soft_start_bg_command_for(name) or ""
+                if cmd ~= "" then mq.cmd(cmd) end
+            end
+        end
+    end
+
     if state.engine_claim_disabled then
         -- Ensure local bg only; do not /e3bcg soft-start the whole group.
         local bg_name = tostring((cfg.CFG and cfg.CFG.bg_lua_name) or 'turbogear_bg')
         mq.cmd('/squelch /lua run ' .. bg_name)
         mq.cmd('/squelch /tgearbg sync')
         pcall(function()
-            if Store.reload_cache_if_changed then Store.reload_cache_if_changed(false)
+            if Store.reload_cache_if_changed then Store.reload_cache_if_changed(true)
             else Store.reload_cache() end
         end)
         return
     end
     Engine.publish(true, "full")
-    Engine.request_all(true)
+    Engine.request_all(true, { depth = "full", fastInventory = true })
     Engine.begin_startup_sync(8.0)
 end
 
@@ -1170,13 +1198,21 @@ function M.draw_ui()
     if state.bg and not state.show then return end
     local th = push_theme()
     if state.show and not state.bg then
+        -- After Sync/Request: poll shared cache more often so late peer snaps appear.
+        if suggest.tick_cache_watch then
+            pcall(suggest.tick_cache_watch)
+        end
         local now = os.clock()
-        if (now - (last_cache_reload or 0)) >= 0.75 then
+        local watch = suggest.cache_watch_active and suggest.cache_watch_active()
+        local gap = watch and 0.25 or 0.75
+        if (now - (last_cache_reload or 0)) >= gap then
             last_cache_reload = now
-            pcall(function()
-                if Store.reload_cache_if_changed then Store.reload_cache_if_changed(false)
-                else Store.reload_cache() end
-            end)
+            if not watch then
+                pcall(function()
+                    if Store.reload_cache_if_changed then Store.reload_cache_if_changed(false)
+                    else Store.reload_cache() end
+                end)
+            end
         end
     end
     if not state.show then draw_mini() end

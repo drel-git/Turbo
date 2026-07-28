@@ -183,5 +183,86 @@ while item_index.building() do item_index.tick(50) end
 local rows_fat = item_index.get(false)
 check(#rows_fat >= 200, "fat peer eventually indexed")
 
+-- Lite bag (no wear slots) then full meta on same id must rebuild Suggestions rows.
+item_index._reset_for_tests()
+Store.sources = {
+    ["Srv:BowPeer"] = {
+        name = "BowPeer",
+        server = "Srv",
+        class = "Berserker",
+        status = "online",
+        depth = "lite",
+        inventoryUpdated = 100,
+        equipped = {},
+        bags = {
+            { name = "Test Bow", id = 555, qty = 1, location = "Bags", where = "Bag1 #1",
+              slots = {}, stats = {}, depth = "lite", itemType = "weapon" },
+        },
+        bank = {},
+    },
+}
+Store.content_version = 1
+self_cached.bags = {}
+item_index.get(false)
+while item_index.building() do item_index.tick(50) end
+local rows_lite = item_index.get(false)
+local bow_lite_slots = 0
+for _, row in ipairs(rows_lite) do
+    if row.name == "Test Bow" and type(row.slots) == "table" then
+        for _ in pairs(row.slots) do bow_lite_slots = bow_lite_slots + 1 end
+    end
+end
+check(bow_lite_slots == 0, "lite indexed bow has no wear slots")
+
+Store.sources["Srv:BowPeer"].depth = "full"
+Store.sources["Srv:BowPeer"].bags[1] = {
+    name = "Test Bow", id = 555, qty = 1, location = "Bags", where = "Bag1 #1",
+    slots = { 11 }, stats = { ac = 5, hp = 20 }, depth = "full",
+    classes = { "Berserker" }, itemType = "weapon",
+}
+Store.content_version = 2
+item_index.get(false)
+while item_index.building() do item_index.tick(50) end
+local rows_full = item_index.get(false)
+local saw_ranged = false
+for _, row in ipairs(rows_full) do
+    if row.name == "Test Bow" and type(row.slots) == "table" then
+        for _, sid in pairs(row.slots) do
+            if tonumber(sid) == 11 then saw_ranged = true end
+        end
+    end
+end
+check(saw_ranged, "full meta rebuild indexes ranged wear slot for bag bow")
+
+-- Store flatten serves Suggestions while the budgeted index is still building.
+item_index._reset_for_tests()
+Store.sources = {
+    ["Srv:Quick"] = {
+        name = "Quick",
+        server = "Srv",
+        class = "Berserker",
+        status = "online",
+        depth = "full",
+        inventoryUpdated = 100,
+        equipped = {},
+        bags = {
+            { name = "Quick Bow", id = 777, qty = 1, location = "Bags", where = "Bag1 #1",
+              slots = { 11 }, stats = { ac = 3 }, depth = "full", itemType = "weapon" },
+        },
+        bank = {},
+    },
+}
+Store.content_version = 9
+self_cached.bags = {}
+item_index.get(false)
+check(item_index.building() == true, "cold get starts job before store flatten")
+local srows, _, src = item_index.suggestion_rows()
+check(src == "store", "suggestion_rows uses store while index building")
+local saw_quick = false
+for _, row in ipairs(srows or {}) do
+    if row.name == "Quick Bow" then saw_quick = true end
+end
+check(saw_quick, "store flatten includes bag bow immediately")
+
 print(string.format("item_index: %d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

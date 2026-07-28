@@ -17,10 +17,18 @@ local M = {
     payload_sig = "",
     self_signature = "",
     summary = { total = 0, withAnyStat = 0 },
+    -- CleanName of the Suggestions target; index job walks this peer right
+    -- after self so Upgrade picks appear before the rest of the fleet.
+    priority_owner = "",
 }
 
 -- In-progress rebuild. Never assigned to M.rows until complete.
 local job = nil
+
+-- Sync Store flatten for Suggestions while the budgeted fleet index is empty
+-- or rebuilding. Cached on Store.content_version so Upgrade tab is instant on
+-- launch without hitching every frame.
+local suggest_store_cache = { cv = -1, rows = {} }
 
 local function safe_stats(stats)
     return type(stats) == "table" and stats or {}
@@ -102,6 +110,25 @@ local function snap_item_count(snap)
     return #(snap.equipped or {}) + #(snap.bags or {}) + #(snap.bank or {})
 end
 
+local function list_meta_richness(list)
+    list = list or {}
+    local with_slots, with_stats = 0, 0
+    for _, it in ipairs(list) do
+        if type(it.slots) == "table" and next(it.slots) ~= nil then
+            with_slots = with_slots + 1
+        end
+        if type(it.stats) == "table" then
+            for _, v in pairs(it.stats) do
+                if (tonumber(v) or 0) ~= 0 then
+                    with_stats = with_stats + 1
+                    break
+                end
+            end
+        end
+    end
+    return with_slots .. ":" .. with_stats
+end
+
 local function list_quick_sig(list)
     list = list or {}
     local n = #list
@@ -113,6 +140,9 @@ local function list_quick_sig(list)
         tostring(b and b.id or 0),
         tostring(a and a.name or ""),
         tostring(b and b.name or ""),
+        -- Include compare-meta richness so lite->full peer upgrades rebuild
+        -- Suggestions rows (wear slots / stats) even when ids stay the same.
+        list_meta_richness(list),
     }, ":")
 end
 
@@ -210,12 +240,26 @@ local function fleet_payload_sig()
         }, "|")
     end
     table.sort(parts)
-    local sig = table.concat(parts, "\n")
+    -- Prefix content_version so Store.put meta-only bumps always rebuild
+    -- (list_quick_sig can look identical when only compare-meta changed on a
+    -- path that still advanced content_version).
+    local sig = tostring(store_cv) .. "\n" .. table.concat(parts, "\n")
     payload_sig_cache.store_v = store_v
     payload_sig_cache.store_cv = store_cv
     payload_sig_cache.live_key = live_key
     payload_sig_cache.sig = sig
     return sig
+end
+
+local function wear_slots_for_row(item, opts)
+    local slots = type(item.slots) == "table" and item.slots or {}
+    if next(slots) ~= nil then return slots end
+    -- Equipped rows sometimes lack WornSlots meta; the wear location is known.
+    if opts.where == "equipped" then
+        local sid = tonumber(item.slotid)
+        if sid ~= nil and sid >= 0 and sid <= 22 then return { sid } end
+    end
+    return slots
 end
 
 local function add_row(rows, snap, item, opts)
@@ -243,7 +287,7 @@ local function add_row(rows, snap, item, opts)
         installedIn = opts.installedIn or "",
         installedInId = opts.installedInId or 0,
 
-        slots = type(item.slots) == "table" and item.slots or {},
+        slots = wear_slots_for_row(item, opts),
         classes = type(item.classes) == "table" and item.classes or {},
         allClasses = item.allClasses and true or false,
         itemType = item.itemType or (item_kind(item) == "aug" and "aug" or "unknown"),
@@ -394,6 +438,23 @@ local ITEM_CHUNK = 48
 -- phase: 0=equipped, 1=bags, 2=bank
 local PHASE_EQUIPPED, PHASE_BAGS, PHASE_BANK = 0, 1, 2
 
+local function prioritize_peer(peers, owner_clean)
+    owner_clean = clean_text(owner_clean)
+    if owner_clean == "" or type(peers) ~= "table" or #peers < 2 then return peers end
+    local idx = nil
+    for i = 2, #peers do
+        if clean_text(peers[i] and peers[i].name) == owner_clean then
+            idx = i
+            break
+        end
+    end
+    if not idx or idx == 2 then return peers end
+    local prefer = peers[idx]
+    table.remove(peers, idx)
+    table.insert(peers, 2, prefer)
+    return peers
+end
+
 local function start_job()
     local target_payload_sig = fleet_payload_sig()
     local self_snap = self_snap_for_index()
@@ -403,6 +464,7 @@ local function start_job()
     for _, snap in ipairs(collect_peer_sources(self_snap)) do
         peers[#peers + 1] = snap
     end
+    prioritize_peer(peers, M.priority_owner)
     job = {
         rows = {},
         peers = peers,
@@ -414,6 +476,40 @@ local function start_job()
         started_at = os.clock(),
     }
     return job
+end
+
+local function flatten_store_rows()
+    local rows = {}
+    local self_snap = self_snap_for_index()
+    if self_snap then
+        add_equipped(rows, self_snap)
+        add_storage(rows, self_snap)
+    end
+    for _, snap in ipairs(collect_peer_sources(self_snap)) do
+        add_equipped(rows, snap)
+        add_storage(rows, snap)
+    end
+    return rows
+end
+
+--- Rows for Suggestions/Search consumers that cannot wait on the 4ms/tick fleet
+--- rebuild. While the budgeted index is empty or mid-rebuild, flatten Store
+--- once per content_version (no MQ TLOs). When the index is complete, prefer it.
+function M.suggestion_rows()
+    M.get(false)
+    if not M.building() and #(M.rows or {}) > 0 then
+        return M.rows, M.version, "index"
+    end
+    local cv = Store.content_version or 0
+    if suggest_store_cache.cv ~= cv then
+        suggest_store_cache.rows = flatten_store_rows()
+        suggest_store_cache.cv = cv
+    end
+    return suggest_store_cache.rows, cv, "store"
+end
+
+function M.set_priority_owner(name)
+    M.priority_owner = clean_text(name)
 end
 
 local function finish_job(j)
@@ -572,6 +668,9 @@ function M._reset_for_tests()
     M.payload_sig = ""
     M.self_signature = ""
     M.summary = { total = 0, withAnyStat = 0 }
+    M.priority_owner = ""
+    suggest_store_cache.cv = -1
+    suggest_store_cache.rows = {}
     payload_sig_cache.store_v = -1
     payload_sig_cache.store_cv = -1
     payload_sig_cache.live_key = ""

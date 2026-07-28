@@ -41,6 +41,7 @@ local tests = {
     "turbogear_announcer_budget_test.lua",
     "turbogear_engine_dispatch_test.lua",
     "turbogear_suggestions_stats_test.lua",
+    "turbogear_worn_refresh_test.lua",
     "turbo_loot_doctor_test.lua",
     "turbo_bot_pause_test.lua",
 }

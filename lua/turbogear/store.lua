@@ -172,6 +172,34 @@ local function list_sig(t)
     return table.concat(parts, ";")
 end
 
+-- Compact compare-meta fingerprint. Identity-only sigs missed lite->full
+-- upgrades (same bag ids, newly filled stats/slots), so Suggestions kept a
+-- stale item_index with empty wear slots and "No candidates" forever.
+local function item_meta_stamp(item)
+    if type(item) ~= "table" then return "0" end
+    local slots_n = 0
+    if type(item.slots) == "table" then
+        for _ in pairs(item.slots) do slots_n = slots_n + 1 end
+    end
+    local classes_n = 0
+    if type(item.classes) == "table" then
+        for _ in pairs(item.classes) do classes_n = classes_n + 1 end
+    end
+    local ac, hp = 0, 0
+    if type(item.stats) == "table" then
+        ac = tonumber(item.stats.ac) or 0
+        hp = tonumber(item.stats.hp) or 0
+    end
+    return table.concat({
+        tostring(item.depth or ""),
+        tostring(slots_n),
+        tostring(classes_n),
+        tostring(ac),
+        tostring(hp),
+        item.allClasses and "1" or "0",
+    }, ":")
+end
+
 local function item_sig(item)
     if type(item) ~= "table" then return "" end
     local parts = {
@@ -183,6 +211,7 @@ local function item_sig(item)
         tostring(item.slotname or ""),
         tostring(item.qty or item.count or 1),
         item.empty and "empty" or "filled",
+        item_meta_stamp(item),
     }
     if type(item.augs) == "table" then
         for _, aug in ipairs(item.augs) do
@@ -191,6 +220,7 @@ local function item_sig(item)
             parts[#parts+1] = tostring(aug.id or 0)
             parts[#parts+1] = tostring(aug.name or "")
             parts[#parts+1] = aug.empty and "empty" or "filled"
+            parts[#parts+1] = item_meta_stamp(aug)
         end
     end
     return table.concat(parts, "|")
@@ -396,6 +426,18 @@ local function merge_item_lists(old_list, new_list)
                 end
             end
             new_list[i] = merged
+        elseif prev and item_has_full_meta(item) then
+            -- Full replace won, but keep wear/class meta if the new row lost it.
+            local function empty_list(t)
+                return type(t) ~= "table" or next(t) == nil
+            end
+            if empty_list(item.slots) and not empty_list(prev.slots) then
+                item.slots = prev.slots
+            end
+            if empty_list(item.classes) and not empty_list(prev.classes) then
+                item.classes = prev.classes
+                item.allClasses = prev.allClasses
+            end
         end
     end
     return new_list
@@ -820,15 +862,20 @@ function Store.flush_wallet_sidecar()
     pcall(write_wallet_sidecar, Store.sources)
 end
 
--- Persist-slim: drop stats/focus/classes blobs. Ownership + Inventory need
--- name/id/location/augs; Stats/Focus re-enrich from live gather when opened.
--- This is what made own-row serialize 30–60s for a ~370KB rich tree.
+-- Persist-slim: drop heavy focus/clicky blobs (those made own-row serialize
+-- 30-60s). Keep compact stats/baseStats/classes/slots so peer Suggestions and
+-- worn totals work after the viewer reloads the shared cache file. Viewer UI
+-- never re-enriches peer rows from live TLOs -- disk must retain compare stats.
 local function slim_aug(a)
     if type(a) ~= "table" then return a end
-    return {
+    local out = {
         index = a.index, type = a.type, name = a.name, id = a.id,
         icon = a.icon, empty = a.empty,
+        depth = a.depth,
     }
+    if type(a.stats) == "table" then out.stats = a.stats end
+    if type(a.baseStats) == "table" then out.baseStats = a.baseStats end
+    return out
 end
 
 local function slim_item(it)
@@ -837,7 +884,7 @@ local function slim_item(it)
     for i, a in ipairs(it.augs or {}) do
         augs[i] = slim_aug(a)
     end
-    return {
+    local out = {
         name = it.name, id = it.id, icon = it.icon,
         location = it.location, where = it.where,
         slotid = it.slotid, slotname = it.slotname,
@@ -846,7 +893,17 @@ local function slim_item(it)
         lore = it.lore, loreGroup = it.loreGroup,
         augType = it.augType, depth = it.depth or "lite",
         augs = augs,
+        itemType = it.itemType,
+        requiredLevel = it.requiredLevel,
+        recommendedLevel = it.recommendedLevel,
+        allClasses = it.allClasses,
+        statsMerged = it.statsMerged,
     }
+    if type(it.stats) == "table" then out.stats = it.stats end
+    if type(it.baseStats) == "table" then out.baseStats = it.baseStats end
+    if type(it.classes) == "table" then out.classes = it.classes end
+    if type(it.slots) == "table" then out.slots = it.slots end
+    return out
 end
 
 local function slim_item_list(list)
