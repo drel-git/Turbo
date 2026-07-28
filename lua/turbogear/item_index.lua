@@ -13,7 +13,8 @@ local self_snapshot = require('snapshot')
 local M = {
     rows = {},
     version = 0,
-    content_version = -1,
+    content_version = -1, -- legacy alias; payload_sig is the real staleness key
+    payload_sig = "",
     self_signature = "",
     summary = { total = 0, withAnyStat = 0 },
 }
@@ -96,6 +97,25 @@ local function same_owner(a, b)
     return as == "" or bs == "" or as == bs
 end
 
+local function snap_item_count(snap)
+    if type(snap) ~= "table" then return 0 end
+    return #(snap.equipped or {}) + #(snap.bags or {}) + #(snap.bank or {})
+end
+
+local function list_quick_sig(list)
+    list = list or {}
+    local n = #list
+    if n == 0 then return "0" end
+    local a, b = list[1], list[n]
+    return table.concat({
+        tostring(n),
+        tostring(a and a.id or 0),
+        tostring(b and b.id or 0),
+        tostring(a and a.name or ""),
+        tostring(b and b.name or ""),
+    }, ":")
+end
+
 local function live_self_snapshot_for_index()
     local ok, snap = pcall(function() return self_snapshot.cached() end)
     if not ok or type(snap) ~= "table" or not snap.name then return nil end
@@ -108,18 +128,94 @@ local function live_self_snapshot_for_index()
     return out
 end
 
-local function self_index_signature()
-    local snap = live_self_snapshot_for_index()
-    if not snap then return "" end
-    return table.concat({
-        tostring(snap.server or ""),
-        tostring(snap.name or ""),
-        tostring(snap.depth or ""),
-        tostring(snap.inventoryUpdated or snap.updated or ""),
-        tostring(#(snap.equipped or {})),
-        tostring(#(snap.bags or {})),
-        tostring(#(snap.bank or {})),
-    }, "|")
+--- Prefer Store self when live cache is empty/lite-sparse so Search indexes
+--- the same bags/bank the Characters pill reports (488 items etc.).
+local function self_snap_for_index()
+    local live = live_self_snapshot_for_index()
+    local store_self = nil
+    pcall(function()
+        if store.my_key then
+            store_self = Store.get(store.my_key())
+        end
+    end)
+    if type(store_self) ~= "table" or not store_self.name then store_self = nil end
+
+    local live_n = snap_item_count(live)
+    local store_n = snap_item_count(store_self)
+    if store_self and store_n > live_n then
+        local out = {}
+        for k, v in pairs(store_self) do out[k] = v end
+        out.status = "online"
+        return out
+    end
+    if live then
+        if store_self then
+            if #(live.bags or {}) == 0 and #(store_self.bags or {}) > 0 then
+                live.bags = store_self.bags
+            end
+            if #(live.bank or {}) == 0 and #(store_self.bank or {}) > 0 then
+                live.bank = store_self.bank
+                live.bankValid = store_self.bankValid
+                live.bankCapturedAt = store_self.bankCapturedAt
+                live.bankPreserved = true
+            end
+        end
+        return live
+    end
+    return store_self
+end
+
+-- Item-payload signature (ignores bankLive / bankCapturedAt stamp-only bumps
+-- that raise Store.content_version). Mid-job restarts on those stamps left
+-- Search stuck at 0 rows after async get() (1.2.89+).
+local payload_sig_cache = { store_v = -1, store_cv = -1, live_key = "", sig = "" }
+
+local function fleet_payload_sig()
+    local store_v = Store.version or 0
+    local store_cv = Store.content_version or 0
+    local live = live_self_snapshot_for_index()
+    local live_key = ""
+    if live then
+        live_key = table.concat({
+            list_quick_sig(live.equipped),
+            list_quick_sig(live.bags),
+            list_quick_sig(live.bank),
+        }, "/")
+    end
+    if payload_sig_cache.store_v == store_v
+        and payload_sig_cache.store_cv == store_cv
+        and payload_sig_cache.live_key == live_key then
+        return payload_sig_cache.sig
+    end
+    local parts = {}
+    for _, snap in pairs(Store.sources or {}) do
+        if type(snap) == "table" and snap.name then
+            parts[#parts + 1] = table.concat({
+                clean_text(snap.server),
+                clean_text(snap.name),
+                list_quick_sig(snap.equipped),
+                list_quick_sig(snap.bags),
+                list_quick_sig(snap.bank),
+            }, "|")
+        end
+    end
+    if live then
+        parts[#parts + 1] = table.concat({
+            "live",
+            clean_text(live.server),
+            clean_text(live.name),
+            list_quick_sig(live.equipped),
+            list_quick_sig(live.bags),
+            list_quick_sig(live.bank),
+        }, "|")
+    end
+    table.sort(parts)
+    local sig = table.concat(parts, "\n")
+    payload_sig_cache.store_v = store_v
+    payload_sig_cache.store_cv = store_cv
+    payload_sig_cache.live_key = live_key
+    payload_sig_cache.sig = sig
+    return sig
 end
 
 local function add_row(rows, snap, item, opts)
@@ -267,14 +363,12 @@ local function build_summary(rows)
 end
 
 local function is_stale()
-    return M.content_version ~= (Store.content_version or 0)
-        or M.self_signature ~= self_index_signature()
+    return M.payload_sig ~= fleet_payload_sig()
 end
 
 local function job_targets_match(j)
     if not j then return false end
-    return j.target_cv == (Store.content_version or 0)
-        and j.target_self_sig == self_index_signature()
+    return j.target_payload_sig == fleet_payload_sig()
 end
 
 local function collect_peer_sources(self_snap)
@@ -301,10 +395,8 @@ local ITEM_CHUNK = 48
 local PHASE_EQUIPPED, PHASE_BAGS, PHASE_BANK = 0, 1, 2
 
 local function start_job()
-    local target_cv = Store.content_version or 0
-    local target_self_sig = self_index_signature()
-    local self_snap = live_self_snapshot_for_index()
-    if self_snap then preserve_self_bank_cache(self_snap) end
+    local target_payload_sig = fleet_payload_sig()
+    local self_snap = self_snap_for_index()
     -- Self is peer_i=1 so cold-start never does a synchronous full walk in get().
     local peers = {}
     if self_snap then peers[1] = self_snap end
@@ -317,8 +409,8 @@ local function start_job()
         peer_i = 1,
         phase = PHASE_EQUIPPED,
         item_i = 1,
-        target_cv = target_cv,
-        target_self_sig = target_self_sig,
+        target_payload_sig = target_payload_sig,
+        target_cv = Store.content_version or 0,
         started_at = os.clock(),
     }
     return job
@@ -329,8 +421,9 @@ local function finish_job(j)
     M.rows = j.rows
     M.summary = build_summary(j.rows)
     M.version = (M.version or 0) + 1
-    M.content_version = j.target_cv
-    M.self_signature = j.target_self_sig
+    M.payload_sig = j.target_payload_sig or fleet_payload_sig()
+    M.content_version = j.target_cv or (Store.content_version or 0)
+    M.self_signature = M.payload_sig
     job = nil
     return M.rows, M.version
 end
@@ -476,8 +569,13 @@ function M._reset_for_tests()
     M.rows = {}
     M.version = 0
     M.content_version = -1
+    M.payload_sig = ""
     M.self_signature = ""
     M.summary = { total = 0, withAnyStat = 0 }
+    payload_sig_cache.store_v = -1
+    payload_sig_cache.store_cv = -1
+    payload_sig_cache.live_key = ""
+    payload_sig_cache.sig = ""
 end
 
 return M

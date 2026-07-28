@@ -1073,16 +1073,24 @@ local function run_loop(inspect_tick, peer_refresh)
                         { allow_peers = true })
                 end)
             end
-            -- Keep fleet item-index warm when announcer.tick is skipped (passive bg).
-            pcall(function()
-                local budget = state.bg
-                    and (tonumber(CFG.item_index_budget_bg_ms) or 20)
-                    or (tonumber(CFG.item_index_budget_ms) or 4)
-                require('item_index').tick(budget)
-            end)
         else
             announcer.tick()
         end
+        -- Always advance fleet item-index (Search / Stats / Focus). Do not leave
+        -- this only inside announcer.tick: once announce is ready that path
+        -- early-outs and never reaches item_index.tick, so Search stayed at
+        -- 0 inventory matches after get() stopped sync-rebuilding (1.2.89).
+        pcall(function()
+            local budget
+            if state.bg then
+                budget = tonumber(CFG.item_index_budget_bg_ms) or 20
+            elseif state.lean and state.lean() then
+                budget = tonumber(CFG.item_index_budget_lean_ms) or 2
+            else
+                budget = tonumber(CFG.item_index_budget_ms) or 4
+            end
+            require('item_index').tick(budget)
+        end)
         -- Never let a go-loot tick error kill the bg/UI run loop (that left E3
         -- paused and the panel stuck on "sent"/"going" with no finish).
         local okGo, goErr = pcall(function() require('go_loot').tick() end)

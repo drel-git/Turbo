@@ -10577,6 +10577,274 @@ end)()
 -- =========================================================
 -- Main render window
 -- =========================================================
+
+--- True when only the Mini bar needs this ImGui frame (no Review/Gains/
+--- RulePacks/Fleet/Timed Challenge overlay already open).
+local function turboMiniBarOnly(g)
+    if not g.minimizedGUI then return false end
+    if g.reviewWindowOpen or g.rulePacksWindowOpen or g.gainsWindowOpen then return false end
+    if TG.FleetWallet and TG.FleetWallet.isOpen and TG.FleetWallet.isOpen() then return false end
+    local okTC, TC = pcall(require, 'Turbo.timed_challenge')
+    if okTC and TC and TC.isActive and TC.isActive() then return false end
+    return true
+end
+
+--- Split the 1s auto_refresh batch across frames (group / wallet / INI).
+--- Lean Mini skips wallet entirely (unused by the bar).
+local function turboStaggeredAutoRefresh(g, t, opts)
+    opts = opts or {}
+    if (t - (tonumber(g.lastRefreshMS) or 0)) < AUTO_REFRESH_MS then return false end
+    local skipWallet = opts.skipWallet == true
+    local mod = skipWallet and 2 or 3
+    local phase = (tonumber(g.autoRefreshPhase) or 0) % mod
+    if TG.hitchlog then TG.hitchlog.span_begin('auto_refresh') end
+    if phase == 0 then
+        collectGroupMembers()
+    elseif phase == 1 then
+        if skipWallet then
+            if g.refreshActiveIniState then g.refreshActiveIniState(false) end
+        else
+            refreshWalletCache()
+        end
+    else
+        if g.refreshActiveIniState then g.refreshActiveIniState(false) end
+    end
+    g.autoRefreshPhase = (tonumber(g.autoRefreshPhase) or 0) + 1
+    g.lastRefreshMS = t
+    if TG.hitchlog then TG.hitchlog.span_end() end
+    return true
+end
+
+--- Shared Mini bar action table (lean path + Mini+overlay path).
+local function turboMiniBarActions(ctx)
+    local g = ctx.g
+    local currentLooter = ctx.currentLooter
+    local toggleMultiLooter = ctx.toggleMultiLooter
+    local setupExpanded = ctx.setupExpanded
+    local saveSettingsFn = ctx.saveSettings
+    return {
+        tip = ctx.tip,
+        lootNow = function()
+            if TG.requireSharedControl('Loot Now') then
+                collectGroupMembers()
+                lootNow()
+            end
+        end,
+        stopAllActions = function()
+            if TG.requireSharedControl('STOP') then g.stopAllActions() end
+        end,
+        canSharedControlWrite = TG.isSharedControlOwner,
+        sharedControlOwnerName = TG.sharedControlOwnerName,
+        toggleTurboFromMini = function(rt)
+            if not TG.isSharedControlOwner() then
+                if not TG.takeSharedControl() then return end
+            end
+            if rt.turboOn then
+                TG.setTurboEnabled(false, rt.currentLooter, rt.lootAllOn, rt.multiModeOn)
+            else
+                TG.setTurboEnabled(true, rt.currentLooter, rt.lootAllOn, rt.multiModeOn)
+            end
+        end,
+        toggleMiniLooterPicker = function()
+            collectGroupMembers()
+            g.showMiniLooterPicker = not g.showMiniLooterPicker
+            if not g.showMiniLooterPicker then
+                g.showMiniRosterEditor = false
+            end
+        end,
+        toggleMiniRosterEditor = function()
+            collectGroupMembers()
+            g.showMiniRosterEditor = not g.showMiniRosterEditor
+        end,
+        toggleReviewWindowFromMini = function(hasSkips)
+            if hasSkips then
+                g.reviewWindowOpen = not g.reviewWindowOpen
+                g.skipReviewOpen = g.reviewWindowOpen
+            end
+        end,
+        openTurboPatcher = function(opts)
+            TG.openTurboPatcherExternal(opts)
+        end,
+        setMiniLootMode = function(mode)
+            if TG.requireSharedControl('Loot mode') then
+                collectGroupMembers()
+                TG.setLootMode(mode, g.selectedChar or currentLooter)
+            end
+        end,
+        setMiniLooter = function(name, rt)
+            if not name or name == '' or name == 'NOBODY' then return end
+            if not TG.requireSharedControl('Looter selection') then return end
+            collectGroupMembers()
+            g.selectedChar = name
+            if rt and rt.multiModeOn then
+                toggleMultiLooter(name)
+            else
+                g.showMiniLooterPicker = false
+                g.showMiniRosterEditor = false
+                TG.setLootMode('single', name)
+            end
+        end,
+        toggleMiniQuickRosterMember = function(name)
+            collectGroupMembers()
+            TG.toggleQuickRosterMember(name)
+        end,
+        expandFromMini = function(targetTab, openSkips, targetPage)
+            g.showMiniLooterPicker = false
+            g.showMiniRosterEditor = false
+            g.minimizedGUI = false
+            g.slimGUI = false
+            g.slimWhenExpanded = false
+            local target = targetTab and UiState.normalizeRelevantTab(targetTab)
+                or UiState.normalizeRelevantTab(g.lastRelevantTab)
+            g.activeTab = target
+            g.lastRelevantTab = target
+            if target == 'setup' or target == 'review' then
+                if targetPage then
+                    g.lootManagerPage = UiState.normalizeLootManagerPage(targetPage)
+                elseif openSkips then
+                    g.lootManagerPage = 'review'
+                else
+                    g.lootManagerPage = UiState.normalizeLootManagerPage(g.lootManagerPage)
+                end
+            end
+            if openSkips then
+                g.skipReviewOpen = true
+                g.reviewWindowOpen = true
+            end
+            local expandW = UiState.windowWidthForTab(false, g.activeTab, Theme)
+            local expandH = UiState.windowHeightForTab(false, g.activeTab, Theme, {
+                setupExpanded = setupExpanded,
+            })
+            local basePos = g.fullWindowPos or g.miniWindowPos
+            g.pendingExpandPos = TG.getClampedWindowPos(basePos, expandW, expandH)
+            if saveSettingsFn then saveSettingsFn() end
+        end,
+    }
+end
+
+--- Lean Mini bar frame (own function so renderWindow stays under the 200-local cap).
+local function turboRenderLeanMiniBar(g, hitch)
+    local mq, ensureE3Vars, nowMS = g.mq, g.ensureE3Vars, g.nowMS
+    local getCurrentLooter = g.getCurrentLooter
+    local getTurboState, getLootAllState = g.getTurboState, g.getLootAllState
+    local getMultiLooters, isMultiLootMode = g.getMultiLooters, g.isMultiLootMode
+    local tip, skipTracker, saveSettings = g.tip, g.skipTracker, g.saveSettings
+
+    if TG.hitchlog then TG.hitchlog.span_begin('ensure_e3') end
+    ensureE3Vars()
+    if TG.hitchlog then TG.hitchlog.span_end() end
+
+    if TG.hitchlog then TG.hitchlog.span_begin('shared_control') end
+    TG.refreshSharedControl(false)
+    if TG.hitchlog then TG.hitchlog.span_end() end
+
+    if TG.hitchlog then TG.hitchlog.span_begin('route_restore') end
+    if g.statusMessage == '' then
+        g.lastStatusMessageText = ''
+        g.statusMessageShownAtMS = 0
+    elseif g.statusMessage ~= g.lastStatusMessageText then
+        g.lastStatusMessageText = g.statusMessage
+        g.lastActionMessage = g.statusMessage
+        g.statusMessageShownAtMS = nowMS()
+    end
+    if g.statusMessage ~= '' and g.statusMessageShownAtMS > 0
+        and (nowMS() - g.statusMessageShownAtMS) >= SLIM_STATUS_MSG_TTL_MS then
+        g.statusMessage = ''
+        g.lastActionMessage = ''
+        g.lastStatusMessageText = ''
+        g.statusMessageShownAtMS = 0
+    end
+    if g.reconcileTurboRouteVar then g.reconcileTurboRouteVar() end
+    if g.tickPendingSetupRestore then g.tickPendingSetupRestore() end
+    if TG.hitchlog then TG.hitchlog.span_end() end
+
+    turboStaggeredAutoRefresh(g, nowMS(), { skipWallet = true })
+
+    if TG.hitchlog then TG.hitchlog.span_begin('skip_journal_poll') end
+    if g.skipQueue and g.skipQueue.poll and g.skipQueue.poll() then
+        if skipTracker and skipTracker.refresh then skipTracker.refresh() end
+        g.skipDisplayRows = nil
+    end
+    if skipTracker and skipTracker.poll and skipTracker.poll() then
+        g.skipDisplayRows = nil
+        g.skipDisplayTotal = nil
+    end
+    if TG.hitchlog then TG.hitchlog.span_end() end
+
+    if TG.hitchlog then TG.hitchlog.span_begin('state_tlo') end
+    local currentLooter = getCurrentLooter()
+    local liveMainLooter = g.getLiveMainLooter and g.getLiveMainLooter() or currentLooter
+    if not g.selectedChar or g.selectedChar == '' then
+        g.selectedChar = (currentLooter ~= 'NOBODY') and currentLooter or (mq.TLO.Me.Name() or '')
+    end
+    local turboOn = getTurboState()
+    local lootAllOn = getLootAllState()
+    local multiModeOn = (not lootAllOn) and isMultiLootMode()
+    local multiLooters = getMultiLooters()
+    if TG.hitchlog then TG.hitchlog.span_end() end
+
+    if TG.hitchlog then TG.hitchlog.span_begin('loot_ready') end
+    local lootReady, lootReadyReason = true, ''
+    if g.getLootReadiness then
+        lootReady, lootReadyReason = g.getLootReadiness(lootAllOn, multiModeOn, currentLooter, liveMainLooter)
+    end
+    if TG.hitchlog then TG.hitchlog.span_end() end
+
+    local skipPendingCount = 0
+    if skipTracker and skipTracker.is_ready() then
+        if g.skipDisplayTotal ~= nil then
+            skipPendingCount = g.skipDisplayTotal
+        else
+            skipPendingCount = skipTracker.pending_count()
+        end
+    end
+
+    if TG.hitchlog then TG.hitchlog.span_begin('loot_anim') end
+    local lootAnimationActive = false
+    if g.miniLootAnimation ~= false then
+        local activeTargets = activeLootTargetNames(lootAllOn, multiModeOn, currentLooter)
+        lootAnimationActive = TG.refreshLootAnimationActive(mq, TG, activeTargets, nowMS())
+    end
+    if TG.hitchlog then TG.hitchlog.span_end() end
+
+    if TG.hitchlog then TG.hitchlog.span_begin('view_state') end
+    local viewState = UiState.buildMiniViewState(g, {
+        turboOn = turboOn,
+        lootReady = lootReady,
+        lootReadyReason = lootReadyReason,
+        currentLooter = currentLooter,
+        lootAllOn = lootAllOn,
+        multiModeOn = multiModeOn,
+        multiLooters = multiLooters,
+        skipPendingCount = skipPendingCount,
+        lootAnimationActive = lootAnimationActive,
+        miniLootAnimation = g.miniLootAnimation ~= false,
+        nowMS = nowMS(),
+    })
+    if hitch and hitch.capturing and hitch.capturing() then
+        local okKeys, missing = UiState.assertMiniRuntimeComplete(viewState.runtime)
+        if not okKeys then
+            g.statusMessage = 'Mini runtime missing key: ' .. tostring(missing)
+        end
+    end
+    g.layoutState = viewState.layoutState
+    g.navState = viewState.navState
+    g.skipState = viewState.skipState
+    g.feedbackState = viewState.feedbackState
+    if TG.hitchlog then TG.hitchlog.span_end() end
+
+    if TG.hitchlog then TG.hitchlog.span_begin('draw_mini') end
+    MiniView.render(viewState, turboMiniBarActions({
+        g = g,
+        tip = tip,
+        currentLooter = currentLooter,
+        toggleMultiLooter = g.toggleMultiLooter,
+        setupExpanded = g.perCharProfile,
+        saveSettings = saveSettings,
+    }), Ui)
+    if TG.hitchlog then TG.hitchlog.span_end() end
+end
+
 function TG.renderWindow()
     local hitch = TG.hitchlog
     if hitch and hitch.capturing() then hitch.on_frame_begin() end
@@ -10635,6 +10903,13 @@ function TG.renderWindow()
         return
     end
 
+    -- Lean Mini bar: keep control/TLO/loot-ready/skip-count; skip Full summaries,
+    -- wallet, skip-row rebuild, melee/profile counts, and overlay chrome.
+    if turboMiniBarOnly(g) then
+        turboRenderLeanMiniBar(g, hitch)
+        return
+    end
+
     if TG.hitchlog then TG.hitchlog.span_begin('ensure_e3') end
     ensureE3Vars()
     if TG.hitchlog then TG.hitchlog.span_end() end
@@ -10668,16 +10943,7 @@ function TG.renderWindow()
     if TG.hitchlog then TG.hitchlog.span_end() end
 
     local t = nowMS()
-    if (t - g.lastRefreshMS) >= AUTO_REFRESH_MS then
-        if TG.hitchlog then TG.hitchlog.span_begin('auto_refresh') end
-        collectGroupMembers()
-        refreshWalletCache()
-        if g.refreshActiveIniState then
-            g.refreshActiveIniState(false)
-        end
-        g.lastRefreshMS = t
-        if TG.hitchlog then TG.hitchlog.span_end() end
-    end
+    turboStaggeredAutoRefresh(g, t, { skipWallet = false })
 
     if TG.hitchlog then TG.hitchlog.span_begin('skip_journal_poll') end
     if g.skipQueue and g.skipQueue.poll and g.skipQueue.poll() then
@@ -10749,7 +11015,11 @@ function TG.renderWindow()
         end
     end
     local activeTargets = activeLootTargetNames(lootAllOn, multiModeOn, currentLooter)
-    local lootAnimationActive = TG.refreshLootAnimationActive(mq, TG, activeTargets, nowMS())
+    local lootAnimationActive = false
+    -- Peer Mono probes are multi-client expensive; skip when Mini loot anim is off.
+    if g.miniLootAnimation ~= false or not g.minimizedGUI then
+        lootAnimationActive = TG.refreshLootAnimationActive(mq, TG, activeTargets, nowMS())
+    end
     local activeProfileN = countDistinctProfilesForNames(activeTargets, getProfileForMember)
     local setupExpanded = g.perCharProfile
     if not g.minimizedGUI and g.slimGUI then
@@ -11062,111 +11332,18 @@ function TG.renderWindow()
     end
 
     -- ============ MINI MODE ============
+    -- (Overlays open: Review/Gains/etc. Lean Mini bar returns earlier.)
     local shouldDraw
     if g.minimizedGUI then
         if TG.hitchlog then TG.hitchlog.span_begin('draw_mini') end
-        MiniView.render(viewState, {
-            cachedWallet = o.cachedWallet,
+        MiniView.render(viewState, turboMiniBarActions({
+            g = g,
             tip = tip,
-            renderToolsPopupBody = renderToolsPopupBody,
-            lootNow = function()
-                if TG.requireSharedControl('Loot Now') then
-                    collectGroupMembers()
-                    lootNow()
-                end
-            end,
-            stopAllActions = function()
-                if TG.requireSharedControl('STOP') then g.stopAllActions() end
-            end,
-            canSharedControlWrite = TG.isSharedControlOwner,
-            sharedControlOwnerName = TG.sharedControlOwnerName,
-            toggleTurboFromMini = function(rt)
-                -- Mini has no Control badge; ON/OFF should claim control when
-                -- browse-only so a box can recover without expanding Full UI.
-                if not TG.isSharedControlOwner() then
-                    if not TG.takeSharedControl() then return end
-                end
-                if rt.turboOn then
-                    TG.setTurboEnabled(false, rt.currentLooter, rt.lootAllOn, rt.multiModeOn)
-                else
-                    TG.setTurboEnabled(true, rt.currentLooter, rt.lootAllOn, rt.multiModeOn)
-                end
-            end,
-            toggleMiniLooterPicker = function()
-                collectGroupMembers()
-                g.showMiniLooterPicker = not g.showMiniLooterPicker
-                if not g.showMiniLooterPicker then
-                    g.showMiniRosterEditor = false
-                end
-            end,
-            toggleMiniRosterEditor = function()
-                collectGroupMembers()
-                g.showMiniRosterEditor = not g.showMiniRosterEditor
-            end,
-            toggleReviewWindowFromMini = function(hasSkips)
-                if hasSkips then
-                    g.reviewWindowOpen = not g.reviewWindowOpen
-                    g.skipReviewOpen = g.reviewWindowOpen
-                end
-            end,
-            openTurboPatcher = function(opts)
-                TG.openTurboPatcherExternal(opts)
-            end,
-            setMiniLootMode = function(mode)
-                if TG.requireSharedControl('Loot mode') then
-                    collectGroupMembers()
-                    TG.setLootMode(mode, g.selectedChar or currentLooter)
-                end
-            end,
-            setMiniLooter = function(name, rt)
-                if not name or name == '' or name == 'NOBODY' then return end
-                if not TG.requireSharedControl('Looter selection') then return end
-                collectGroupMembers()
-                g.selectedChar = name
-                if rt and rt.multiModeOn then
-                    toggleMultiLooter(name)
-                else
-                    g.showMiniLooterPicker = false
-                    g.showMiniRosterEditor = false
-                    TG.setLootMode('single', name)
-                end
-            end,
-            toggleMiniQuickRosterMember = function(name)
-                collectGroupMembers()
-                TG.toggleQuickRosterMember(name)
-            end,
-            expandFromMini = function(targetTab, openSkips, targetPage)
-                g.showMiniLooterPicker = false
-                g.showMiniRosterEditor = false
-                g.minimizedGUI = false
-                g.slimGUI = false
-                g.slimWhenExpanded = false
-                local target = targetTab and UiState.normalizeRelevantTab(targetTab)
-                    or UiState.normalizeRelevantTab(g.lastRelevantTab)
-                g.activeTab = target
-                g.lastRelevantTab = target
-                if target == 'setup' or target == 'review' then
-                    if targetPage then
-                        g.lootManagerPage = UiState.normalizeLootManagerPage(targetPage)
-                    elseif openSkips then
-                        g.lootManagerPage = 'review'
-                    else
-                        g.lootManagerPage = UiState.normalizeLootManagerPage(g.lootManagerPage)
-                    end
-                end
-                if openSkips then
-                    g.skipReviewOpen = true
-                    g.reviewWindowOpen = true
-                end
-                local expandW = UiState.windowWidthForTab(false, g.activeTab, Theme)
-                local expandH = UiState.windowHeightForTab(false, g.activeTab, Theme, {
-                    setupExpanded = setupExpanded,
-                })
-                local basePos = g.fullWindowPos or g.miniWindowPos
-                g.pendingExpandPos = TG.getClampedWindowPos(basePos, expandW, expandH)
-                o.saveSettings()
-            end,
-        }, Ui)
+            currentLooter = currentLooter,
+            toggleMultiLooter = toggleMultiLooter,
+            setupExpanded = setupExpanded,
+            saveSettings = o.saveSettings,
+        }), Ui)
         if g.reviewWindowOpen then
             pcall(function()
                 ImGui.SetNextWindowSizeConstraints(560, 760, 1120, 1040)

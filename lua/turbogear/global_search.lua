@@ -4,8 +4,6 @@
 local cfg = require('config')
 local Settings = cfg.Settings
 local item_index = require('item_index')
-local store = require('store')
-local Store = store.Store
 
 local M = {}
 
@@ -93,8 +91,16 @@ function M.filter(needle, limit)
     end
 
     item_index.get(false)
-    local version = Store.content_version or 0
-    local cache_key = needle .. ":" .. tostring(version) .. ":" .. tostring(limit or 80)
+    -- While Search is open, spend a little extra budget so a cold/empty index
+    -- can finish instead of sitting at 0 matches for many seconds.
+    if #(item_index.rows or {}) == 0 and item_index.building and item_index.building() then
+        for _ = 1, 6 do
+            if item_index.tick(16) then break end
+            if #(item_index.rows or {}) > 0 then break end
+        end
+    end
+    local version = tostring(item_index.version or 0) .. ":" .. tostring(#(item_index.rows or {}))
+    local cache_key = needle .. ":" .. version .. ":" .. tostring(limit or 80)
     if filtered_cache.key == cache_key then
         return filtered_cache.rows or {}
     end

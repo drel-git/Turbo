@@ -1,7 +1,7 @@
 --[[
   Turbo View -- Mini Bar
   ----------------------
-  @version lua/Turbo/ui/views/mini.lua 1.1.1
+  @version lua/Turbo/ui/views/mini.lua 1.1.2
 
   Compact floating bar: Turbo toggle, active looter picker, Loot button,
   skip chip, tool-icon cluster, expand-to-full. Shows the quick-roster editor.
@@ -250,6 +250,11 @@ function M.render(state, actions, ui)
     local g = state.raw
     local rt = state.runtime
 
+    -- Rounding lives here so the lean Mini path (no Full style push) matches
+    -- pre-lean look. Style vars only; no draw/layout cost.
+    ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 8)
+    ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 4)
+    ImGui.PushStyleVar(ImGuiStyleVar.PopupRounding, 4)
     ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 2.5)
     ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, 5, 4)
     ImGui.PushStyleColor(ImGuiCol.WindowBg, IM_COL32(24, 28, 44, 248))
@@ -543,7 +548,7 @@ function M.render(state, actions, ui)
     end
     ImGui.End()
     ImGui.PopStyleColor(2)
-    ImGui.PopStyleVar(2)
+    ImGui.PopStyleVar(5)
 end
 
 return M

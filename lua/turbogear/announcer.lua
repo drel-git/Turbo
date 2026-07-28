@@ -14,7 +14,6 @@ local item_actions = require('item_actions')
 local diag = require('diagnostics')
 local Store = require('store').Store
 local needs_index = require('needs_index')
-local item_index = require('item_index')
 local rules = require('announce_rules')
 local roster_sets = require('roster_sets')
 
@@ -2804,25 +2803,8 @@ function M.tick()
                 end
             end
         end
-        -- Fleet item-index (Focus/Stats/Search): budgeted peer walks; UI serves
-        -- last-good rows until tick finishes a generation.
-        do
-            local ii_budget
-            if state.bg then
-                ii_budget = tonumber(CFG.item_index_budget_bg_ms) or 20
-            elseif state.lean and state.lean() then
-                ii_budget = tonumber(CFG.item_index_budget_lean_ms) or 2
-            else
-                ii_budget = tonumber(CFG.item_index_budget_ms) or 4
-            end
-            local remaining_ms = (frame_deadline - os.clock()) * 1000
-            if remaining_ms < ii_budget then ii_budget = remaining_ms end
-            if ii_budget >= 0.5 then
-                diag.time("item_index.tick", function()
-                    item_index.tick(ii_budget)
-                end)
-            end
-        end
+        -- Fleet item-index ticks in init.lua every loop (not here). Leaving it
+        -- under announce early-out left Search/Stats empty once announce_ready.
         diag.time("announce.pending", function()
             drain_pending(CFG.announce_pending_budget_ms, CFG.announce_pending_items_per_tick)
         end)

@@ -1,7 +1,7 @@
 --[[
   Turbo UI View State
   -------------------
-  @version lua/Turbo/ui/state.lua 1.3.0
+  @version lua/Turbo/ui/state.lua 1.3.1
 
   Pure data transforms — takes the flat TG table from init.lua and produces
   a structured view-state object for each render path. No ImGui calls.
@@ -214,6 +214,92 @@ function M.buildViewState(g, runtime)
             topBar = topBarSummary,
             lootManager = lootManagerSummary,
         },
+    }
+end
+
+-- Keys read from state.runtime by ui/views/mini.lua. Keep in sync when Mini
+-- gains fields; buildMiniViewState must supply every entry (nil only for
+-- lootReadyReason, which may be an empty string).
+M.MINI_RUNTIME_KEYS = {
+    'turboOn',
+    'lootReady',
+    'lootReadyReason',
+    'currentLooter',
+    'lootAllOn',
+    'multiModeOn',
+    'multiLooters',
+    'skipPendingCount',
+    'lootAnimationActive',
+    'miniLootAnimation',
+    'nowMS',
+}
+
+--- Slim runtime for the Mini bar lean path (no Full summaries / layout sizing).
+function M.buildMiniRuntime(runtime)
+    runtime = runtime or {}
+    return {
+        turboOn = runtime.turboOn == true,
+        lootReady = runtime.lootReady ~= false,
+        lootReadyReason = tostring(runtime.lootReadyReason or ''),
+        currentLooter = runtime.currentLooter or 'NOBODY',
+        lootAllOn = runtime.lootAllOn == true,
+        multiModeOn = runtime.multiModeOn == true,
+        multiLooters = runtime.multiLooters or {},
+        skipPendingCount = tonumber(runtime.skipPendingCount) or 0,
+        lootAnimationActive = runtime.lootAnimationActive == true,
+        miniLootAnimation = runtime.miniLootAnimation ~= false,
+        nowMS = tonumber(runtime.nowMS) or 0,
+    }
+end
+
+function M.assertMiniRuntimeComplete(runtime)
+    if type(runtime) ~= 'table' then return false, 'runtime' end
+    for _, key in ipairs(M.MINI_RUNTIME_KEYS) do
+        if runtime[key] == nil then
+            return false, key
+        end
+    end
+    return true
+end
+
+--- View-state object for Mini-only frames (skips topBar / lootManager summaries).
+function M.buildMiniViewState(g, runtime)
+    local miniRuntime = M.buildMiniRuntime(runtime)
+    return {
+        raw = g,
+        runtime = miniRuntime,
+        layoutState = {
+            mode = 'mini',
+            minimized = true,
+            slim = false,
+            slimWhenExpanded = g.slimWhenExpanded,
+            lastRelevantTab = M.normalizeRelevantTab(g.lastRelevantTab),
+            pendingExpandPos = g.pendingExpandPos,
+            lastWindowMode = g.lastWindowMode,
+            targetWidth = 0,
+            targetHeight = 0,
+        },
+        navState = {
+            activeTab = M.normalizeActiveTab(g.activeTab),
+        },
+        lootManagerState = {
+            selectedChar = g.selectedChar,
+            perCharProfile = g.perCharProfile,
+            slimIniExpanded = g.slimIniExpanded,
+            page = M.normalizeLootManagerPage(g.lootManagerPage),
+        },
+        skipState = {
+            reviewOpen = g.skipReviewOpen,
+            selectedKey = g.skipSelectedKey,
+            linkDbEnabled = g.skipReviewUseLinkDb,
+            pendingCount = miniRuntime.skipPendingCount,
+            hasDisplayRows = g.skipDisplayRows ~= nil,
+        },
+        feedbackState = {
+            statusMessage = g.statusMessage or '',
+            shownAtMS = g.statusMessageShownAtMS or 0,
+        },
+        summary = {},
     }
 end
 

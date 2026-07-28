@@ -1,3 +1,20 @@
+1.2.96
+- Search everywhere: inventory and bank matches work again. The fleet item
+  index was stalling empty on the announce-driver Gear UI (tick skipped after
+  announce ready, then rebuild thrash from stamp-only Store bumps). Index now
+  keeps ticking, keys off item payload, and Search catch-up fills matches
+  while open. BiS catalog hits were unaffected.
+- Turbo Mini: restore rounded corners on the lean Mini path (cosmetic only).
+
+1.2.95
+- Search everywhere: keep item_index ticking outside announcer early-out so
+  the announce-driver Gear UI can build inventory rows for Search.
+
+1.2.94
+- Turbo Mini hitch lean: Mini-only frames skip Full ImGui prep (slim runtime,
+  staggered refresh, no wallet on the bar, loot-anim probes off when anim is
+  off).
+
 1.2.93
 - Bank cache UI: Setup status uses a live self snap when the bank is open
   (was reading a stale Store row, so it stayed "Xh ago" even with BigBank open).
