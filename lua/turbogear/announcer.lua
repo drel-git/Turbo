@@ -1,8 +1,10 @@
 -- TurboGear/announcer.lua
--- BiS linked-needs (hybrid, 1.2.107+): raid/group/say links are evaluated
--- locally on every box. Peers LOOT_NEED the announce beacon; the beacon holds
--- briefly and emits one grouped [TG] line. needs_index is optional enrichment,
--- not a gate for linked announces.
+-- BiS linked-needs (hybrid, 1.2.107+ / fail-open 1.2.110+): raid/group/say
+-- links are evaluated locally on every box. The driver answers from the full
+-- announce catalog when ready, else from the disk-cached direct catalog while
+-- the full index is still warming. Peers LOOT_NEED the announce beacon; the
+-- beacon holds briefly and emits one grouped [TG] line. needs_index is
+-- optional enrichment, not a gate for linked announces.
 
 local mq  = require('mq')
 local cfg = require('config')
@@ -289,6 +291,10 @@ local function peer_report_wait_s()
     return math.max(0.5, tonumber(CFG.announce_peer_report_wait_s) or 2.0)
 end
 
+local function peer_report_short_s()
+    return math.max(group_window_s(), tonumber(CFG.announce_peer_report_short_s) or 0.35)
+end
+
 local function link_hybrid_enabled()
     return CFG.announce_link_hybrid ~= false
 end
@@ -302,16 +308,19 @@ local function resolve_announce_holder()
     return trim(holder or ""), reason, defer == true
 end
 
-local function arm_peer_report_hold(bucket)
+-- opts.short: needers already known from local/Store — only brief coalesce for
+-- late peer LOOT_NEED (near-instant [TG] instead of a full 2s hold).
+local function arm_peer_report_hold(bucket, opts)
     if type(bucket) ~= "table" then return end
+    opts = type(opts) == "table" and opts or {}
     local now = os.clock()
     local created = tonumber(bucket.created) or now
-    local wait = peer_report_wait_s()
+    local wait = opts.short and peer_report_short_s() or peer_report_wait_s()
     if not bucket.peer_report_armed then
         bucket.peer_report_armed = true
         bucket.due = math.max(tonumber(bucket.due) or 0, created + wait)
     else
-        local cap = created + wait + 0.75
+        local cap = created + wait + (opts.short and 0.25 or 0.75)
         bucket.due = math.min(cap, math.max(tonumber(bucket.due) or 0, now + 0.15))
     end
 end
@@ -986,13 +995,30 @@ local function active_announce_roster_status(limit)
     }
 end
 
+-- Full catalog when ready; otherwise memory-resident direct/dcat only.
+-- Never sync-flushes the full announce catalog on a chat frame (hitch source).
+local function check_need_fail_open(snap, item_name, item_id, opts)
+    if not snap or not snap.class then return nil end
+    if catalog.announce_catalog_ready(snap.class, snap.name) then
+        return catalog.check_announce_need(snap, item_name, item_id)
+    end
+    return catalog.check_announce_need_direct(snap, item_name, item_id, opts)
+end
+
+local function direct_lookup_ready(snap)
+    if not snap or not snap.class then return false end
+    if type(catalog.direct_catalog_if_ready) ~= "function" then return false end
+    local ok, idx = pcall(catalog.direct_catalog_if_ready, snap.class, snap.name)
+    return ok and idx ~= nil
+end
+
 local function try_direct_need_for_snapshot(item, row, item_link, bucket, source)
     local snap = row and row.snap
     if type(snap) ~= "table" or not snap.class or snap.class == "?" then return 0, true end
     local item_name = tostring(item and item.name or "")
     if item_name == "" then return 0, true end
     local item_id = tonumber(item and item.id) or 0
-    local need = catalog.check_announce_need_direct(snap, item_name, item_id, {
+    local need = check_need_fail_open(snap, item_name, item_id, {
         skip_live = not (row and row.local_owner),
     })
     if need then
@@ -1130,25 +1156,13 @@ local function scan_group_needs_from_cache(links, source)
     local indexed = index_enabled and needs_index.char_count() or 0
     local hybrid = link_hybrid_enabled()
 
-    -- Hybrid: beacon local-live + peer LOOT_NEED; needs_index is enrichment only.
-    -- Legacy: wait on group_ready / targeted Store scans (pre-1.2.107 path).
+    -- Hybrid: local fail-open + Store direct scan + peer LOOT_NEED.
+    -- Do not sync-flush the full announce catalog here (frame hitch).
     local snap = hybrid and snap_for_announce() or nil
-    local catalog_ready = false
     if hybrid and snap and snap.class then
-        -- Inline ready check (ensure_catalog_for_chat is defined later in this file).
         pcall(function()
             catalog.ensure_announce_catalog(snap.class, { owner = snap.name })
         end)
-        catalog_ready = catalog.announce_catalog_ready(snap.class, snap.name) == true
-        -- Fresh patcher / cold start: spend a bounded sync slice so the beacon
-        -- can answer locally instead of flushing empty hybrid buckets.
-        if not catalog_ready then
-            pcall(function()
-                catalog.flush_announce_catalog(
-                    snap.class, snap.name, tonumber(CFG.announce_flush_budget_ms) or 400)
-            end)
-            catalog_ready = catalog.announce_catalog_ready(snap.class, snap.name) == true
-        end
     end
 
     for _, item in ipairs(links) do
@@ -1157,14 +1171,11 @@ local function scan_group_needs_from_cache(links, source)
             note_loot_seen(item_name, source)
             local item_link = resolve_group_item_link(item_name, item.link, item.id)
             local bucket = ensure_group_announce(item_name, item_link, item.id, source, item.corpse_id)
-            if hybrid and bucket then
-                arm_peer_report_hold(bucket)
-            end
 
             -- Announce under the LINKED item's own name (a real item), never
             -- an index alias like "... - Tier II" (see needs_index display rules).
-            if hybrid and catalog_ready and snap then
-                local need = catalog.check_announce_need(snap, item_name, item.id)
+            if hybrid and snap then
+                local need = check_need_fail_open(snap, item_name, item.id, { skip_live = false })
                 if need and add_group_need(item_name, item_link, item.id, me_name(), "local-live") then
                     added = added + 1
                 end
@@ -1178,20 +1189,25 @@ local function scan_group_needs_from_cache(links, source)
                 end
             end
 
-            -- Store walk while the group index is cold. Keep this even in hybrid:
-            -- after a patcher update peer bgs may still be old (no LOOT_NEED yet),
-            -- or peer catalogs may still be warming — without this fallback the
-            -- beacon flushes empty buckets and looks "dead".
-            if not group_index_ready then
+            -- Hybrid always walks in-scope Store snaps (direct/dcat) so one [TG]
+            -- can list every known needer without waiting on peer LOOT_NEED or a
+            -- warm needs_index. Legacy still uses this only while the index is cold.
+            if hybrid or not group_index_ready then
                 local d_added, d_queued, d_snaps = queue_group_target_checks(item, item_link, bucket, source)
                 added = added + (tonumber(d_added) or 0)
                 queued = queued + (tonumber(d_queued) or 0)
                 snaps_seen = math.max(snaps_seen, tonumber(d_snaps) or 0)
             end
 
-            -- Surface Go-loot buttons as soon as we know a corpse id and at
-            -- least one needer - don't wait for the [TG] collapse flush.
-            if bucket and row_corpse_id(bucket) and type(bucket.order) == "table" and #bucket.order > 0 then
+            if hybrid and bucket then
+                local order_n = type(bucket.order) == "table" and #bucket.order or 0
+                local waiting = (tonumber(bucket.pending_targets) or 0) > 0
+                arm_peer_report_hold(bucket, { short = order_n > 0 and not waiting })
+            end
+
+            -- Surface Linked rows as soon as any needer is known (corpse id is
+            -- optional — Go buttons stay off until a corpse handoff arrives).
+            if bucket and type(bucket.order) == "table" and #bucket.order > 0 then
                 record_linked_item(bucket, "pending")
             end
         end
@@ -1290,6 +1306,9 @@ local function send_group_announce(bucket, opts)
     end
     local cmd = opts.cmd or manual_channel_command(opts.channel) or cfg.bis_announce_command()
     local msg = rules.format_message(display_payload(bucket.item_name, bucket.item_link), bucket.order)
+    -- Record before mq.cmd so a same-frame multi-item flush cannot lose a
+    -- Linked row if a later send path errors or the panel reads mid-drain.
+    record_linked_item(bucket, "sent")
     if item_actions.looks_like_item_link(bucket.item_link) then
         mq.cmd(tostring(cmd or "/g") .. " " .. msg)
     else
@@ -1298,7 +1317,6 @@ local function send_group_announce(bucket, opts)
     note_sent(bucket.item_name)
     note_recent_sent(dedupe.key)
     note_item_announced(bucket.item_name, bucket.item_id)
-    record_linked_item(bucket, "sent")
     return true
 end
 
@@ -2057,6 +2075,12 @@ local function catalog_ready_for(snap)
     return snap and snap.class and catalog.announce_catalog_ready(snap.class, snap.name)
 end
 
+-- True when linked need checks can run (full catalog OR in-memory direct/dcat).
+local function lookup_ready_for(snap)
+    if catalog_ready_for(snap) then return true end
+    return direct_lookup_ready(snap)
+end
+
 local function ensure_catalog_for_chat(snap, flush)
     if not snap or not snap.class then return false end
     if catalog_ready_for(snap) then
@@ -2064,6 +2088,7 @@ local function ensure_catalog_for_chat(snap, flush)
         return true
     end
     if flush then
+        -- Last resort only: bounded full flush (manual/debug paths).
         local ready = catalog.flush_announce_catalog(
             snap.class, snap.name, tonumber(CFG.announce_flush_budget_ms) or 800)
         announce_ready = ready
@@ -2157,20 +2182,12 @@ local function report_links_to_holder(links, holder, source, allow_queue)
         runtime.last_chat_note = "peer report: no snap"
         return false
     end
-    if not ensure_catalog_for_chat(snap, false) then
-        pcall(function()
-            if snap.class then
-                catalog.flush_announce_catalog(
-                    snap.class, snap.name, tonumber(CFG.announce_flush_budget_ms) or 400)
-            end
-        end)
-        if not ensure_catalog_for_chat(snap, false) then
-            if allow_queue then
-                queue_pending_items(links, source, "catalog warming", holder)
-            end
-            runtime.last_chat_note = "peer report queued (catalog)"
-            return false
+    if not lookup_ready_for(snap) then
+        if allow_queue then
+            queue_pending_items(links, source, "catalog warming", holder)
         end
+        runtime.last_chat_note = "peer report queued (catalog)"
+        return false
     end
 
     local any = false
@@ -2178,7 +2195,7 @@ local function report_links_to_holder(links, holder, source, allow_queue)
         local item_name = tostring(item and item.name or "")
         if item_name ~= "" then
             note_loot_seen(item_name, source)
-            local need = catalog.check_announce_need(snap, item_name, item.id)
+            local need = check_need_fail_open(snap, item_name, item.id, { skip_live = false })
             if need and announce_from_need(need, source, item.link, item.id, snap, true, item_name, {
                 reply_to = holder,
             }) then
@@ -2203,7 +2220,7 @@ local function try_process_item_links(links, source, allow_queue, line, opts)
 
     local snap = snap_for_announce()
     if not snap then return false end
-    local ready = ensure_catalog_for_chat(snap, false)
+    local ready = lookup_ready_for(snap)
     if not ready then
         if source == "chat" or source == "replay" then
             return try_process_direct_chat_links_while_warming(links, snap, allow_queue, source, opts)
@@ -2218,7 +2235,7 @@ local function try_process_item_links(links, source, allow_queue, line, opts)
         if opts.group_local then
             ensure_group_announce(item.name, item.link, item.id, source, item.corpse_id)
         end
-        local need = catalog.check_announce_need(snap, item.name, item.id)
+        local need = check_need_fail_open(snap, item.name, item.id, { skip_live = false })
         if announce_from_need(need, source, item.link, item.id, snap, ready, item.name, opts) then
             announced = announced + 1
         else
@@ -2384,7 +2401,8 @@ local function drain_pending(budget_ms, max_entries)
     if #pending == 0 and #pending_items == 0 then return end
     if not SharedSettings.bisAnnounceEnabled then return end
     local snap = gather_self_snapshot.cached() or snap_for_announce()
-    if not snap or not catalog_ready_for(snap) then return end
+    -- Drain once full OR direct/dcat is in memory (do not wait on full rebuild).
+    if not snap or not lookup_ready_for(snap) then return end
 
     local now = os.clock()
     local deadline = now + (math.max(1, tonumber(budget_ms) or 4) / 1000)
@@ -2553,8 +2571,9 @@ function M.on_loot_need(msg)
         local key = grouped_item_key(item_name, item_id, item_link)
         local bucket = key and group_announces[key] or nil
         if bucket then
-            arm_peer_report_hold(bucket)
-            if row_corpse_id(bucket) and type(bucket.order) == "table" and #bucket.order > 0 then
+            local order_n = type(bucket.order) == "table" and #bucket.order or 0
+            arm_peer_report_hold(bucket, { short = order_n > 0 })
+            if order_n > 0 then
                 record_linked_item(bucket, "pending")
             end
         end
@@ -2774,10 +2793,18 @@ function M.warm(flush)
         return announce_ready
     end
     catalog.ensure_announce_catalog(snap.class, { owner = snap.name })
+    -- Prefetch disk dcat into memory so the first loot link is a cheap lookup
+    -- (load cost lands here once, not on the chat frame).
+    pcall(function()
+        catalog.direct_catalog_prefetch(snap.class, snap.name, 250)
+    end)
     announce_ready = catalog_ready_for(snap)
     needs_index_warm = not announce_ready
-    note_startup_progress(announce_ready, announce_ready and "warm_ready" or "warm_startup")
-    return announce_ready
+    -- Treat direct/dcat ready as "listener usable" for startup messaging when
+    -- the full catalog is still building — matches fail-open announce behavior.
+    local usable = announce_ready or direct_lookup_ready(snap)
+    note_startup_progress(usable, usable and "warm_ready" or "warm_startup")
+    return usable
 end
 
 function M.count_announcing_lists()
@@ -2810,14 +2837,18 @@ function M.status()
         if s < 60 then return string.format("%ds ago", s) end
         return string.format("%dm ago", math.floor(s / 60))
     end
-    local ready = announce_ready and catalog_ready_for(snap)
+    local full_ready = catalog_ready_for(snap)
+    local direct_ready = direct_lookup_ready(snap)
+    local ready = full_ready or direct_ready
     local index_label = passive and "passive viewer" or (ready and "ready" or (build.building and "building" or "warming"))
     if passive then
         index_label = "passive viewer"
+    elseif full_ready and (build.entries or 0) > 0 then
+        index_label = string.format("ready (%d items)", build.entries or 0)
+    elseif direct_ready and not full_ready then
+        index_label = "ready (direct cache)"
     elseif build.building and (build.entries or 0) > 0 then
         index_label = string.format("building (%d items)", build.entries or 0)
-    elseif ready and (build.entries or 0) > 0 then
-        index_label = string.format("ready (%d items)", build.entries or 0)
     end
     local pending_group = 0
     for _, _ in pairs(group_announces or {}) do pending_group = pending_group + 1 end
@@ -2998,7 +3029,24 @@ function M.tick()
         end
         local frame_deadline = os.clock() + (frame_budget_ms / 1000)
 
-        if not catalog_ready_for(snap) then
+        -- Prefer getting direct/dcat into memory before (or instead of waiting
+        -- solely on) the full announce catalog — enables fail-open linked needs.
+        if type(catalog.direct_catalog_prefetch) == "function"
+            and not direct_lookup_ready(snap) and os.clock() < frame_deadline
+        then
+            local direct_budget = math.max(5, (frame_deadline - os.clock()) * 1000)
+            if state.bg then
+                direct_budget = math.min(direct_budget, tonumber(CFG.announce_catalog_budget_bg_ms) or 40)
+            elseif state.lean and state.lean() then
+                direct_budget = math.min(direct_budget, tonumber(CFG.announce_catalog_budget_lean_ms) or 5)
+            else
+                direct_budget = math.min(direct_budget, 80)
+            end
+            diag.time("announce.direct_prefetch", function()
+                catalog.direct_catalog_prefetch(snap.class, snap.name, direct_budget)
+            end)
+        end
+        if not catalog_ready_for(snap) and os.clock() < frame_deadline then
             local budget, max_steps
             if state.bg and not announce_ready then
                 budget = tonumber(CFG.announce_catalog_budget_bg_ms) or 40
@@ -3010,14 +3058,13 @@ function M.tick()
                 budget = tonumber(CFG.announce_catalog_budget_ms) or 45
                 max_steps = tonumber(CFG.announce_catalog_steps_ui) or 1
             end
+            budget = math.min(budget, math.max(5, (frame_deadline - os.clock()) * 1000))
             diag.time("announce.catalog_tick", function()
                 catalog.tick_announce_catalog(budget, max_steps)
             end)
         end
         announce_ready = catalog_ready_for(snap)
-        if announce_ready and not was_ready then
-            note_startup_progress(true, "ready")
-        end
+        local usable = announce_ready or direct_lookup_ready(snap)
         -- Decoupled from announce_ready: the index does not depend on the
         -- static catalog, and gating on it starved index warm-up whenever the
         -- static build was slow (Rydell 17:05: 76 index ticks in 626 loops).
@@ -3054,6 +3101,10 @@ function M.tick()
                     needs_index.tick(idx_budget, { allow_peers = allow_peer_index })
                 end
             end
+        end
+        -- After budgeted work: console/replay I/O must not steal the frame slice.
+        if usable and not was_ready then
+            note_startup_progress(true, "ready")
         end
         -- Fleet item-index ticks in init.lua every loop (not here). Leaving it
         -- under announce early-out left Search/Stats empty once announce_ready.

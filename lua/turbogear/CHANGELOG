@@ -1,3 +1,9 @@
+1.2.110
+- Linked needs answer from the cached catalog while the full index is still warming.
+- Driver lists in-scope needers on one [TG] per item with a short hold when needers are already known.
+- Linked items panel keeps a row for every successful [TG].
+- No Sync Now required after restart.
+
 1.2.109
 - Announce: after patcher/restart, stamp the UI driver immediately and keep peer
   need-reports queued until the beacon is up (no Sync Now required).

@@ -35,7 +35,7 @@ M.CFG = {
     script_name  = 'TurboGear',    -- display/settings/cache name
     lua_name     = 'turbogear',     -- folder/module name used by /lua run and /lua stop
     bg_lua_name  = 'turbogear_bg',  -- wrapper responder name; leaves /lua run turbogear free for UI
-    version      = '1.2.109',
+    version      = '1.2.110',
     mailbox      = 'turbogear',     -- shared actor mailbox name across all boxes
     proto        = 1,              -- snapshot protocol version (guards mismatched boxes)
     frame_round  = 5.0,
@@ -143,7 +143,9 @@ M.CFG = {
     -- Hybrid linked [TG]: peers self-report via LOOT_NEED from raid/group/say;
     -- beacon holds briefly to coalesce. needs_index is enrichment only (not a gate).
     announce_link_hybrid = true,
-    announce_peer_report_wait_s = 2.0, -- beacon hold for peer LOOT_NEED coalescing
+    announce_peer_report_wait_s = 2.0, -- beacon hold when still waiting for needers
+    -- When local/Store already found needers, only hold briefly for late LOOT_NEED.
+    announce_peer_report_short_s = 0.35,
     needs_index_enabled = true,  -- optional enrichment for linked announces; still used for text scans
     needs_index_build_peers = true,
     needs_index_budget_ms = 4,     -- inverted needs-index rebuild budget per tick (UI)

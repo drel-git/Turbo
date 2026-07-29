@@ -36,6 +36,8 @@ package.preload['bis_catalog'] = function()
         announce_catalog_ready = function() return true end, -- ready -> catalog warm skipped
         ensure_announce_catalog = function() end,
         tick_announce_catalog = function() end,
+        direct_catalog_if_ready = function() return { by_name = {} } end,
+        direct_catalog_prefetch = function() return { by_name = {} } end,
         direct_build_progress = function() return nil end,
         announce_list_specs = function() return {} end,
         catalog_build_state = function() return {} end,
@@ -54,6 +56,21 @@ package.preload['diagnostics'] = function() return {
 package.preload['store'] = function() return { Store = {
     peer_keys = function() return {} end, get = function() return nil end,
     is_recently_visible = function() return false end } } end
+package.preload['inventory_watch'] = function()
+    return { inventory_settling = function() return false end }
+end
+package.preload['engine'] = function()
+    return { Engine = { debug = false, request_loot_replay = function() end } }
+end
+package.preload['item_index'] = function()
+    return { tick = function() end, get = function() return {}, 0 end }
+end
+package.preload['roster_sets'] = function()
+    return {
+        active_store_keys = function() return {} end,
+        scope_label = function() return "online" end,
+    }
+end
 package.preload['mq'] = function() return {
     LinkTypes = { Item = "item" },
     TLO = { Me = { CleanName = function() return "Tester" end },

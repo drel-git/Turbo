@@ -1460,6 +1460,14 @@ function M.direct_catalog_if_ready(class_name, owner_name)
     return direct_catalogs[catalog_static_sig(class_name, owner_name)]
 end
 
+-- Budgeted warm helper: loads disk dcat when present, otherwise advances the
+-- async direct build. Safe for announcer.tick / M.warm — not for unbounded
+-- sync rebuilds on a chat frame.
+function M.direct_catalog_prefetch(class_name, owner_name, budget_ms)
+    budget_ms = math.max(5, tonumber(budget_ms) or 50)
+    return M.tick_direct_build(class_name, owner_name, os.clock() + budget_ms / 1000)
+end
+
 -- ===== Disk cache for direct catalogs =================================== --
 -- Catalogs depend only on the lazbis data + announce settings + user lists,
 -- all captured below. Build once EVER per signature, persist, and load in
