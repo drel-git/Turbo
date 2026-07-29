@@ -777,7 +777,8 @@ local function draw_linked_items_panel()
     local ok, rows = pcall(function() return announcer.linked_items() end)
     if not ok or type(rows) ~= "table" or #rows == 0 then return end
 
-    col_text(Theme.header, "Linked items:")
+    local show_n = math.min(#rows, 6)
+    col_text(Theme.header, string.format("Linked items (%d):", #rows))
     ImGui.SameLine()
     if themed_button("Clear##bis_linked_clear", Theme.steel, button_text_width("Clear"), NAV_BTN_H) then
         announcer.clear_linked_items()
@@ -786,65 +787,83 @@ local function draw_linked_items_panel()
     end
 
     if not ImGui.BeginTable then
-        for i = 1, math.min(#rows, 6) do
+        for i = 1, show_n do
             local row = rows[i]
             col_text(Theme.item, tostring(row.item_name or "?") .. " - " .. table.concat(row.needers or {}, " | "))
         end
         return
     end
 
-    local flags = (ImGuiTableFlags.BordersInnerV or 0)
-        + (ImGuiTableFlags.RowBg or 0)
-        + (ImGuiTableFlags.NoSavedSettings or 0)
-    if ImGui.BeginTable("##bis_linked_items", 6, flags) then
-        ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 30.0)
-        ImGui.TableSetupColumn("Send", ImGuiTableColumnFlags.WidthFixed, 150.0)
-        ImGui.TableSetupColumn("Item", ImGuiTableColumnFlags.WidthStretch, 1.8)
-        ImGui.TableSetupColumn("Needers", ImGuiTableColumnFlags.WidthStretch, 2.2)
-        -- Corpse spawn id from TurboLoot [ANNOUNCE]/[SKIP] so callers can say
-        -- "loot corpse 132" without digging through chat.
-        ImGui.TableSetupColumn("ID", ImGuiTableColumnFlags.WidthFixed, 48.0)
-        ImGui.TableSetupColumn("Age", ImGuiTableColumnFlags.WidthFixed, 42.0)
-        ImGui.TableHeadersRow()
-        for i = 1, math.min(#rows, 6) do
-            local row = rows[i]
-            local id = tostring(i) .. "_" .. tostring(row.id or "row")
-            ImGui.TableNextRow()
-            ImGui.TableSetColumnIndex(0)
-            if themed_button("X##bis_linked_x_" .. id, Theme.brick or Theme.steel, 24, NAV_BTN_H) then
-                announcer.dismiss_linked_item(row.id)
-                status_msg = "Removed linked item."
-            end
-            ImGui.TableSetColumnIndex(1)
-            draw_linked_send_buttons(row, id)
-            ImGui.TableSetColumnIndex(2)
-            item_actions.draw_name(
-                tostring(row.item_name or "?"),
-                Theme.item,
-                "linked_panel_" .. tostring(id),
-                tonumber(row.item_id) or nil)
-            ImGui.TableSetColumnIndex(3)
-            draw_linked_needers(row, id)
-            ImGui.TableSetColumnIndex(4)
-            local cid = tonumber(row.corpse_id)
-            if cid then
-                col_text(Theme.dim, tostring(math.floor(cid)))
-                if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
-                    ImGui.SetTooltip(string.format(
-                        "Corpse spawn id %d — tell others which corpse still has this item.",
-                        math.floor(cid)))
-                end
-            else
-                ImGui.TextDisabled("-")
-                if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
-                    ImGui.SetTooltip("No corpse id — Go buttons stay off until an [ANNOUNCE]/[SKIP] handoff arrives.")
-                end
-            end
-            ImGui.TableSetColumnIndex(5)
-            ImGui.TextDisabled(linked_item_age_text(row.age_s))
+    -- Reserve height for every visible row so a 3-link burst is not clipped by
+    -- the roster child that takes the remaining viewport below.
+    local row_h = 26.0
+    local panel_h = 22.0 + (show_n + 1) * row_h + 8.0
+    local child_began, child_open = false, true
+    if ImGui.BeginChild and ImVec2 then
+        local cok, open = pcall(function()
+            return ImGui.BeginChild("##bis_linked_panel", ImVec2(0, panel_h), false, 0)
+        end)
+        if cok then
+            child_began = true
+            child_open = (open ~= false)
         end
-        ImGui.EndTable()
     end
+    if child_open then
+        local flags = (ImGuiTableFlags.BordersInnerV or 0)
+            + (ImGuiTableFlags.RowBg or 0)
+            + (ImGuiTableFlags.NoSavedSettings or 0)
+            + (ImGuiTableFlags.SizingStretchProp or 0)
+        if ImGui.BeginTable("##bis_linked_items", 6, flags) then
+            ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 30.0)
+            ImGui.TableSetupColumn("Send", ImGuiTableColumnFlags.WidthFixed, 150.0)
+            ImGui.TableSetupColumn("Item", ImGuiTableColumnFlags.WidthStretch, 1.8)
+            ImGui.TableSetupColumn("Needers", ImGuiTableColumnFlags.WidthStretch, 2.2)
+            -- Corpse spawn id from TurboLoot [ANNOUNCE]/[SKIP] so callers can say
+            -- "loot corpse 132" without digging through chat.
+            ImGui.TableSetupColumn("ID", ImGuiTableColumnFlags.WidthFixed, 48.0)
+            ImGui.TableSetupColumn("Age", ImGuiTableColumnFlags.WidthFixed, 42.0)
+            ImGui.TableHeadersRow()
+            for i = 1, show_n do
+                local row = rows[i]
+                local id = tostring(i) .. "_" .. tostring(row.id or "row")
+                ImGui.TableNextRow()
+                ImGui.TableSetColumnIndex(0)
+                if themed_button("X##bis_linked_x_" .. id, Theme.brick or Theme.steel, 24, NAV_BTN_H) then
+                    announcer.dismiss_linked_item(row.id)
+                    status_msg = "Removed linked item."
+                end
+                ImGui.TableSetColumnIndex(1)
+                draw_linked_send_buttons(row, id)
+                ImGui.TableSetColumnIndex(2)
+                item_actions.draw_name(
+                    tostring(row.item_name or "?"),
+                    Theme.item,
+                    "linked_panel_" .. tostring(id),
+                    tonumber(row.item_id) or nil)
+                ImGui.TableSetColumnIndex(3)
+                draw_linked_needers(row, id)
+                ImGui.TableSetColumnIndex(4)
+                local cid = tonumber(row.corpse_id)
+                if cid then
+                    col_text(Theme.dim, tostring(math.floor(cid)))
+                    if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
+                        ImGui.SetTooltip(string.format(
+                            "Corpse spawn id %d — tell others which corpse still has this item.",
+                            math.floor(cid)))
+                    end
+                else
+                    ImGui.TextDisabled("-")
+                    if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
+                        ImGui.SetTooltip("No corpse id — Go buttons stay off until an [ANNOUNCE]/[SKIP] handoff arrives.")
+                    end
+                end
+                ImGui.TableSetColumnIndex(5)
+                ImGui.TextDisabled(linked_item_age_text(row.age_s))
+            end
+            ImGui.EndTable()
+        end
+    end
+    if child_began and ImGui.EndChild then ImGui.EndChild() end
     if #rows > 6 then
         col_text(Theme.dim, string.format("%d older linked items hidden.", #rows - 6))
     end

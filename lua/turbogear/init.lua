@@ -671,6 +671,21 @@ local function tgear_command(...)
         else
             diag.print(rest)
         end
+    elseif arg == "lootneedquiet" then
+        -- lootneedquiet <from> <itemId> <item name...>  (bg -> UI relay for LOOT_NEED)
+        local from = tostring(args[2] or "")
+        local item_id = tonumber(args[3]) or 0
+        local item_name = table.concat(args, " ", 4)
+        item_name = tostring(item_name or ""):match("^%s*(.-)%s*$") or ""
+        if from ~= "" and item_name ~= "" then
+            announcer.on_loot_need({
+                from = from,
+                character = from,
+                item_name = item_name,
+                loot_item_name = item_name,
+                item_id = item_id,
+            })
+        end
     elseif arg == "lootseen" or arg == "lootseenquiet" or arg == "loot" or arg == "linkedloot" then
         local quiet = arg == "lootseenquiet"
         -- lootseenquiet "Item Name" [itemId] [corpseId]

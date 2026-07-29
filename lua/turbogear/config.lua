@@ -35,7 +35,7 @@ M.CFG = {
     script_name  = 'TurboGear',    -- display/settings/cache name
     lua_name     = 'turbogear',     -- folder/module name used by /lua run and /lua stop
     bg_lua_name  = 'turbogear_bg',  -- wrapper responder name; leaves /lua run turbogear free for UI
-    version      = '1.2.106',
+    version      = '1.2.107',
     mailbox      = 'turbogear',     -- shared actor mailbox name across all boxes
     proto        = 1,              -- snapshot protocol version (guards mismatched boxes)
     frame_round  = 5.0,
@@ -140,7 +140,11 @@ M.CFG = {
     announce_confirm_needers = true,    -- live-confirm cache-derived peer needers over actors before sending [TG]
     announce_confirm_wait_s = 2.0,      -- max hold on a grouped announce while confirm replies arrive (fail-open)
     announce_confirm_refresh_cooldown_s = 30.0, -- min gap between fresh-snapshot requests for a stale-confirmed peer
-    needs_index_enabled = true,  -- linked announces use the prebuilt needs index in steady state
+    -- Hybrid linked [TG]: peers self-report via LOOT_NEED from raid/group/say;
+    -- beacon holds briefly to coalesce. needs_index is enrichment only (not a gate).
+    announce_link_hybrid = true,
+    announce_peer_report_wait_s = 2.0, -- beacon hold for peer LOOT_NEED coalescing
+    needs_index_enabled = true,  -- optional enrichment for linked announces; still used for text scans
     needs_index_build_peers = true,
     needs_index_budget_ms = 4,     -- inverted needs-index rebuild budget per tick (UI)
     needs_index_budget_lean_ms = 2, -- minimized/lean should yield quickly while zoning/running

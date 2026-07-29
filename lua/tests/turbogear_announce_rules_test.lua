@@ -95,14 +95,18 @@ check(R.parse_tg_line("Drel tells the group, 'grats on the sword'") == nil, 'tg 
 check(R.parse_tg_line("") == nil, 'tg parse: empty line is nil')
 check(R.parse_tg_line("[TG] - Solo Item") == "Solo Item", 'tg parse: payload without names segment')
 
--- confirmable_needers: cache-derived peer needers only (skip self + actor-reply)
+-- confirmable_needers: cache-derived peer needers only (skip self + live sources)
 do
-    local order = { "Gears", "Hez", "Captaain", "Drel" }
-    local sources = { gears = "index", hez = "index", captaain = "actor-reply", drel = "targeted" }
+    local order = { "Gears", "Hez", "Captaain", "Drel", "Vyth" }
+    local sources = {
+        gears = "local-live", hez = "index", captaain = "actor-reply",
+        drel = "targeted", vyth = "local-live",
+    }
     local out = R.confirmable_needers(order, sources, "Gears")
-    check(#out == 2 and out[1] == "Hez" and out[2] == "Drel", 'confirm: skips self and actor-reply needers')
+    check(#out == 2 and out[1] == "Hez" and out[2] == "Drel",
+        'confirm: skips self, actor-reply, and local-live needers')
     out = R.confirmable_needers(order, nil, "Gears")
-    check(#out == 3, 'confirm: nil sources treats all remote needers as cache-derived')
+    check(#out == 4, 'confirm: nil sources treats all remote needers as cache-derived')
     check(#R.confirmable_needers(nil, sources, "Gears") == 0, 'confirm: nil order safe')
     check(#R.confirmable_needers({ "Gears" }, {}, "gears") == 0, 'confirm: self match is case-insensitive')
 end

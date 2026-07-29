@@ -1,8 +1,8 @@
 -- TurboGear/announcer.lua
--- (needs-index fast path added 2026-07-04)
--- BiS linked-needs: the box that links an item starts a short aggregation
--- window. Peers evaluate their own lists and privately report needs back, so
--- chat gets one grouped line instead of one line per responder.
+-- BiS linked-needs (hybrid, 1.2.107+): raid/group/say links are evaluated
+-- locally on every box. Peers LOOT_NEED the announce beacon; the beacon holds
+-- briefly and emits one grouped [TG] line. needs_index is optional enrichment,
+-- not a gate for linked announces.
 
 local mq  = require('mq')
 local cfg = require('config')
@@ -273,7 +273,7 @@ end
 local no_ui_driver_warn_printed = false
 
 local function should_defer_chat_announce()
-    local defer, reason = rules.should_defer_announce({
+    local defer, reason, holder = rules.should_defer_announce({
         is_bg = state.bg == true,
         me_name = me_name(),
         group_sig = settled_group_sig(),
@@ -282,7 +282,38 @@ local function should_defer_chat_announce()
         coordinators = SharedSettings.announceCoordinators,
         legacy_seen_at = SharedSettings.announceCoordinatorSeenAt,
     })
-    return defer == true, reason
+    return defer == true, reason, holder
+end
+
+local function peer_report_wait_s()
+    return math.max(0.5, tonumber(CFG.announce_peer_report_wait_s) or 2.0)
+end
+
+local function link_hybrid_enabled()
+    return CFG.announce_link_hybrid ~= false
+end
+
+--- Fresh shared-settings read so peers see the beacon holder promptly.
+local function resolve_announce_holder()
+    pcall(function()
+        if cfg.LoadSharedSettings then cfg.LoadSharedSettings() end
+    end)
+    local defer, reason, holder = should_defer_chat_announce()
+    return trim(holder or ""), reason, defer == true
+end
+
+local function arm_peer_report_hold(bucket)
+    if type(bucket) ~= "table" then return end
+    local now = os.clock()
+    local created = tonumber(bucket.created) or now
+    local wait = peer_report_wait_s()
+    if not bucket.peer_report_armed then
+        bucket.peer_report_armed = true
+        bucket.due = math.max(tonumber(bucket.due) or 0, created + wait)
+    else
+        local cap = created + wait + 0.75
+        bucket.due = math.min(cap, math.max(tonumber(bucket.due) or 0, now + 0.15))
+    end
 end
 
 local function warn_no_ui_driver_once(reason)
@@ -1097,14 +1128,39 @@ local function scan_group_needs_from_cache(links, source)
     local group_index_ready = index_enabled
         and (needs_index.group_ready and needs_index.group_ready() or needs_index.ready())
     local indexed = index_enabled and needs_index.char_count() or 0
+    local hybrid = link_hybrid_enabled()
+
+    -- Hybrid: beacon local-live + peer LOOT_NEED; needs_index is enrichment only.
+    -- Legacy: wait on group_ready / targeted Store scans (pre-1.2.107 path).
+    local snap = hybrid and snap_for_announce() or nil
+    local catalog_ready = false
+    if hybrid and snap and snap.class then
+        -- Inline ready check (ensure_catalog_for_chat is defined later in this file).
+        pcall(function()
+            catalog.ensure_announce_catalog(snap.class, { owner = snap.name })
+        end)
+        catalog_ready = catalog.announce_catalog_ready(snap.class, snap.name) == true
+    end
+
     for _, item in ipairs(links) do
         local item_name = tostring(item and item.name or "")
         if item_name ~= "" then
             note_loot_seen(item_name, source)
             local item_link = resolve_group_item_link(item_name, item.link, item.id)
             local bucket = ensure_group_announce(item_name, item_link, item.id, source, item.corpse_id)
+            if hybrid and bucket then
+                arm_peer_report_hold(bucket)
+            end
+
             -- Announce under the LINKED item's own name (a real item), never
             -- an index alias like "... - Tier II" (see needs_index display rules).
+            if hybrid and catalog_ready and snap then
+                local need = catalog.check_announce_need(snap, item_name, item.id)
+                if need and add_group_need(item_name, item_link, item.id, me_name(), "local-live") then
+                    added = added + 1
+                end
+            end
+
             if index_enabled then
                 for _, need in ipairs(needs_index.needers_for(item_name, item.id)) do
                     if add_group_need(item_name, item_link, item.id, need.character or "?", "index") then
@@ -1112,12 +1168,15 @@ local function scan_group_needs_from_cache(links, source)
                     end
                 end
             end
-            if not group_index_ready then
+
+            -- Cold Store walk only when hybrid is off (legacy fallback).
+            if not hybrid and not group_index_ready then
                 local d_added, d_queued, d_snaps = queue_group_target_checks(item, item_link, bucket, source)
                 added = added + (tonumber(d_added) or 0)
                 queued = queued + (tonumber(d_queued) or 0)
                 snaps_seen = math.max(snaps_seen, tonumber(d_snaps) or 0)
             end
+
             -- Surface Go-loot buttons as soon as we know a corpse id and at
             -- least one needer - don't wait for the [TG] collapse flush.
             if bucket and row_corpse_id(bucket) and type(bucket.order) == "table" and #bucket.order > 0 then
@@ -1125,7 +1184,10 @@ local function scan_group_needs_from_cache(links, source)
             end
         end
     end
-    if queued > 0 then
+    if hybrid then
+        note_group_scan("links-hybrid", source, #links, indexed, added)
+        if added > 0 then diag.count("announce.hybrid_group_needs") end
+    elseif queued > 0 then
         note_group_scan("links-targeted", source, #links, snaps_seen, added)
         diag.count("announce.group_targeted_queued", queued)
     elseif group_index_ready then
@@ -1638,6 +1700,11 @@ end
 
 local function drain_group_announces()
     local now = os.clock()
+    -- Snapshot keys first: deleting from group_announces while pairs() iterates
+    -- can skip buckets (Lua/LuaJIT), which dropped Linked-items rows for one of
+    -- every three same-frame flushes even when all [TG] lines still went out on
+    -- a later tick after a re-arm race.
+    local due_keys = {}
     for key, bucket in pairs(group_announces) do
         local pending_targets = bucket and (tonumber(bucket.pending_targets) or 0) or 0
         local batch_key = bucket and tostring(bucket.text_batch_key or "") or ""
@@ -1651,26 +1718,46 @@ local function drain_group_announces()
         if bucket and (pending_targets > 0 or pending_text) and not target_wait_expired then
             bucket.due = math.max(tonumber(bucket.due) or 0, now + group_window_s())
         elseif not bucket or (tonumber(bucket.due) or 0) <= now then
-            if bucket and not target_wait_expired and try_start_confirm_round(bucket, now) then
-                -- held: confirm replies (or the confirm wait) will re-due it
-            else
-                group_announces[key] = nil
-                clear_targeted_seen(key)
-                if target_wait_expired then
-                    bucket.pending_targets = 0
-                    if batch then
-                        batch.expired = true
-                        batch.pending = 0
-                    end
-                    runtime.target_checks_pending = #targeted_checks
-                    note_skip(bucket.item_name, "targeted peer checks timed out")
-                    diag.count("announce.target_checks_timed_out")
-                end
-                send_group_announce(bucket)
-            end
+            due_keys[#due_keys + 1] = {
+                key = key,
+                bucket = bucket,
+                target_wait_expired = target_wait_expired,
+                batch = batch,
+            }
         end
     end
-    for batch_key, batch in pairs(text_batches) do
+    for _, work in ipairs(due_keys) do
+        local key, bucket = work.key, work.bucket
+        if bucket and not work.target_wait_expired and try_start_confirm_round(bucket, now) then
+            -- held: confirm replies (or the confirm wait) will re-due it
+        elseif bucket then
+            group_announces[key] = nil
+            clear_targeted_seen(key)
+            if work.target_wait_expired then
+                bucket.pending_targets = 0
+                local batch = work.batch
+                if batch then
+                    batch.expired = true
+                    batch.pending = 0
+                end
+                runtime.target_checks_pending = #targeted_checks
+                note_skip(bucket.item_name, "targeted peer checks timed out")
+                diag.count("announce.target_checks_timed_out")
+            end
+            -- Record before chat send so the Linked panel always keeps the row
+            -- even if a later same-frame send is rate-limited / skipped.
+            if type(bucket.order) == "table" and #bucket.order > 0 then
+                record_linked_item(bucket, "pending")
+            end
+            send_group_announce(bucket)
+        end
+    end
+    local batch_keys = {}
+    for batch_key, _ in pairs(text_batches) do
+        batch_keys[#batch_keys + 1] = batch_key
+    end
+    for _, batch_key in ipairs(batch_keys) do
+        local batch = text_batches[batch_key]
         local done = batch and ((tonumber(batch.pending) or 0) <= 0 or batch.expired)
         local at = tonumber((batch and (batch.finished_at or batch.created)) or now) or now
         if done and (now - at) > 30 then
@@ -2020,6 +2107,53 @@ local function try_process_direct_chat_text_while_warming(line, snap, allow_queu
     return false
 end
 
+--- Peer / non-holder UI: evaluate locally and LOOT_NEED the beacon (no [TG]).
+local function report_links_to_holder(links, holder, source, allow_queue)
+    if type(links) ~= "table" or #links == 0 then return false end
+    holder = trim(holder or "")
+    if holder == "" then
+        holder = select(1, resolve_announce_holder())
+    end
+    if holder == "" then
+        runtime.last_chat_note = "peer report: no holder"
+        return false
+    end
+    if holder:lower() == tostring(me_name() or ""):lower() then
+        runtime.last_chat_note = "peer report: self is holder"
+        return false
+    end
+
+    local snap = snap_for_announce()
+    if not snap then
+        runtime.last_chat_note = "peer report: no snap"
+        return false
+    end
+    if not ensure_catalog_for_chat(snap, false) then
+        if allow_queue then
+            queue_pending_items(links, source, "catalog warming", holder)
+        end
+        runtime.last_chat_note = "peer report queued (catalog)"
+        return false
+    end
+
+    local any = false
+    for _, item in ipairs(links) do
+        local item_name = tostring(item and item.name or "")
+        if item_name ~= "" then
+            note_loot_seen(item_name, source)
+            local need = catalog.check_announce_need(snap, item_name, item.id)
+            if need and announce_from_need(need, source, item.link, item.id, snap, true, item_name, {
+                reply_to = holder,
+            }) then
+                any = true
+            end
+        end
+    end
+    runtime.last_chat_note = any and ("peer report to " .. holder) or "peer report: no need"
+    if any then diag.count("announce.peer_reports_attempted") end
+    return any
+end
+
 local function try_process_item_links(links, source, allow_queue, line, opts)
     if not SharedSettings.bisAnnounceEnabled then return false end
     if type(links) ~= "table" or #links == 0 then return false end
@@ -2086,30 +2220,57 @@ local function try_process_chat(line, allow_queue, opts)
     if #links > 0 and not opts.replay and is_player_link_chat_line(line) then
         remember_recent_replay(line, links, "chat")
     end
-    -- Sticky per-group driver-first: same-group non-holders (UI or bg) stay
-    -- quiet for chat-triggered needs. Link capture / replay / [TG] dedupe above
-    -- still ran. Bg with no fresh UI beacon fail-closes (no_ui_driver).
-    local defer_chat, defer_reason = should_defer_chat_announce()
-    if defer_chat then
-        warn_no_ui_driver_once(defer_reason)
-        runtime.last_chat_note = defer_reason == "no_ui_driver" and "no ui driver" or "driver coordinator"
-        return false
+    -- Sticky per-group driver-first: only the beacon emits [TG]. Peers (and
+    -- non-holder UIs) still evaluate linked loot and LOOT_NEED the holder when
+    -- hybrid announce is on. Bg with no fresh UI beacon fail-closes.
+    if #links > 0 and link_hybrid_enabled() then
+        -- Peers need a fresh beacon name from shared settings.
+        pcall(function()
+            if cfg.LoadSharedSettings then cfg.LoadSharedSettings() end
+        end)
     end
+    local defer_chat, defer_reason, holder = should_defer_chat_announce()
     if #links > 0 then
+        local source = opts.replay and "replay" or "chat"
+        if defer_chat then
+            if defer_reason == "no_ui_driver" then
+                warn_no_ui_driver_once(defer_reason)
+                runtime.last_chat_note = "no ui driver"
+                return false
+            end
+            if link_hybrid_enabled() then
+                return report_links_to_holder(links, holder, source, allow_queue)
+            end
+            runtime.last_chat_note = "driver coordinator"
+            return false
+        end
         local self_line = opts.self_event == true or is_self_loot_line(line)
         local group_local = self_line or ui_coordinator
-        if not group_local and not opts.replay and SharedSettings.announceUseActor ~= false then
+        if not group_local and not opts.replay and SharedSettings.announceUseActor ~= false
+            and not link_hybrid_enabled()
+        then
             runtime.last_chat_note = "actor expected"
             return false
         end
-        return try_process_item_links(links, opts.replay and "replay" or "chat", allow_queue, line, {
-            group_local = group_local,
+        -- Hybrid: non-coordinator boxes that did not defer still report-only
+        -- rather than emitting their own [TG] (belt-and-suspenders).
+        if link_hybrid_enabled() and not group_local then
+            local h = trim(holder or "")
+            if h == "" then h = select(1, resolve_announce_holder()) end
+            if h ~= "" and h:lower() ~= tostring(me_name() or ""):lower() then
+                return report_links_to_holder(links, h, source, allow_queue)
+            end
+        end
+        return try_process_item_links(links, source, allow_queue, line, {
+            group_local = group_local or link_hybrid_enabled(),
         })
     end
 
     if not opts.replay and SharedSettings.announceUseActor ~= false
         and not ui_coordinator
-        and (opts.other_event == true or is_other_player_chat_line(line)) then
+        and (opts.other_event == true or is_other_player_chat_line(line))
+        and not link_hybrid_enabled()
+    then
         return false
     end
 
@@ -2223,6 +2384,19 @@ local function forward_loot_to_local_ui(item_name, item_id, corpse_id)
         math.floor(tonumber(corpse_id) or 0)))
 end
 
+-- Same mailbox split: peer LOOT_NEED arrives on passive bg and must reach the
+-- UI process that owns group_announces / [TG] emit.
+local function forward_loot_need_to_local_ui(from, item_name, item_id)
+    if state.bg ~= true then return end
+    from = trim(from):gsub("%s+", "")
+    item_name = trim(item_name)
+    if from == "" or item_name == "" then return end
+    mq.cmd(string.format('/squelch /tgear lootneedquiet %s %d %s',
+        from,
+        math.floor(tonumber(item_id) or 0),
+        item_name))
+end
+
 function M.on_loot_link(msg)
     if type(msg) ~= "table" or type(msg.items) ~= "table" or #msg.items == 0 then return end
     local from = tostring(msg.from or "")
@@ -2303,8 +2477,6 @@ function M.on_loot_seen(item_name, item_id, item_link, source, corpse_id)
 end
 
 function M.on_loot_need(msg)
-    if passive then return end
-    if not SharedSettings.bisAnnounceEnabled then return end
     if type(msg) ~= "table" then return end
     local from = trim(msg.from or msg.character or "")
     if from == "" or from:lower() == me_name():lower() then return end
@@ -2312,8 +2484,24 @@ function M.on_loot_need(msg)
     if item_name == "" then return end
     local item_link = tostring(msg.item_link or "")
     local item_id = tonumber(msg.item_id) or 0
+    if passive then
+        forward_loot_need_to_local_ui(from, item_name, item_id)
+        return
+    end
+    if not SharedSettings.bisAnnounceEnabled then return end
     add_group_need(item_name, item_link, item_id, from, "actor-reply")
     diag.count("announce.need_reports_received")
+    -- Stretch the hybrid coalesce window so late peer reports join one [TG].
+    if link_hybrid_enabled() then
+        local key = grouped_item_key(item_name, item_id, item_link)
+        local bucket = key and group_announces[key] or nil
+        if bucket then
+            arm_peer_report_hold(bucket)
+            if row_corpse_id(bucket) and type(bucket.order) == "table" and #bucket.order > 0 then
+                record_linked_item(bucket, "pending")
+            end
+        end
+    end
 end
 
 -- Peer side of the confirm round: another box is about to announce US as a
