@@ -1,3 +1,17 @@
+1.2.113
+- Announce/Linked: Jonas hand short aliases and "Jonas Dagmire's …" loot names
+  collapse to one [TG] / Linked row (different bones stay distinct).
+- Bank: closed/empty gathers no longer wipe a prior good bank cache; Store merge
+  treats non-live empty bank as keep-existing; announce ownership falls back to
+  preserved Store bank when FindItemBank fails after zone.
+
+1.2.112
+- Inspect Effects/Focus: stop tab switches and background sync from wiping live stats and focus data after they first appear.
+
+1.2.111
+- Inspect Effects: Sync Now / peer requests keep live stats again (1.2.106 fastInventory had been skipping them).
+- Inspect Focus: clear sticky empty focus meta on sync/refresh and republish full item focus data.
+
 1.2.110
 - Linked needs answer from the cached catalog while the full index is still warming.
 - Driver lists in-scope needers on one [TG] per item with a short hold when needers are already known.

@@ -666,6 +666,13 @@ function M.source_snapshot(key)
             end
         end
         if cached and (depth == "lite" or cached.depth == "full") then
+            -- Module cache can lose liveStats after inventory_watch skipLiveStats
+            -- gathers. Prefer Store's preserved liveStats for Inspect > Effects.
+            if type(cached.liveStats) ~= "table" and type(store_self) == "table"
+                and type(store_self.liveStats) == "table"
+            then
+                cached.liveStats = store_self.liveStats
+            end
             return cached, true, "Self"
         end
         return snapshot.gather({ force = false, depth = depth }), true, "Self"

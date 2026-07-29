@@ -427,7 +427,9 @@ local function merge_item_lists(old_list, new_list)
             end
             new_list[i] = merged
         elseif prev and item_has_full_meta(item) then
-            -- Full replace won, but keep wear/class meta if the new row lost it.
+            -- Full replace won, but keep wear/class/focus meta if the new row lost it.
+            -- depth=full with empty focusEffects is common after skip-heavy publishes
+            -- and must not erase a prior good Focus tab payload.
             local function empty_list(t)
                 return type(t) ~= "table" or next(t) == nil
             end
@@ -437,6 +439,12 @@ local function merge_item_lists(old_list, new_list)
             if empty_list(item.classes) and not empty_list(prev.classes) then
                 item.classes = prev.classes
                 item.allClasses = prev.allClasses
+            end
+            if empty_list(item.focusEffects) and not empty_list(prev.focusEffects) then
+                item.focusEffects = prev.focusEffects
+            end
+            if empty_list(item.wornFocusEffects) and not empty_list(prev.wornFocusEffects) then
+                item.wornFocusEffects = prev.wornFocusEffects
             end
         end
     end
@@ -481,7 +489,10 @@ local function merge_lite_snapshot(existing, snap)
         celestial_crests = snap.celestial_crests ~= nil and snap.celestial_crests or existing.celestial_crests,
         aa_unspent = snap.aa_unspent ~= nil and snap.aa_unspent or existing.aa_unspent,
     }
-    if snap.bankValid ~= true and type(existing.bank) == "table" and #existing.bank > 0 then
+    local live_bank = snap.bankLive == true and snap.bankOpen == true
+    local snap_bank_ok = live_bank
+        or (snap.bankValid == true and type(snap.bank) == "table" and #snap.bank > 0)
+    if (not snap_bank_ok) and type(existing.bank) == "table" and #existing.bank > 0 then
         out.bank = existing.bank
         out.bankValid = true
         out.bankLive = false
@@ -521,7 +532,17 @@ local function merge_snapshot(existing, snap)
         snap.spells_sig = existing.spells_sig
         snap.spell_ids = existing.spell_ids
     end
-    if snap.bankValid == true then return snap end
+    -- Full snaps still go through item merge so empty focus/stats rows cannot
+    -- clobber richer Inspect Focus data from a prior publish.
+    snap.equipped = merge_item_lists(existing.equipped, snap.equipped or {})
+    snap.bags = merge_item_lists(existing.bags, snap.bags or {})
+    local live_bank = snap.bankLive == true and snap.bankOpen == true
+    -- Live open bank is authoritative (including intentional empty).
+    if live_bank then return snap end
+    -- bankValid + empty after zone/closed gather is NOT authoritative.
+    if snap.bankValid == true and type(snap.bank) == "table" and #snap.bank > 0 then
+        return snap
+    end
     if type(existing.bank) ~= "table" or #existing.bank == 0 then return snap end
     local out = {}
     for k, v in pairs(snap) do out[k] = v end
@@ -1450,6 +1471,9 @@ local function ingest_cache_table(t, mark_offline)
                 s = preserve_presence(existing, s, mark_offline and "offline" or existing.status)
                 -- Disk/actor rows with class="?" must not clobber a known in-memory class.
                 s.class = coalesce_class(s.class, existing.class)
+                -- Merge so disk rows without liveStats/focus do not erase fresher
+                -- in-memory Inspect Effects / Focus payloads after Sync Now.
+                s = merge_snapshot(existing, s)
                 Store.sources[k] = s
                 accepted = true
                 -- Newer timestamp does not imply new content (bg re-saves on

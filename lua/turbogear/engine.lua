@@ -270,8 +270,9 @@ local function on_message(message)
         local depth = (c.depth == "full" or c.depth == "lite") and c.depth or (force and "full" or "lite")
         local publish_opts = { includeSpells = c.includeSpells == true }
         if c.fastInventory == true then
+            -- Skip lockouts only. Live stats are required for Inspect > Effects
+            -- after Sync Now (1.2.106 had skipLiveStats here and left Effects empty).
             publish_opts.skipLockouts = true
-            publish_opts.skipLiveStats = true
         end
         publish_opts.reason = "peer_request"
         publish_opts.replyTo = c.requestId

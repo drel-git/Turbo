@@ -148,7 +148,18 @@ local function draw_controls()
         ImGui.SameLine()
     end
     if theme.themed_button("Refresh##live_stats_refresh", Theme.blue) then
-        Engine.request_all(true, { depth = "full" })
+        local key = selected_key()
+        if key == "__self__" then
+            -- Local box: publish with liveStats (do not use fastInventory skip).
+            Engine.publish(true, "full", { skipLockouts = true, reason = "effects_refresh" })
+        else
+            -- Peer: request full inventory + live stats for the selected character.
+            if Engine.request_source then
+                Engine.request_source(key, true, { depth = "full" })
+            else
+                Engine.request_all(true, { depth = "full" })
+            end
+        end
     end
     ImGui.SameLine()
     if theme.themed_button("Open Inv Stats##live_stats_open_inv_stats", Theme.steel) then

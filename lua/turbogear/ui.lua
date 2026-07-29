@@ -887,8 +887,25 @@ local function sync_current_view_if_needed()
             last_view_key = view_key
             return
         end
+        -- Effects/Focus: force a full publish with liveStats so tab re-entry
+        -- cannot serve a skipLiveStats module cache that blanked those views.
+        local main = tostring(Settings.mainTab or "")
+        local inspect = tostring(Settings.inspectTab or "stats")
+        local force_inspect = main == "inspect" and (inspect == "live" or inspect == "focus")
+        if force_inspect then
+            pcall(function()
+                local items = require('items')
+                if items.clear_meta_cache then items.clear_meta_cache() end
+            end)
+            snapshot.invalidate()
+        end
         snapshot.ensure_full()
-        if Engine.ok then Engine.publish(false, "full") end
+        if Engine.ok then
+            Engine.publish(force_inspect, "full", {
+                skipLockouts = true,
+                reason = "inspect_tab_enter",
+            })
+        end
     end
     last_view_key = view_key
 end

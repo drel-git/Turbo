@@ -556,6 +556,62 @@ local function live_status_from_fi(fi, bank)
     return "carried"
 end
 
+local function jonas_bare(name)
+    name = norm_item_name(name)
+    if name == "" then return "" end
+    local prefix = "jonas dagmire's "
+    if name:sub(1, #prefix) == prefix then
+        return trim(name:sub(#prefix + 1))
+    end
+    return name
+end
+
+local function names_match_owned(a, b)
+    a, b = norm_item_name(a), norm_item_name(b)
+    if a == "" or b == "" then return false end
+    if a == b then return true end
+    local ca, cb = jonas_bare(a), jonas_bare(b)
+    return ca ~= "" and ca == cb
+end
+
+-- After zone, FindItemBank can fail while Store still holds a preserved bank.
+local function owned_in_store_bank(entry, item_name, item_id)
+    local bank = nil
+    pcall(function()
+        local store = require('store').Store
+        local key = store and store.my_key and store.my_key() or nil
+        local snap = key and store.get and store.get(key) or nil
+        if type(snap) == "table" and type(snap.bank) == "table" and #snap.bank > 0 then
+            bank = snap.bank
+        end
+    end)
+    if not bank then return false end
+    item_id = tonumber(item_id) or 0
+    local ids = {}
+    for _, id in ipairs(entry.ids or {}) do
+        id = tonumber(id) or 0
+        if id > 0 then ids[id] = true end
+    end
+    if item_id > 0 then ids[item_id] = true end
+    local names = {}
+    local function note_name(n)
+        n = trim(n)
+        if n ~= "" then names[#names + 1] = n end
+    end
+    note_name(item_name)
+    note_name(entry.item)
+    for _, n in ipairs(entry.names or {}) do note_name(n) end
+    for _, it in ipairs(bank) do
+        local bid = tonumber(it and it.id) or 0
+        if bid > 0 and ids[bid] then return true end
+        local bname = tostring(it and it.name or "")
+        for _, n in ipairs(names) do
+            if names_match_owned(bname, n) then return true end
+        end
+    end
+    return false
+end
+
 --- Returns "equipped", "carried", or nil (not owned on this box).
 function M.live_item_status(entry, item_name, item_id)
     entry = entry and M.normalize_entry(entry) or {}
@@ -584,6 +640,9 @@ function M.live_item_status(entry, item_name, item_id)
     if canonical ~= "" and canonical ~= item_name then
         local st = try(canonical)
         if st then return st end
+    end
+    if owned_in_store_bank(entry, item_name, item_id) then
+        return "carried"
     end
     return nil
 end

@@ -71,6 +71,10 @@ local function snap(server, name, opts)
         seq = opts.seq,
         inventoryUpdated = opts.inventoryUpdated,
         equipped = opts.equipped or {}, bags = opts.bags or {}, bank = opts.bank or {},
+        bankValid = opts.bankValid,
+        bankLive = opts.bankLive,
+        bankOpen = opts.bankOpen,
+        bankPreserved = opts.bankPreserved,
     }
 end
 
@@ -269,6 +273,41 @@ do
     check(cv2 > cv1, "lite->full meta enrich bumps content_version (same bag id)")
     local bow = Store.get("Srv_Meta").bags[1]
     check(type(bow.slots) == "table" and tonumber(bow.slots[1]) == 11, "full put keeps ranged wear slot")
+end
+
+-- ---- 12. bank: empty non-live put keeps prior bank ------------------------
+do
+    local bank_item = {
+        id = 777, name = "Banked Bone", location = "Bank", where = "Bank1 #1",
+        slotid = 2000, slotname = "Bank",
+    }
+    Store.put(snap("Srv", "Banker", {
+        depth = "full",
+        bank = { bank_item },
+        bankValid = true,
+        bankLive = true,
+        bankOpen = true,
+    }), "client")
+    check(#(Store.get("Srv_Banker").bank or {}) == 1, "bank put stored one item")
+    Store.put(snap("Srv", "Banker", {
+        depth = "full",
+        bank = {},
+        bankValid = true, -- stale/empty after zone; not live-open
+        bankLive = false,
+        bankOpen = false,
+    }), "client")
+    local b = Store.get("Srv_Banker")
+    check(#(b.bank or {}) == 1 and b.bank[1].id == 777, "empty non-live bank put preserved prior bank")
+    check(b.bankPreserved == true, "preserved bank flagged")
+    Store.put(snap("Srv", "Banker", {
+        depth = "full",
+        bank = {},
+        bankValid = true,
+        bankLive = true,
+        bankOpen = true,
+    }), "client")
+    b = Store.get("Srv_Banker")
+    check(#(b.bank or {}) == 0, "live open empty bank is authoritative clear")
 end
 
 -- ---- results --------------------------------------------------------------

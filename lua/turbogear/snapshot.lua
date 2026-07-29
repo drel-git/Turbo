@@ -309,6 +309,7 @@ function M.invalidate()
     self_full_snap, self_full_time = nil, 0
     spell_cache_store = { class = nil, spells = nil, ids = nil, sig = nil }
     last_force_snap, last_force_time, last_force_depth = nil, 0, nil
+    pcall(function() items.clear_meta_cache() end)
 end
 
 --- Attach spells to snap: reuse module cache when spell_cache signature matches
@@ -751,8 +752,22 @@ local function build_snap(depth, opts)
     return snap
 end
 
+local function bank_is_live_open(snap)
+    return type(snap) == "table" and snap.bankLive == true and snap.bankOpen == true
+end
+
+local function cached_bank_usable(cached)
+    return type(cached) == "table" and type(cached.bank) == "table" and #cached.bank > 0
+end
+
 local function preserve_cached_bank(snap, cached)
-    if type(snap) ~= "table" or snap.bankValid == true then return snap end
+    if type(snap) ~= "table" then return snap end
+    -- Live open bank is authoritative (including intentional empty).
+    if bank_is_live_open(snap) then return snap end
+    -- Closed / non-live empty bank must not wipe a prior good cache.
+    if type(snap.bank) == "table" and #snap.bank > 0 and snap.bankValid == true then
+        return snap
+    end
     if type(cached) ~= "table" or type(cached.bank) ~= "table" then cached = self_bank_cache end
     if type(cached) ~= "table" or type(cached.bank) ~= "table" then
         pcall(function()
@@ -761,8 +776,7 @@ local function preserve_cached_bank(snap, cached)
             cached = store and store.get and store.get(key) or nil
         end)
     end
-    if type(cached) ~= "table" or type(cached.bank) ~= "table" then return snap end
-    if cached.bankValid ~= true and #cached.bank == 0 then return snap end
+    if not cached_bank_usable(cached) then return snap end
     snap.bank = cached.bank
     snap.bankValid = true
     snap.bankLive = false
@@ -774,11 +788,25 @@ end
 
 local function remember_bank(snap)
     if type(snap) ~= "table" or type(snap.bank) ~= "table" then return end
-    if snap.bankValid ~= true and #snap.bank == 0 then return end
+    local live = bank_is_live_open(snap)
+    if live then
+        -- Authoritative open-bank scan, even when empty.
+        self_bank_cache = {
+            bank = snap.bank,
+            bankValid = true,
+            bankLive = true,
+            bankCapturedAt = tonumber(snap.bankCapturedAt) or tonumber(snap.updated) or os.time(),
+            updated = tonumber(snap.updated) or os.time(),
+        }
+        return
+    end
+    -- Never replace a good cache with a closed/non-live empty bank gather.
+    if #snap.bank == 0 then return end
+    if snap.bankValid ~= true and snap.bankPreserved ~= true then return end
     self_bank_cache = {
         bank = snap.bank,
         bankValid = true,
-        bankLive = snap.bankLive == true,
+        bankLive = false,
         bankCapturedAt = tonumber(snap.bankCapturedAt) or tonumber(snap.updated) or os.time(),
         updated = tonumber(snap.updated) or os.time(),
     }
@@ -1054,6 +1082,12 @@ function M.gather(arg)
 
     local snap = diag.time("snapshot.gather", function() return build_snap(depth, opts) end)
     snap = preserve_cached_bank(snap, cache_snap)
+    -- skipLiveStats gathers must not blank Inspect > Effects on the next tab visit.
+    if opts.skipLiveStats == true and type(cache_snap) == "table" and type(cache_snap.liveStats) == "table" then
+        if type(snap.liveStats) ~= "table" then
+            snap.liveStats = cache_snap.liveStats
+        end
+    end
     remember_bank(snap)
     diag.event("snapshot.gather", string.format("force=%s depth=%s eq=%d bag=%d bank=%d bankOpen=%s bankLive=%s bankPreserved=%s",
         tostring(force), tostring(depth), #(snap.equipped or {}), #(snap.bags or {}), #(snap.bank or {}),

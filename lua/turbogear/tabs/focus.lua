@@ -468,6 +468,23 @@ local function draw_controls()
         if Settings.focusSourceScope == "loadout" then
             pcall(function() require('loadout').invalidate() end)
         else
+            -- Force a fresh full gather so Focus/Worn spells are re-read (item
+            -- meta cache can otherwise stick on empty focus from an early read).
+            pcall(function()
+                local items = require('items')
+                if items.clear_meta_cache then items.clear_meta_cache() end
+            end)
+            pcall(function()
+                local snap = require('snapshot')
+                if snap.invalidate then snap.invalidate() end
+                if snap.ensure_full then snap.ensure_full() end
+            end)
+            pcall(function()
+                local Engine = require('engine').Engine
+                if Engine and Engine.publish then
+                    Engine.publish(true, "full", { skipLockouts = true, reason = "focus_refresh" })
+                end
+            end)
             item_index.refresh()
         end
         filtered_key = nil

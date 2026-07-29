@@ -76,6 +76,25 @@ check(R.grouped_item_key("", 0, "\18link-payload\18", is_link) == "link:\18link-
 check(R.grouped_item_key("Blade", 0, "not a link", is_link) == "name:blade", 'group key: name fallback')
 check(R.grouped_item_key("Blade", 0, "\18x\18", nil) == "name:blade", 'group key: no predicate -> name')
 
+-- Jonas short catalog name and loot-link full name share one group key.
+check(R.jonas_canonical_name("Jonas Dagmire's Forefinger Proximal Phalanx")
+    == "forefinger proximal phalanx", 'jonas: strip prefix')
+check(R.jonas_canonical_name("Forefinger Proximal Phalanx")
+    == "forefinger proximal phalanx", 'jonas: bare name unchanged')
+check(R.grouped_item_key("Jonas Dagmire's Forefinger Proximal Phalanx", 0, "", is_link)
+    == R.grouped_item_key("Forefinger Proximal Phalanx", 0, "", is_link),
+    'jonas: short + full name same group key')
+check(R.grouped_item_key("Jonas Dagmire's Triquetrum", 0, "", is_link)
+    ~= R.grouped_item_key("Jonas Dagmire's Trapezium", 0, "", is_link),
+    'jonas: different bones stay distinct')
+check(R.prefer_announce_item_name("Forefinger Proximal Phalanx", "Jonas Dagmire's Forefinger Proximal Phalanx")
+    == "Jonas Dagmire's Forefinger Proximal Phalanx", 'jonas: prefer full display name')
+check(R.prefer_announce_item_name("Jonas Dagmire's Forefinger Proximal Phalanx", "Forefinger Proximal Phalanx")
+    == "Jonas Dagmire's Forefinger Proximal Phalanx", 'jonas: keep full when short arrives late')
+check(R.dedupe_key("Srv", "Hez", "jonas", "Jonas Dagmire's Capitate", 0)
+    == R.dedupe_key("Srv", "Hez", "jonas", "Capitate", 0),
+    'jonas: dedupe key collapses alias pair')
+
 -- format_message
 check(R.format_message("Blade of War", "Hez") == "[TG] - Blade of War - Hez", 'format: single name')
 check(R.format_message("Blade of War", { "drel", "Ana", "hez" })

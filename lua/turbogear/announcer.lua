@@ -663,7 +663,7 @@ local function note_announce_seen(line)
     end
     local now = os.clock()
     if tostring(name or "") ~= "" and not item_actions.looks_like_item_link(name) then
-        announce_seen["name:" .. normalize_item_name(name)] = now
+        announce_seen["name:" .. (rules.jonas_canonical_name(name))] = now
     end
     if id > 0 then
         announce_seen["id:" .. tostring(math.floor(id))] = now
@@ -678,13 +678,13 @@ local function announce_seen_recently(item_name, item_id)
         local at = announce_seen["id:" .. tostring(math.floor(item_id))]
         if at and (now - at) <= ttl then return true end
     end
-    local at = announce_seen["name:" .. normalize_item_name(item_name)]
+    local at = announce_seen["name:" .. rules.jonas_canonical_name(item_name)]
     return at ~= nil and (os.clock() - at) <= ttl
 end
 
 local function item_cooldown_key(item_name, item_id)
     item_id = tonumber(item_id) or 0
-    local name = normalize_item_name(item_name)
+    local name = rules.jonas_canonical_name(item_name)
     if name ~= "" then return "name:" .. name end
     if item_id > 0 then return "id:" .. tostring(math.floor(item_id)) end
     return ""
@@ -726,7 +726,10 @@ local function copy_order(order)
 end
 
 local function linked_item_display_key(item_name)
-    local name = normalize_item_name(item_name)
+    -- Same Jonas bare-name collapse as grouped_item_key so Linked panel cannot
+    -- keep a short-alias row beside the real loot-link row.
+    local name = rules.jonas_canonical_name and rules.jonas_canonical_name(item_name)
+        or normalize_item_name(item_name)
     if name == "" then return "" end
     return "name:" .. name
 end
@@ -763,7 +766,9 @@ local function record_linked_item(bucket, status)
     prune_linked_items(now)
     for i, row in ipairs(linked_items) do
         if row.key == key or (display_key ~= "" and row.display_key == display_key) then
-            row.item_name = tostring(bucket.item_name or row.item_name or "")
+            row.item_name = rules.prefer_announce_item_name
+                and rules.prefer_announce_item_name(row.item_name, bucket.item_name)
+                or tostring(bucket.item_name or row.item_name or "")
             row.item_id = tonumber(bucket.item_id) or row.item_id or 0
             row.item_link = tostring(bucket.item_link or row.item_link or "")
             row.key = key
@@ -854,11 +859,14 @@ local function ensure_group_announce(item_name, item_link, item_id, source, corp
         group_announces[key] = bucket
     else
         if tostring(item_link or "") ~= "" then bucket.item_link = tostring(item_link) end
-        -- Never overwrite an established bucket name: late needers (actor
-        -- replies, index aliases) must not rename an already-correct bucket.
-        local have_name = tostring(bucket.item_name or "")
-        if (have_name == "" or have_name == "?") and tostring(item_name or "") ~= "" then
-            bucket.item_name = tostring(item_name)
+        -- Prefer the real loot-link / Jonas-prefixed name over a short catalog alias.
+        if rules.prefer_announce_item_name then
+            bucket.item_name = rules.prefer_announce_item_name(bucket.item_name, item_name)
+        else
+            local have_name = tostring(bucket.item_name or "")
+            if (have_name == "" or have_name == "?") and tostring(item_name or "") ~= "" then
+                bucket.item_name = tostring(item_name)
+            end
         end
         if (tonumber(item_id) or 0) > 0 then bucket.item_id = tonumber(item_id) or 0 end
         bucket.due = math.max(tonumber(bucket.due) or now, now + group_window_s())

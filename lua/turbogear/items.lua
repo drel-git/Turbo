@@ -10,6 +10,13 @@ local focus_extract = require('focus_extract')
 local M = {}
 local item_meta_cache = {}
 
+--- Drop cached MQ item meta (stats/focus). Empty focus can be sticky if the
+--- first read happened before the item TLO was ready; force gathers must
+--- re-query Focus/Worn spells.
+function M.clear_meta_cache()
+    item_meta_cache = {}
+end
+
 -- ===================== INVENTORY SLOT ORDER ============================== --
 M.inventory_slots = {
     { id = 2,  name = "Head" },        { id = 1,  name = "Left Ear" },

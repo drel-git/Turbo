@@ -121,10 +121,39 @@ end
 
 -- Cooldown/dedupe key for a single announce: prefer item id, fall back to the
 -- normalized name, scoped to server + character + list.
+-- Jonas hand pieces are catalogued as short names ("Forefinger Proximal Phalanx")
+-- and expanded with "Jonas Dagmire's …". Loot links use the full name. Collapse
+-- both forms to the bare bone name for announce/Linked bucketing only.
+local JONAS_PREFIX_NORM = "jonas dagmire's "
+
+function M.jonas_canonical_name(item_name)
+    local name = M.normalize_item_name(item_name)
+    if name == "" then return "" end
+    if name:sub(1, #JONAS_PREFIX_NORM) == JONAS_PREFIX_NORM then
+        return M.trim(name:sub(#JONAS_PREFIX_NORM + 1))
+    end
+    return name
+end
+
+-- Prefer the full Jonas-prefixed / longer display name when merging alias hits.
+function M.prefer_announce_item_name(current, incoming)
+    local a = tostring(current or "")
+    local b = tostring(incoming or "")
+    if a == "" or a == "?" then return b ~= "" and b or a end
+    if b == "" or b == "?" then return a end
+    local na, nb = M.normalize_item_name(a), M.normalize_item_name(b)
+    if M.jonas_canonical_name(na) ~= M.jonas_canonical_name(nb) then return a end
+    local ja = na:sub(1, #JONAS_PREFIX_NORM) == JONAS_PREFIX_NORM
+    local jb = nb:sub(1, #JONAS_PREFIX_NORM) == JONAS_PREFIX_NORM
+    if jb and not ja then return b end
+    if #b > #a then return b end
+    return a
+end
+
 function M.dedupe_key(server, me_name, list_id, item_name, item_id)
     item_id = tonumber(item_id) or 0
     local item_key = item_id > 0 and ("id:" .. tostring(math.floor(item_id)))
-        or ("name:" .. M.normalize_item_name(item_name))
+        or ("name:" .. M.jonas_canonical_name(item_name))
     return tostring(server or "?") .. ":" ..
            tostring(me_name or "?") .. ":" ..
            tostring(list_id or "") .. ":" .. item_key
@@ -138,7 +167,7 @@ end
 -- detection depends on the runtime (item_actions.looks_like_item_link).
 function M.grouped_item_key(item_name, item_id, item_link, is_link)
     item_id = tonumber(item_id) or 0
-    local name = M.normalize_item_name(item_name)
+    local name = M.jonas_canonical_name(item_name)
     if name ~= "" then return "name:" .. name end
     if item_id > 0 then return "id:" .. tostring(math.floor(item_id)) end
     local link = tostring(item_link or "")
