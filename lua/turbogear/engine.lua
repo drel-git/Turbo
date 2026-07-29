@@ -451,8 +451,10 @@ end
 
 function Engine.send_loot_need(target_name, need)
     if not Engine.ok or type(need) ~= "table" then return false end
+    -- Empty/unknown holder still broadcasts: receivers do not gate on target, and
+    -- after a patcher restart the UI beacon name may not be on disk yet.
     target_name = tostring(target_name or "")
-    if target_name == "" then return false end
+    if target_name == "" then target_name = "*" end
     Engine.stats.tx_need = (Engine.stats.tx_need or 0) + 1
     send_mail("loot_need", {
         type = MSG.LOOT_NEED,

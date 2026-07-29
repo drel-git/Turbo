@@ -1,3 +1,7 @@
+1.2.109
+- Announce: after patcher/restart, stamp the UI driver immediately and keep peer
+  need-reports queued until the beacon is up (no Sync Now required).
+
 1.2.108
 - Announce: keep Store fallback with hybrid peer reports so needs still show after a cold/patcher start.
 
