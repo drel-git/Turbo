@@ -1140,6 +1140,15 @@ local function scan_group_needs_from_cache(links, source)
             catalog.ensure_announce_catalog(snap.class, { owner = snap.name })
         end)
         catalog_ready = catalog.announce_catalog_ready(snap.class, snap.name) == true
+        -- Fresh patcher / cold start: spend a bounded sync slice so the beacon
+        -- can answer locally instead of flushing empty hybrid buckets.
+        if not catalog_ready then
+            pcall(function()
+                catalog.flush_announce_catalog(
+                    snap.class, snap.name, tonumber(CFG.announce_flush_budget_ms) or 400)
+            end)
+            catalog_ready = catalog.announce_catalog_ready(snap.class, snap.name) == true
+        end
     end
 
     for _, item in ipairs(links) do
@@ -1169,8 +1178,11 @@ local function scan_group_needs_from_cache(links, source)
                 end
             end
 
-            -- Cold Store walk only when hybrid is off (legacy fallback).
-            if not hybrid and not group_index_ready then
+            -- Store walk while the group index is cold. Keep this even in hybrid:
+            -- after a patcher update peer bgs may still be old (no LOOT_NEED yet),
+            -- or peer catalogs may still be warming — without this fallback the
+            -- beacon flushes empty buckets and looks "dead".
+            if not group_index_ready then
                 local d_added, d_queued, d_snaps = queue_group_target_checks(item, item_link, bucket, source)
                 added = added + (tonumber(d_added) or 0)
                 queued = queued + (tonumber(d_queued) or 0)
@@ -1185,8 +1197,9 @@ local function scan_group_needs_from_cache(links, source)
         end
     end
     if hybrid then
-        note_group_scan("links-hybrid", source, #links, indexed, added)
+        note_group_scan(queued > 0 and "links-hybrid+targeted" or "links-hybrid", source, #links, indexed, added)
         if added > 0 then diag.count("announce.hybrid_group_needs") end
+        if queued > 0 then diag.count("announce.group_targeted_queued", queued) end
     elseif queued > 0 then
         note_group_scan("links-targeted", source, #links, snaps_seen, added)
         diag.count("announce.group_targeted_queued", queued)
