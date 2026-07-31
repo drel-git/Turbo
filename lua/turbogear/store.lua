@@ -451,9 +451,70 @@ local function merge_item_lists(old_list, new_list)
     return new_list
 end
 
+-- Empty equipped from a failed/non-authoritative gather must not wipe a prior
+-- good worn set (same class of bug as empty closed-bank wipe). Real gear
+-- changes still win:
+--   * non-empty new equipped (swap / partial strip)
+--   * empty worn but bags present (stripped to bags)
+--   * empty worn with live open bank that has items (banked gear)
+local function should_preserve_equipped(existing, snap)
+    if type(existing) ~= "table" or type(snap) ~= "table" then return false end
+    if type(existing.equipped) ~= "table" or #existing.equipped == 0 then return false end
+    if type(snap.equipped) == "table" and #snap.equipped > 0 then return false end
+    if type(snap.bags) == "table" and #snap.bags > 0 then return false end
+    if snap.bankLive == true and snap.bankOpen == true
+        and type(snap.bank) == "table" and #snap.bank > 0 then
+        return false
+    end
+    return true
+end
+
+local function apply_equipped_preserve(existing, snap)
+    if type(snap) == "table" and snap.inventoryIncomplete == true then
+        return snap
+    end
+    if not should_preserve_equipped(existing, snap) then
+        if type(snap) == "table" then snap.equippedPreserved = nil end
+        return snap
+    end
+    snap.equipped = existing.equipped
+    snap.equippedPreserved = true
+    -- Failed inventory walks usually empty bags too; keep prior bags so bag
+    -- ownership does not disappear with the worn set.
+    if (type(snap.bags) ~= "table" or #snap.bags == 0)
+        and type(existing.bags) == "table" and #existing.bags > 0 then
+        snap.bags = existing.bags
+    end
+    return snap
+end
+
+-- Explicit incomplete inventory walk (partial or empty): never replace prior
+-- equipped/bags with the failed scan. Bank prefers prior when present.
+local function apply_incomplete_inventory_preserve(existing, snap)
+    if type(existing) ~= "table" or type(snap) ~= "table" then return snap end
+    if snap.inventoryIncomplete ~= true then return snap end
+    if type(existing.equipped) == "table" and #existing.equipped > 0 then
+        snap.equipped = existing.equipped
+        snap.equippedPreserved = true
+    end
+    if type(existing.bags) == "table" and #existing.bags > 0 then
+        snap.bags = existing.bags
+    end
+    if type(existing.bank) == "table" and #existing.bank > 0 then
+        snap.bank = existing.bank
+        snap.bankValid = true
+        snap.bankLive = false
+        snap.bankPreserved = true
+        snap.bankCapturedAt = tonumber(existing.bankCapturedAt) or snapshot_inventory_stamp(existing)
+        snap.bankReason = "cached; inventory walk incomplete"
+    end
+    return snap
+end
+
 local function merge_lite_snapshot(existing, snap)
     if type(existing) ~= "table" or type(snap) ~= "table" then return snap end
     if snap.depth == "full" then return snap end
+    local incomplete = snap.inventoryIncomplete == true
     local out = {
         name = snap.name,
         server = snap.server,
@@ -470,8 +531,10 @@ local function merge_lite_snapshot(existing, snap)
         status = snap.status,
         last_seen = snap.last_seen,
         kind = snap.kind or existing.kind,
-        equipped = merge_item_lists(existing.equipped, snap.equipped or {}),
-        bags = merge_item_lists(existing.bags, snap.bags or {}),
+        equipped = incomplete and (existing.equipped or {})
+            or merge_item_lists(existing.equipped, snap.equipped or {}),
+        bags = incomplete and (existing.bags or {})
+            or merge_item_lists(existing.bags, snap.bags or {}),
         bank = merge_item_lists(existing.bank, snap.bank or {}),
         bankValid = snap.bankValid,
         bankLive = snap.bankLive,
@@ -479,6 +542,8 @@ local function merge_lite_snapshot(existing, snap)
         bankPreserved = snap.bankPreserved,
         bankCapturedAt = snap.bankCapturedAt,
         bankReason = snap.bankReason,
+        inventoryIncomplete = snap.inventoryIncomplete,
+        inventoryError = snap.inventoryError,
         lockouts = snap.lockouts or existing.lockouts,
         liveStats = snap.liveStats or existing.liveStats,
         radiant_crystals = snap.radiant_crystals ~= nil and snap.radiant_crystals or existing.radiant_crystals,
@@ -489,6 +554,11 @@ local function merge_lite_snapshot(existing, snap)
         celestial_crests = snap.celestial_crests ~= nil and snap.celestial_crests or existing.celestial_crests,
         aa_unspent = snap.aa_unspent ~= nil and snap.aa_unspent or existing.aa_unspent,
     }
+    if incomplete then
+        apply_incomplete_inventory_preserve(existing, out)
+    else
+        apply_equipped_preserve(existing, out)
+    end
     local live_bank = snap.bankLive == true and snap.bankOpen == true
     local snap_bank_ok = live_bank
         or (snap.bankValid == true and type(snap.bank) == "table" and #snap.bank > 0)
@@ -532,10 +602,16 @@ local function merge_snapshot(existing, snap)
         snap.spells_sig = existing.spells_sig
         snap.spell_ids = existing.spell_ids
     end
+    -- Incomplete walks must not replace prior equipped/bags (partial wipe).
+    if snap.inventoryIncomplete == true then
+        apply_incomplete_inventory_preserve(existing, snap)
+        return snap
+    end
     -- Full snaps still go through item merge so empty focus/stats rows cannot
     -- clobber richer Inspect Focus data from a prior publish.
     snap.equipped = merge_item_lists(existing.equipped, snap.equipped or {})
     snap.bags = merge_item_lists(existing.bags, snap.bags or {})
+    apply_equipped_preserve(existing, snap)
     local live_bank = snap.bankLive == true and snap.bankOpen == true
     -- Live open bank is authoritative (including intentional empty).
     if live_bank then return snap end

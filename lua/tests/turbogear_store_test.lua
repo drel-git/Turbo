@@ -75,6 +75,8 @@ local function snap(server, name, opts)
         bankLive = opts.bankLive,
         bankOpen = opts.bankOpen,
         bankPreserved = opts.bankPreserved,
+        inventoryIncomplete = opts.inventoryIncomplete,
+        inventoryError = opts.inventoryError,
     }
 end
 
@@ -308,6 +310,76 @@ do
     }), "client")
     b = Store.get("Srv_Banker")
     check(#(b.bank or {}) == 0, "live open empty bank is authoritative clear")
+end
+
+-- ---- 13. equipped: empty eq+bags put keeps prior worn set -----------------
+do
+    local pauldrons = eqitem(555, "Ornate Pauldrons of Proficience", "Shoulder")
+    Store.put(snap("Srv", "Melee", {
+        depth = "full",
+        equipped = { pauldrons, eqitem(556, "Shabby Crimson Sash", "Waist") },
+        bags = {},
+    }), "client")
+    check(#(Store.get("Srv_Melee").equipped or {}) == 2, "equipped put stored worn set")
+
+    -- Failed/empty inventory walk: empty worn + empty bags must not wipe.
+    Store.put(snap("Srv", "Melee", {
+        depth = "full",
+        equipped = {},
+        bags = {},
+    }), "client")
+    local m = Store.get("Srv_Melee")
+    check(#(m.equipped or {}) == 2 and m.equipped[1].id == 555,
+        "empty eq+bags put preserved prior equipped")
+    check(m.equippedPreserved == true, "preserved equipped flagged")
+
+    -- Strip to bags: empty worn but bags present must accept (real gear move).
+    Store.put(snap("Srv", "Melee", {
+        depth = "full",
+        equipped = {},
+        bags = { eqitem(555, "Ornate Pauldrons of Proficience", "Shoulder") },
+    }), "client")
+    m = Store.get("Srv_Melee")
+    check(#(m.equipped or {}) == 0, "strip-to-bags accepts empty equipped")
+    check(#(m.bags or {}) == 1 and m.bags[1].id == 555, "strip-to-bags keeps bag item")
+    check(m.equippedPreserved ~= true, "strip-to-bags not flagged preserved")
+
+    -- Real swap: non-empty new equipped replaces prior.
+    Store.put(snap("Srv", "Melee", {
+        depth = "full",
+        equipped = { eqitem(560, "Other Shoulders", "Shoulder") },
+        bags = {},
+    }), "client")
+    m = Store.get("Srv_Melee")
+    check(#(m.equipped or {}) == 1 and m.equipped[1].id == 560,
+        "non-empty equipped put replaces prior (gear swap)")
+end
+
+-- ---- 14. incomplete walk: partial equipped must not wipe prior ------------
+do
+    Store.put(snap("Srv", "Partial", {
+        depth = "full",
+        equipped = {
+            eqitem(701, "Ornate Pauldrons of Proficience", "Shoulder"),
+            eqitem(702, "Shabby Crimson Sash", "Waist"),
+            eqitem(703, "Some Helm", "Head"),
+        },
+        bags = { eqitem(710, "BagThing", "Bag") },
+    }), "client")
+    -- Failed mid-walk: only Head made it into the new snap.
+    Store.put(snap("Srv", "Partial", {
+        depth = "full",
+        equipped = { eqitem(703, "Some Helm", "Head") },
+        bags = {},
+        inventoryIncomplete = true,
+        inventoryError = "simulated walk failure",
+    }), "client")
+    local p = Store.get("Srv_Partial")
+    check(#(p.equipped or {}) == 3 and p.equipped[1].id == 701,
+        "incomplete put kept prior full equipped set")
+    check(#(p.bags or {}) == 1 and p.bags[1].id == 710,
+        "incomplete put kept prior bags")
+    check(p.equippedPreserved == true, "incomplete put flagged equippedPreserved")
 end
 
 -- ---- results --------------------------------------------------------------

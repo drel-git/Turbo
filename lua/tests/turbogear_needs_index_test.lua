@@ -1,20 +1,57 @@
--- Run from repo root:  luajit lua\tests\turbogear_needs_index_test.lua
--- Tests the pure core of the inverted needs index. Runtime deps are stubbed so
--- the module loads outside MacroQuest.
-package.path = 'lua/turbogear/?.lua;lua/turbogear/?/init.lua;' .. package.path
+-- Tests the pure core of the inverted needs index. Runtime deps are stubbed.
+--
+-- Offline (repo root):
+--   luajit lua/tests/turbogear_needs_index_test.lua
+-- In-game (MacroQuest lua folder must contain turbogear/ + tests/):
+--   /lua run tests/turbogear_needs_index_test
 
-package.preload['mq'] = function()
-    return {
-        TLO = {
-            Me = { CleanName = function() return "Tester" end },
-            MacroQuest = { Server = function() return "Srv" end },
-        },
-    }
+local function prepend_path(entry)
+    if entry and entry ~= "" then
+        package.path = entry .. ";" .. package.path
+    end
 end
-package.preload['config'] = function()
+
+-- Prefer paths next to this file so cwd / MQ working directory do not matter.
+do
+    local src = debug and debug.getinfo and debug.getinfo(1, "S").source or ""
+    local dir = src:sub(1, 1) == "@" and src:sub(2):gsub("\\", "/"):match("^(.+)/[^/]+$") or nil
+    if dir then
+        prepend_path(dir .. "/../turbogear/?.lua")
+        prepend_path(dir .. "/../turbogear/?/init.lua")
+    end
+end
+do
+    local ok, mq = pcall(require, "mq")
+    local root = ok and mq and mq.luaDir and tostring(mq.luaDir):gsub("\\", "/") or nil
+    if root and root ~= "" then
+        prepend_path(root .. "/turbogear/?.lua")
+        prepend_path(root .. "/turbogear/?/init.lua")
+    end
+end
+prepend_path("lua/turbogear/?.lua")
+prepend_path("lua/turbogear/?/init.lua")
+prepend_path("turbogear/?.lua")
+prepend_path("turbogear/?/init.lua")
+
+-- Stub runtime deps so core tests stay offline-safe. Clear loaded slots first
+-- so an in-game /lua run does not pick up a half-initialized TurboGear module.
+for _, name in ipairs({ "config", "store", "diagnostics", "roster_sets", "needs_index" }) do
+    package.loaded[name] = nil
+end
+if not package.loaded["mq"] then
+    package.preload["mq"] = function()
+        return {
+            TLO = {
+                Me = { CleanName = function() return "Tester" end },
+                MacroQuest = { Server = function() return "Srv" end },
+            },
+        }
+    end
+end
+package.preload["config"] = function()
     return { CFG = {}, Settings = {}, SharedSettings = {} }
 end
-package.preload['store'] = function()
+package.preload["store"] = function()
     return {
         Store = {
             content_version = 0,
@@ -26,7 +63,7 @@ package.preload['store'] = function()
         my_key = function() return "Srv_Tester" end,
     }
 end
-package.preload['diagnostics'] = function()
+package.preload["diagnostics"] = function()
     return {
         time = function(_, fn) return fn() end,
         count = function() end,
@@ -34,8 +71,14 @@ package.preload['diagnostics'] = function()
         context = function() end,
     }
 end
+package.preload["roster_sets"] = function()
+    return {
+        active_store_keys = function() return {} end,
+        scope_label = function() return "" end,
+    }
+end
 
-local NI = require('needs_index')
+local NI = require("needs_index")
 local core = NI.core
 
 local passed, failed = 0, 0
@@ -44,7 +87,9 @@ local function check(cond, label)
         passed = passed + 1
     else
         failed = failed + 1
-        io.stderr:write('FAIL: ', tostring(label), '\n')
+        local msg = "FAIL: " .. tostring(label)
+        pcall(function() io.stderr:write(msg, "\n") end)
+        print(msg)
     end
 end
 
@@ -265,6 +310,38 @@ do
     check(core.cache_sizes().norm == before + 1, 'cache_sizes: norm count grows on a new key')
     core.norm_key("Unique Cache Probe Name 246810")
     check(core.cache_sizes().norm == before + 1, 'cache_sizes: repeated key is not re-counted')
+end
+
+-- Linked/BiS ownership agreement: bank/bags "carried" (and equipped/known)
+-- must drop stale needers so Linked cannot list a char BiS already paints
+-- as owned (Hezalo Asp's Fang / Imbued Feather bank regression).
+do
+    check(core.status_is_owned("carried") == true, 'owned: carried (bags/bank) counts')
+    check(core.status_is_owned("equipped") == true, 'owned: equipped counts')
+    check(core.status_is_owned("known") == true, 'owned: known counts')
+    check(core.status_is_owned("missing") == false, 'owned: missing does not count')
+    check(core.status_is_owned(nil) == false, 'owned: nil does not count')
+
+    local needers = {
+        { character = "Hezalo", char_key = "Srv_Hezalo", display = "Asp's Fang" },
+        { character = "Captaain", char_key = "Srv_Captaain", display = "Asp's Fang" },
+        { character = "Ghee", char_key = "Srv_Ghee", display = "Asp's Fang" },
+    }
+    -- Simulate Store snap ownership: Hezalo banked, Ghee equipped, Captaain missing.
+    local owned = {
+        Srv_Hezalo = "carried",
+        Srv_Ghee = "equipped",
+    }
+    local kept = core.filter_owned_needers(needers, function(need)
+        local st = owned[need.char_key]
+        return core.status_is_owned(st) and "store_owned" or nil
+    end)
+    check(#kept == 1 and kept[1].character == "Captaain",
+        'filter: banked/equipped peers dropped; true needer kept')
+    check(#core.filter_owned_needers(needers, function() return nil end) == 3,
+        'filter: no-op when nobody owns')
+    check(#core.filter_owned_needers(nil, function() return "x" end) == 0,
+        'filter: nil needers safe')
 end
 
 io.write(string.format('needs_index core: %d passed, %d failed\n', passed, failed))

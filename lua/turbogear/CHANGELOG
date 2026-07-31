@@ -1,3 +1,16 @@
+1.2.114
+- Linked/Announce: needers who already own an item in Store bags or bank are
+  dropped so Linked and [TG] match BiS ownership paint (stale needs index no
+  longer lists banked items as needed for peers).
+- Equipped: empty gathers/publishes no longer wipe a prior good worn set (and
+  bags when both are empty). Strip-to-bags and live bank-with-items still
+  accept empty equipped so real gear moves stay accurate.
+- Inventory: if the inventory walk pcall fails (partial or empty), mark the
+  snap incomplete, restore prior equipped/bags/bank locally, and skip peer
+  SNAPSHOT publish so a failed gather cannot wipe BiS ownership.
+- DoN Shadow: finished class combines (Broodslayer, Igniss, Bulwarks, etc.)
+  count as owning Shadow and Materium1-3; Ranger accepts Buckler or Bolt.
+
 1.2.113
 - Announce/Linked: Jonas hand short aliases and "Jonas Dagmire's …" loot names
   collapse to one [TG] / Linked row (different bones stay distinct).

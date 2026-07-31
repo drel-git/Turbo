@@ -658,6 +658,19 @@ function Engine.publish(force, depth, opts)
         dprint("publish skipped - no valid name (zoning?)")
         return false
     end
+    -- Incomplete inventory walk (pcall failed): keep local Store via put/merge
+    -- preserve, but do not broadcast a partial/empty wipe to peers.
+    if snap.inventoryIncomplete == true then
+        dprint("publish skipped - inventory walk incomplete")
+        Store.put(snap, 'client')
+        Engine.last_publish = os.clock()
+        schedule_next_publish(Engine.last_publish)
+        diag.event("engine.publish", string.format(
+            "skipped incomplete reason=%s force=%s depth=%s eq=%d bag=%d err=%s",
+            publish_reason, tostring(force), tostring(depth),
+            #(snap.equipped or {}), #(snap.bags or {}), tostring(snap.inventoryError or "?")))
+        return false
+    end
 
     local sig = snapshot.lite_signature(snap)
     local wsig = snapshot.wallet_signature and snapshot.wallet_signature(snap) or ""

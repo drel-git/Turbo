@@ -666,7 +666,10 @@ local function build_snap(depth, opts)
     }
     -- Wallet extras (cheap TLOs + FindItemCount; not a bag walk).
     fill_wallet_fields(snap)
-    pcall(function()
+    -- One pcall wraps the whole inventory walk. On failure the snap may be
+    -- empty or only partially filled — mark incomplete so gather/Store keep
+    -- prior equipped/bags instead of publishing a wipe.
+    local inv_ok, inv_err = pcall(function()
         diag.context("snapshot.inventory", string.format("depth=%s bankOpen=%s scanBank=%s",
             tostring(depth), tostring(bank_open == true), tostring(bank_open == true)))
         diag.time("snapshot.inventory", function()
@@ -728,6 +731,12 @@ local function build_snap(depth, opts)
             end
         end)
     end)
+    if not inv_ok then
+        snap.inventoryIncomplete = true
+        snap.inventoryError = tostring(inv_err or "inventory walk failed")
+        diag.count("snapshot.inventory_incomplete")
+        diag.event("snapshot.inventory", "incomplete: " .. tostring(inv_err or "?"))
+    end
     if opts.includeSpells == true then
         pcall(function()
             diag.time("snapshot.spells", function()
@@ -783,6 +792,93 @@ local function preserve_cached_bank(snap, cached)
     snap.bankPreserved = true
     snap.bankCapturedAt = tonumber(cached.bankCapturedAt) or tonumber(cached.updated)
     snap.bankReason = "cached; bank window closed"
+    return snap
+end
+
+local function resolve_inventory_cache(snap, cached)
+    if type(cached) == "table"
+        and ((type(cached.equipped) == "table" and #cached.equipped > 0)
+            or (type(cached.bags) == "table" and #cached.bags > 0)
+            or cached_bank_usable(cached)) then
+        return cached
+    end
+    cached = self_full_snap or self_lite_snap
+    if type(cached) == "table"
+        and ((type(cached.equipped) == "table" and #cached.equipped > 0)
+            or (type(cached.bags) == "table" and #cached.bags > 0)
+            or cached_bank_usable(cached)) then
+        return cached
+    end
+    pcall(function()
+        local store = require('store').Store
+        local key = tostring(snap and snap.server or "") .. "_" .. tostring(snap and snap.name or "")
+        cached = store and store.get and store.get(key) or nil
+    end)
+    return cached
+end
+
+-- Inventory pcall failed: restore prior equipped/bags (and bank if the live
+-- bank scan may be partial). Does not use slot-count heuristics — only the
+-- explicit inventoryIncomplete flag from build_snap.
+local function preserve_incomplete_inventory(snap, cached)
+    if type(snap) ~= "table" or snap.inventoryIncomplete ~= true then return snap end
+    cached = resolve_inventory_cache(snap, cached)
+    if type(cached) ~= "table" then return snap end
+    if type(cached.equipped) == "table" and #cached.equipped > 0 then
+        snap.equipped = cached.equipped
+        snap.equippedPreserved = true
+    end
+    if type(cached.bags) == "table" and #cached.bags > 0 then
+        snap.bags = cached.bags
+    end
+    -- Bank was inside the same pcall; a mid-walk failure can leave a partial
+    -- live bank. Prefer a prior good bank over that partial scan.
+    if cached_bank_usable(cached) then
+        snap.bank = cached.bank
+        snap.bankValid = true
+        snap.bankLive = false
+        snap.bankPreserved = true
+        snap.bankCapturedAt = tonumber(cached.bankCapturedAt) or tonumber(cached.updated)
+        snap.bankReason = "cached; inventory walk incomplete"
+    elseif bank_is_live_open(snap) then
+        snap.bank = {}
+        snap.bankValid = false
+        snap.bankLive = false
+        snap.bankOpen = snap.bankOpen
+        snap.bankReason = "inventory walk incomplete; bank discarded"
+    end
+    return snap
+end
+
+-- Empty worn + empty bags after a gather usually means the inventory walk
+-- failed inside pcall, not that the toon stripped naked. Keep prior worn
+-- (and bags) so we do not publish a wipe. Strip-to-bags / live bank with
+-- items still accept empty equipped.
+local function preserve_cached_equipped(snap, cached)
+    if type(snap) ~= "table" then return snap end
+    if snap.inventoryIncomplete == true then return snap end
+    if type(snap.equipped) == "table" and #snap.equipped > 0 then
+        snap.equippedPreserved = nil
+        return snap
+    end
+    if type(snap.bags) == "table" and #snap.bags > 0 then
+        snap.equippedPreserved = nil
+        return snap
+    end
+    if bank_is_live_open(snap) and type(snap.bank) == "table" and #snap.bank > 0 then
+        snap.equippedPreserved = nil
+        return snap
+    end
+    cached = resolve_inventory_cache(snap, cached)
+    if type(cached) ~= "table" or type(cached.equipped) ~= "table" or #cached.equipped == 0 then
+        return snap
+    end
+    snap.equipped = cached.equipped
+    snap.equippedPreserved = true
+    if (type(snap.bags) ~= "table" or #snap.bags == 0)
+        and type(cached.bags) == "table" and #cached.bags > 0 then
+        snap.bags = cached.bags
+    end
     return snap
 end
 
@@ -1081,6 +1177,8 @@ function M.gather(arg)
     end
 
     local snap = diag.time("snapshot.gather", function() return build_snap(depth, opts) end)
+    snap = preserve_incomplete_inventory(snap, cache_snap)
+    snap = preserve_cached_equipped(snap, cache_snap)
     snap = preserve_cached_bank(snap, cache_snap)
     -- skipLiveStats gathers must not blank Inspect > Effects on the next tab visit.
     if opts.skipLiveStats == true and type(cache_snap) == "table" and type(cache_snap.liveStats) == "table" then
@@ -1089,9 +1187,11 @@ function M.gather(arg)
         end
     end
     remember_bank(snap)
-    diag.event("snapshot.gather", string.format("force=%s depth=%s eq=%d bag=%d bank=%d bankOpen=%s bankLive=%s bankPreserved=%s",
+    diag.event("snapshot.gather", string.format(
+        "force=%s depth=%s eq=%d bag=%d bank=%d bankOpen=%s bankLive=%s bankPreserved=%s equippedPreserved=%s inventoryIncomplete=%s",
         tostring(force), tostring(depth), #(snap.equipped or {}), #(snap.bags or {}), #(snap.bank or {}),
-        tostring(snap.bankOpen == true), tostring(snap.bankLive == true), tostring(snap.bankPreserved == true)))
+        tostring(snap.bankOpen == true), tostring(snap.bankLive == true), tostring(snap.bankPreserved == true),
+        tostring(snap.equippedPreserved == true), tostring(snap.inventoryIncomplete == true)))
     if depth == "full" then
         self_full_snap = snap
         self_full_time = now

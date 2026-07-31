@@ -5773,10 +5773,12 @@ return {
           Shadow = {
             ids = {
               60668,
+              56498,
             },
             item = "Shadow of a Legendary Bard Weapon",
             names = {
               "Shadow of a Legendary Bard Weapon",
+              "Broodslayer, the Dauntless Blade",
             },
             slot = "Shadow",
           },
@@ -6201,10 +6203,12 @@ return {
           Shadow = {
             ids = {
               62534,
+              56754,
             },
             item = "Shadow of a Legendary Beastlord Weapon",
             names = {
               "Shadow of a Legendary Beastlord Weapon",
+              "Holy Relic of the Temple",
             },
             slot = "Shadow",
           },
@@ -6625,10 +6629,12 @@ return {
           Shadow = {
             ids = {
               60667,
+              56497,
             },
             item = "Shadow of a Legendary Berserker Augment",
             names = {
               "Shadow of a Legendary Berserker Augment",
+              "Igniss, the Fallen Flame",
             },
             slot = "Shadow",
           },
@@ -7068,10 +7074,12 @@ return {
           Shadow = {
             ids = {
               60546,
+              56492,
             },
             item = "Shadow of a Legendary Cleric Staff",
             names = {
               "Shadow of a Legendary Cleric Staff",
+              "Beacon of the Blessed",
             },
             slot = "Shadow",
           },
@@ -7511,10 +7519,12 @@ return {
           Shadow = {
             ids = {
               60548,
+              56493,
             },
             item = "Shadow of a Legendary Druid Staff",
             names = {
               "Shadow of a Legendary Druid Staff",
+              "Staff of Nature's Soul",
             },
             slot = "Shadow",
           },
@@ -7961,10 +7971,12 @@ return {
           Shadow = {
             ids = {
               62531,
+              56501,
             },
             item = "Shadow of a Legendary Enchanter Shield",
             names = {
               "Shadow of a Legendary Enchanter Shield",
+              "Shield of the Savvy Psyche",
             },
             slot = "Shadow",
           },
@@ -8382,10 +8394,12 @@ return {
           Shadow = {
             ids = {
               62530,
+              56500,
             },
             item = "Shadow of a Legendary Magician Staff",
             names = {
               "Shadow of a Legendary Magician Staff",
+              "Stave of Searing Slag",
             },
             slot = "Shadow",
           },
@@ -8806,10 +8820,12 @@ return {
           Shadow = {
             ids = {
               60549,
+              56495,
             },
             item = "Shadow of a Legendary Monk Weapon",
             names = {
               "Shadow of a Legendary Monk Weapon",
+              "Phantom, the Storm Child",
             },
             slot = "Shadow",
           },
@@ -9227,10 +9243,12 @@ return {
           Shadow = {
             ids = {
               62532,
+              56752,
             },
             item = "Shadow of a Legendary Necromancer Shield",
             names = {
               "Shadow of a Legendary Necromancer Shield",
+              "Shadowed Shield of Corruption",
             },
             slot = "Shadow",
           },
@@ -9648,10 +9666,12 @@ return {
           Shadow = {
             ids = {
               60545,
+              55078,
             },
             item = "Shadow of a Legendary Paladin Shield",
             names = {
               "Shadow of a Legendary Paladin Shield",
+              "Valiant Bulwark of the Storm Dragon",
             },
             slot = "Shadow",
           },
@@ -10073,10 +10093,14 @@ return {
           Shadow = {
             ids = {
               62533,
+              56753,
+              66907,
             },
             item = "Shadow of a Legendary Ranger Shield",
             names = {
               "Shadow of a Legendary Ranger Shield",
+              "Buckler of the Broodlands Stalker",
+              "Bolt of the Storming Sky",
             },
             slot = "Shadow",
           },
@@ -10497,10 +10521,12 @@ return {
           Shadow = {
             ids = {
               60550,
+              56496,
             },
             item = "Shadow of a Legendary Rogue Weapon",
             names = {
               "Shadow of a Legendary Rogue Weapon",
+              "Fang, the Lair's Deceit",
             },
             slot = "Shadow",
           },
@@ -10926,10 +10952,12 @@ return {
           Shadow = {
             ids = {
               60544,
+              55077,
             },
             item = "Shadow of a Legendary Shadowknight Shield",
             names = {
               "Shadow of a Legendary Shadowknight Shield",
+              "Merciless Bulwark of the Ice Dragon",
             },
             slot = "Shadow",
           },
@@ -11362,10 +11390,12 @@ return {
           Shadow = {
             ids = {
               60547,
+              56494,
             },
             item = "Shadow of a Legendary Shaman Shield",
             names = {
               "Shadow of a Legendary Shaman Shield",
+              "Bulwark of Bygone Purity",
             },
             slot = "Shadow",
           },
@@ -11769,10 +11799,12 @@ return {
           Shadow = {
             ids = {
               60538,
+              55056,
             },
             item = "Shadow of a Legendary Warrior Shield",
             names = {
               "Shadow of a Legendary Warrior Shield",
+              "Tenacious Bulwark of the Lava Dragon",
             },
             slot = "Shadow",
           },
@@ -12190,10 +12222,12 @@ return {
           Shadow = {
             ids = {
               60669,
+              56499,
             },
             item = "Shadow of a Legendary Wizard Staff",
             names = {
               "Shadow of a Legendary Wizard Staff",
+              "Capsule of Catastrophic Fate",
             },
             slot = "Shadow",
           },

@@ -180,6 +180,26 @@ function core.build_char_needs(recs, evaluator)
     return needs
 end
 
+-- True when a BiS/snap status means the character owns the entry (equipped,
+-- bags, bank, known spell, etc.). Used to drop stale needers so Linked and
+-- BiS paint agree (LazBiS: one ownership source for grid + linked list).
+function core.status_is_owned(status)
+    return status ~= nil and status ~= "missing"
+end
+
+-- Drop needers for whom owned_fn(need) returns a truthy reason string.
+-- Pure helper for tests; runtime passes live/Store ownership checks.
+function core.filter_owned_needers(needers, owned_fn)
+    local out = {}
+    for _, need in ipairs(needers or {}) do
+        local reason = owned_fn and owned_fn(need) or nil
+        if not reason then
+            out[#out + 1] = need
+        end
+    end
+    return out
+end
+
 -- Merge per-character needs into shared lookup tables.
 --   chars: { char_key -> { name = display char name, needs = build_char_needs(...) } }
 -- Returns { by_id = { id -> { {character, display, entry, char_key} } }, by_name = ..., item_count }
@@ -1043,51 +1063,58 @@ function M.peer_work_pending()
     return queue_has_peer_work()
 end
 
--- Needers for a linked item. Local character hits are confirmed against live
--- FindItem so an item looted seconds ago never gets announced as needed.
-function M.needers_for(item_name, item_id)
-    local out = {}
-    local local_key = local_char_key()
-    local visible = visible_char_key_set()
-    for _, need in ipairs(filter_visible_needers(core.query_chars(state_idx.chars, item_name, item_id), visible)) do
-        local keep = true
-        if need.char_key == local_key then
-            local ok, owned = pcall(function()
-                local bis = require('bis')
-                return bis.live_own_item(need.entry, need.display or item_name, item_id)
-            end)
-            if ok and owned then
-                keep = false
-                enqueue(local_key, "live_owned", tostring(need.display or item_name or "")) -- index is stale for us; refresh
-            end
-        end
-        if keep then out[#out + 1] = need end
+-- Drop needers who already own the item. Local: live FindItem/FindItemBank
+-- (plus Store-bank fallback). Peers: Store snap bags+bank+equipped via the
+-- same snap_entry_status BiS paint uses — so banked items cannot linger as
+-- Linked needers when the BiS grid already shows them owned.
+local function ownership_reason_for_need(need, item_name, item_id)
+    local key = tostring(need and need.char_key or "")
+    if key == "" then return nil end
+    if is_local_key(key) then
+        local ok, owned = pcall(function()
+            local bis = require('bis')
+            return bis.live_own_item(need.entry, need.display or item_name, item_id)
+        end)
+        if ok and owned then return "live_owned" end
     end
-    return out
+    local snap = Store.get(key)
+    if type(snap) ~= "table" or type(need.entry) ~= "table" then return nil end
+    local ok, status = pcall(function()
+        local bis = require('bis')
+        return bis.snap_entry_status(need.entry, snap)
+    end)
+    if ok and core.status_is_owned(status) then return "store_owned" end
+    return nil
+end
+
+local function filter_owned_visible_needers(needers, item_name, item_id, visible)
+    return core.filter_owned_needers(
+        filter_visible_needers(needers, visible),
+        function(need)
+            local reason = ownership_reason_for_need(need, item_name, item_id)
+            if reason then
+                enqueue(need.char_key, reason, tostring(need.display or item_name or ""))
+            end
+            return reason
+        end)
+end
+
+-- Needers for a linked item. Confirmed against live (local) and Store snap
+-- (peers / bank) so Linked and [TG] match BiS ownership paint.
+function M.needers_for(item_name, item_id)
+    local visible = visible_char_key_set()
+    return filter_owned_visible_needers(
+        core.query_chars(state_idx.chars, item_name, item_id),
+        item_name, item_id, visible)
 end
 
 -- Needed items mentioned in a plain chat line, each with its needers.
 function M.text_needs(line, limit)
     local hits = core.text_candidates_chars(state_idx.chars, line, limit)
-    local local_key = local_char_key()
     local visible = visible_char_key_set()
     for _, hit in ipairs(hits) do
-        local filtered = {}
-        for _, need in ipairs(filter_visible_needers(hit.needers or {}, visible)) do
-            local keep = true
-            if need.char_key == local_key then
-                local ok, owned = pcall(function()
-                    local bis = require('bis')
-                    return bis.live_own_item(need.entry, need.display or hit.name, hit.id)
-                end)
-                if ok and owned then
-                    keep = false
-                    enqueue(local_key, "live_owned", tostring(need.display or hit.name or ""))
-                end
-            end
-            if keep then filtered[#filtered + 1] = need end
-        end
-        hit.needers = filtered
+        hit.needers = filter_owned_visible_needers(
+            hit.needers or {}, hit.name, hit.id, visible)
     end
     return hits
 end
