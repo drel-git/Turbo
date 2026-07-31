@@ -518,6 +518,24 @@ local function entry_matches_item(entry, it)
     return false
 end
 
+local function jonas_bare(name)
+    name = norm_item_name(name)
+    if name == "" then return "" end
+    local prefix = "jonas dagmire's "
+    if name:sub(1, #prefix) == prefix then
+        return trim(name:sub(#prefix + 1))
+    end
+    return name
+end
+
+local function names_match_owned(a, b)
+    a, b = norm_item_name(a), norm_item_name(b)
+    if a == "" or b == "" then return false end
+    if a == b then return true end
+    local ca, cb = jonas_bare(a), jonas_bare(b)
+    return ca ~= "" and ca == cb
+end
+
 -- LazBiS-style live ownership check (FindItem + FindItemBank).
 -- BOUNDED by design: this confirm exists to catch an item looted SECONDS ago
 -- (snapshot lag) - and that item is by definition the linked/looted one, so
@@ -530,6 +548,17 @@ local function find_item_tlo(id_or_name, bank)
         local ok, exists = pcall(function() return fi and fi() end)
         return ok and exists and true or false
     end
+    -- Name queries: reject substring false-hits (e.g. FindItem("Arcane Demise")
+    -- returning "Hideous Hex of Arcane Demise"). Norm match still allows
+    -- "... (Augmented)" vs bare catalog names.
+    local function fi_matches_query(fi, query)
+        if type(query) == "number" then return true end
+        local qname = tostring(query or ""):gsub("^%=", "")
+        if trim(qname) == "" then return false end
+        local actual = ""
+        pcall(function() actual = tostring(fi.Name() or "") end)
+        return names_match_owned(actual, qname)
+    end
     local function lookup(query)
         local ok, fi = pcall(function()
             if bank then
@@ -537,7 +566,7 @@ local function find_item_tlo(id_or_name, bank)
             end
             return mq.TLO.FindItem and mq.TLO.FindItem(query) or nil
         end)
-        if ok and valid(fi) then return fi end
+        if ok and valid(fi) and fi_matches_query(fi, query) then return fi end
         return nil
     end
     if type(id_or_name) == "number" then
@@ -555,7 +584,7 @@ local function find_item_tlo(id_or_name, bank)
         fi = lookup("=" .. name .. " (Augmented)")
         if fi then return fi end
     end
-    -- Partial match (same fallback as items.resolve_item_tlo).
+    -- Partial match (same fallback as items.resolve_item_tlo), then confirm name.
     return lookup(name)
 end
 
@@ -590,24 +619,6 @@ local function live_status_from_fi(fi, bank)
     -- InvSlots 0-22 are worn; bag/bank pack slots are higher.
     if slot and slot >= 0 and slot <= 22 then return "equipped" end
     return "carried"
-end
-
-local function jonas_bare(name)
-    name = norm_item_name(name)
-    if name == "" then return "" end
-    local prefix = "jonas dagmire's "
-    if name:sub(1, #prefix) == prefix then
-        return trim(name:sub(#prefix + 1))
-    end
-    return name
-end
-
-local function names_match_owned(a, b)
-    a, b = norm_item_name(a), norm_item_name(b)
-    if a == "" or b == "" then return false end
-    if a == b then return true end
-    local ca, cb = jonas_bare(a), jonas_bare(b)
-    return ca ~= "" and ca == cb
 end
 
 -- After zone, FindItemBank can fail while Store still holds a preserved bank.

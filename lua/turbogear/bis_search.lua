@@ -22,6 +22,17 @@ local function trim(s)
     return tostring(s or ""):gsub("^%s+", ""):gsub("%s+$", "")
 end
 
+-- Match bis.norm_item_name enough to accept "(Augmented)" and reject
+-- substring false-hits (short focus name vs "Hideous Hex of …").
+local function norm_item_name(s)
+    s = trim(s):lower()
+    s = s:gsub("`", "'"):gsub("\226\128\152", "'"):gsub("\226\128\153", "'")
+    s = s:gsub("%s*%(%s*[^%)]-%s*%)%s*$", "")
+    s = s:gsub("%s*%[%s*[^%]]-%s*%]%s*$", "")
+    s = s:gsub("%s+", " ")
+    return trim(s)
+end
+
 local function cache_path()
     return tostring(cfg.BisSearchFile or (tostring(mq.configDir or "") .. "/TurboGear_bissearch.lua"))
 end
@@ -121,6 +132,15 @@ local function find_tlo(id_or_name, bank)
         local ok, exists = pcall(function() return fi and fi() end)
         return ok and exists and true or false
     end
+    local function fi_matches_query(fi, query)
+        if type(query) == "number" then return true end
+        local qname = tostring(query or ""):gsub("^%=", "")
+        if trim(qname) == "" then return false end
+        local actual = ""
+        pcall(function() actual = tostring(fi.Name() or "") end)
+        local a, b = norm_item_name(actual), norm_item_name(qname)
+        return a ~= "" and a == b
+    end
     local function lookup(query)
         local ok, fi = pcall(function()
             if bank then
@@ -128,7 +148,7 @@ local function find_tlo(id_or_name, bank)
             end
             return mq.TLO.FindItem and mq.TLO.FindItem(query) or nil
         end)
-        if ok and valid(fi) then return fi end
+        if ok and valid(fi) and fi_matches_query(fi, query) then return fi end
         return nil
     end
     if type(id_or_name) == "number" then

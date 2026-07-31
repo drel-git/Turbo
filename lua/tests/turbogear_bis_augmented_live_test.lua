@@ -150,5 +150,41 @@ local row = bis.evaluate_entry(entry, snap)
 check(row and row.status == 'equipped' and row.have == true,
     'evaluate_entry: local live paints Augmented helm equipped')
 
+-- DoN Cryptic short label must not claim Hideous Hex via partial FindItem.
+package.loaded['mq'].TLO.FindItem = function(q)
+    q = tostring(q or '')
+    if q == 'Arcane Demise' or q == '=Arcane Demise' then
+        return make_fi('Hideous Hex of Arcane Demise', 28114, 23)
+    end
+    if q == 'Hideous Hex of Arcane Demise' or q == '=Hideous Hex of Arcane Demise'
+        or tonumber(q) == 28114 then
+        return make_fi('Hideous Hex of Arcane Demise', 28114, 23)
+    end
+    return nil
+end
+bis.invalidate_live_ownership_cache()
+local clutch = {
+    item = 'Arcane Demise',
+    names = {
+        'Arcane Demise',
+        'Cryptic Clutch of Arcane Demise',
+        'Vacant Vessel of Arcane Demise',
+    },
+    ids = { 62544, 62564 },
+    slot = 'Aug7',
+}
+st = bis.live_item_status(clutch, clutch.item, nil)
+check(st == nil, 'live_item_status: Hex does not satisfy Cryptic Clutch short name')
+
+local hex = {
+    item = 'Arcane Demise',
+    names = { 'Arcane Demise', 'Hideous Hex of Arcane Demise' },
+    ids = { 28114 },
+    slot = 'Aug7',
+}
+st = bis.live_item_status(hex, hex.item, nil)
+check(st == 'carried' or st == 'equipped',
+    'live_item_status: Hex id still finds Hideous Hex of Arcane Demise')
+
 print(string.format('turbogear_bis_augmented_live_test: %d passed, %d failed', pass, fail))
 if fail > 0 then os.exit(1) end
