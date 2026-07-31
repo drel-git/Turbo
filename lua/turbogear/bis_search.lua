@@ -117,24 +117,34 @@ function M.save()
 end
 
 local function find_tlo(id_or_name, bank)
-    local ok, fi = pcall(function()
-        if bank then
-            if type(id_or_name) == "number" then
-                return mq.TLO.FindItemBank and mq.TLO.FindItemBank(id_or_name) or nil
+    local function valid(fi)
+        local ok, exists = pcall(function() return fi and fi() end)
+        return ok and exists and true or false
+    end
+    local function lookup(query)
+        local ok, fi = pcall(function()
+            if bank then
+                return mq.TLO.FindItemBank and mq.TLO.FindItemBank(query) or nil
             end
-            local name = trim(id_or_name)
-            if name == "" then return nil end
-            return mq.TLO.FindItemBank and mq.TLO.FindItemBank("=" .. name) or nil
-        end
-        if type(id_or_name) == "number" then
-            return mq.TLO.FindItem and mq.TLO.FindItem(id_or_name) or nil
-        end
-        local name = trim(id_or_name)
-        if name == "" then return nil end
-        return mq.TLO.FindItem and mq.TLO.FindItem("=" .. name) or nil
-    end)
-    if not ok or not fi or not fi() then return nil end
-    return fi
+            return mq.TLO.FindItem and mq.TLO.FindItem(query) or nil
+        end)
+        if ok and valid(fi) then return fi end
+        return nil
+    end
+    if type(id_or_name) == "number" then
+        if (tonumber(id_or_name) or 0) <= 0 then return nil end
+        return lookup(id_or_name)
+    end
+    local name = trim(id_or_name)
+    if name == "" then return nil end
+    local fi = lookup("=" .. name)
+    if fi then return fi end
+    local low = name:lower()
+    if not low:find("%(augmented%)%s*$") then
+        fi = lookup("=" .. name .. " (Augmented)")
+        if fi then return fi end
+    end
+    return lookup(name)
 end
 
 local function status_from_fi(fi, bank)

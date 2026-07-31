@@ -526,24 +526,60 @@ end
 -- fungal/Jonas entries) ran hundreds of FindItem/FindItemBank scans per call
 -- and froze the game for 29-39s when chat hit a warm-up fallback scan.
 local function find_item_tlo(id_or_name, bank)
-    local ok, fi = pcall(function()
-        if bank then
-            if type(id_or_name) == "number" then
-                return mq.TLO.FindItemBank and mq.TLO.FindItemBank(id_or_name) or nil
+    local function valid(fi)
+        local ok, exists = pcall(function() return fi and fi() end)
+        return ok and exists and true or false
+    end
+    local function lookup(query)
+        local ok, fi = pcall(function()
+            if bank then
+                return mq.TLO.FindItemBank and mq.TLO.FindItemBank(query) or nil
             end
-            local name = trim(id_or_name)
-            if name == "" then return nil end
-            return mq.TLO.FindItemBank and mq.TLO.FindItemBank("=" .. name) or nil
-        end
-        if type(id_or_name) == "number" then
-            return mq.TLO.FindItem and mq.TLO.FindItem(id_or_name) or nil
-        end
-        local name = trim(id_or_name)
-        if name == "" then return nil end
-        return mq.TLO.FindItem and mq.TLO.FindItem("=" .. name) or nil
-    end)
-    if not ok or not fi or not fi() then return nil end
-    return fi
+            return mq.TLO.FindItem and mq.TLO.FindItem(query) or nil
+        end)
+        if ok and valid(fi) then return fi end
+        return nil
+    end
+    if type(id_or_name) == "number" then
+        if (tonumber(id_or_name) or 0) <= 0 then return nil end
+        return lookup(id_or_name)
+    end
+    local name = trim(id_or_name)
+    if name == "" then return nil end
+    local fi = lookup("=" .. name)
+    if fi then return fi end
+    -- Augmented gear often has Name() "... (Augmented)"; exact =base misses
+    -- while local BiS ignores snap ownership → false red for worn gear.
+    local low = name:lower()
+    if not low:find("%(augmented%)%s*$") then
+        fi = lookup("=" .. name .. " (Augmented)")
+        if fi then return fi end
+    end
+    -- Partial match (same fallback as items.resolve_item_tlo).
+    return lookup(name)
+end
+
+-- When FindItem-by-name fails, confirm the worn Inventory slot for this entry.
+-- Strips (Augmented) via entry_matches_item / norm_item_name.
+local function live_worn_slot_status(entry)
+    local slot_label = trim(entry and entry.slot)
+    if slot_label == "" then return nil end
+    local ok_items, items = pcall(require, 'items')
+    if not ok_items or not items or not items.slot_id_for_label then return nil end
+    local slot_id = items.slot_id_for_label(slot_label)
+    if slot_id == nil then return nil end
+    local ok, it = pcall(function() return mq.TLO.Me.Inventory(slot_id) end)
+    if not ok or not it then return nil end
+    local exists = false
+    pcall(function() exists = it() and true or false end)
+    if not exists then return nil end
+    local name, id = "", 0
+    pcall(function() name = tostring(it.Name() or "") end)
+    pcall(function() id = tonumber(it.ID()) or 0 end)
+    if entry_matches_item(entry, { name = name, id = id }) then
+        return "equipped"
+    end
+    return nil
 end
 
 local function live_status_from_fi(fi, bank)
@@ -641,6 +677,8 @@ function M.live_item_status(entry, item_name, item_id)
         local st = try(canonical)
         if st then return st end
     end
+    local worn = live_worn_slot_status(entry)
+    if worn then return worn end
     if owned_in_store_bank(entry, item_name, item_id) then
         return "carried"
     end

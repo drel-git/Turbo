@@ -1,3 +1,6 @@
+1.2.115
+- Fixed rare bug where aug'd items would sometimes not show as owned.
+
 1.2.114
 - Linked/Announce: needers who already own an item in Store bags or bank are
   dropped so Linked and [TG] match BiS ownership paint (stale needs index no

@@ -15663,6 +15663,7 @@ return {
         ["Shadow Knight"] = {
           Arms = {
             ids = {
+              32461,
             },
             item = "Duskbringer's Ascendant Armguards of the Hateful",
             names = {
@@ -15714,6 +15715,7 @@ return {
           },
           Chest = {
             ids = {
+              32463,
             },
             item = "Duskbringer's Ascendant Chestguard of the Hateful",
             names = {
@@ -15764,6 +15766,7 @@ return {
           },
           Feet = {
             ids = {
+              32462,
             },
             item = "Duskbringer's Ascendant Boots of the Hateful",
             names = {
@@ -15794,6 +15797,7 @@ return {
           },
           Hands = {
             ids = {
+              32464,
             },
             item = "Duskbringer's Ascendant Gloves of the Hateful",
             names = {
@@ -15804,6 +15808,7 @@ return {
           },
           Head = {
             ids = {
+              32465,
             },
             item = "Duskbringer's Ascendant Helm of the Hateful",
             names = {
@@ -15814,6 +15819,7 @@ return {
           },
           Legs = {
             ids = {
+              32466,
             },
             item = "Duskbringer's Ascendant Legguards of the Hateful",
             names = {
@@ -15894,6 +15900,7 @@ return {
           },
           Wrist1 = {
             ids = {
+              32467,
             },
             item = "Duskbringer's Ascendant Wristguard of the Hateful",
             names = {
