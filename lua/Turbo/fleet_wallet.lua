@@ -14,7 +14,7 @@ local TG, mq, ImGui, Ui
 local cachedWallet, refreshWalletCache
 
 local function defaultColumns()
-    return { pp = true, dc = true, rc = true, fav = true, cc = true, aa = true }
+    return { pp = true, dc = true, rc = true, fav = true, cc = true, nvs = true, aa = true }
 end
 
 local function ensureColumns()
@@ -23,7 +23,7 @@ local function ensureColumns()
         cols = defaultColumns()
         TG.fleetWalletColumns = cols
     end
-    for _, key in ipairs({ 'pp', 'dc', 'rc', 'fav', 'cc', 'aa' }) do
+    for _, key in ipairs({ 'aa', 'cc', 'dc', 'fav', 'nvs', 'pp', 'rc' }) do
         if cols[key] == nil then cols[key] = true end
     end
     return cols
@@ -59,6 +59,7 @@ local function quickWalletSig()
         tostring(snap.diamond_coins or ''),
         tostring(snap.radiant_crystals or ''),
         tostring(snap.celestial_crests or ''),
+        tostring(snap.nightveil_scrip or ''),
     }, '|')
 end
 
@@ -131,8 +132,8 @@ function M.init(deps)
     TG.fleetWalletRecipient = TG.fleetWalletRecipient or ''
     TG.fleetWalletRows = TG.fleetWalletRows or {}
     TG.fleetWalletScope = TG.fleetWalletScope or 'group'
-    local cur = tostring(TG.fleetWalletCurrency or 'rc'):lower()
-    if cur ~= 'pp' and cur ~= 'dc' and cur ~= 'rc' and cur ~= 'cc' then cur = 'rc' end
+    local cur = tostring(TG.fleetWalletCurrency or 'cc'):lower()
+    if cur == 'rc' or (cur ~= 'pp' and cur ~= 'dc' and cur ~= 'cc') then cur = 'cc' end
     TG.fleetWalletCurrency = cur
     TG.fleetWalletPicks = type(TG.fleetWalletPicks) == 'table' and TG.fleetWalletPicks or {}
     TG.fleetWalletForgotten = type(TG.fleetWalletForgotten) == 'table' and TG.fleetWalletForgotten or {}
@@ -230,6 +231,7 @@ local function peersFromTable(value)
                 local rc = tonumber(snap.radiant_crystals)
                 local favor = tonumber(snap.tribute_favor)
                 local crests = tonumber(snap.celestial_crests)
+                local nvs = tonumber(snap.nightveil_scrip)
                 local aa = tonumber(snap.aa_unspent)
                 peers[clean(name)] = {
                     name = name,
@@ -238,10 +240,11 @@ local function peersFromTable(value)
                     rc = rc,
                     favor = favor,
                     crests = crests,
+                    nvs = nvs,
                     aa = aa,
                 }
                 if plat ~= nil or dc ~= nil or rc ~= nil or favor ~= nil
-                    or crests ~= nil or aa ~= nil then
+                    or crests ~= nil or nvs ~= nil or aa ~= nil then
                     filled = filled + 1
                 end
             end
@@ -293,12 +296,15 @@ local function streamScanCachePeers()
             if favor then current.favor = tonumber(favor) end
             local crests = line:match("%['celestial_crests'%]%s*=%s*([%-%d%.eE]+)")
             if crests then current.crests = tonumber(crests) end
+            local nvs = line:match("%['nightveil_scrip'%]%s*=%s*([%-%d%.eE]+)")
+            if nvs then current.nvs = tonumber(nvs) end
             local aa = line:match("%['aa_unspent'%]%s*=%s*([%-%d%.eE]+)")
             if aa then current.aa = tonumber(aa) end
             entryDepth = entryDepth + opens - closes
             if entryDepth <= 0 then
                 if current.plat ~= nil or current.dc ~= nil or current.rc ~= nil
-                    or current.favor ~= nil or current.crests ~= nil or current.aa ~= nil then
+                    or current.favor ~= nil or current.crests ~= nil or current.nvs ~= nil
+                    or current.aa ~= nil then
                     filled = filled + 1
                 end
                 current = nil
@@ -380,12 +386,13 @@ local function decodeTurboFW(text)
         if v == nil or v == '' then return nil end
         return tonumber(v)
     end
-    local p, d, r, f, c, a = num(map.p), num(map.d), num(map.r), num(map.f), num(map.c), num(map.a)
-    if p == nil and d == nil and r == nil and f == nil and c == nil and a == nil then
+    local p, d, r, f, c, nv, a = num(map.p), num(map.d), num(map.r), num(map.f),
+        num(map.c), num(map.n), num(map.a)
+    if p == nil and d == nil and r == nil and f == nil and c == nil and nv == nil and a == nil then
         return nil
     end
     return {
-        plat = p, dc = d, rc = r, favor = f, crests = c, aa = a,
+        plat = p, dc = d, rc = r, favor = f, crests = c, nvs = nv, aa = a,
         updated = num(map.t),
         live = true,
     }
@@ -541,7 +548,7 @@ local function buildRows()
         if me ~= '' then allowed[clean(me)] = me end
         for k, rec in pairs(peers) do
             if type(rec) == 'table' and (rec.plat ~= nil or rec.dc ~= nil or rec.rc ~= nil
-                or rec.favor ~= nil or rec.crests ~= nil or rec.aa ~= nil) then
+                or rec.favor ~= nil or rec.crests ~= nil or rec.nvs ~= nil or rec.aa ~= nil) then
                 allowed[k] = rec.name or k
             end
         end
@@ -558,7 +565,7 @@ local function buildRows()
     end
 
     local rows, byName = {}, {}
-    local function upsert(name, plat, dc, rc, favor, crests, aa, isSelf)
+    local function upsert(name, plat, dc, rc, favor, crests, nvs, aa, isSelf)
         name = tostring(name or ''):match('^%s*(.-)%s*$') or ''
         if name == '' then return end
         local key = clean(name)
@@ -567,7 +574,7 @@ local function buildRows()
         if not row then
             row = {
                 name = allowed[key] or name,
-                plat = nil, dc = nil, rc = nil, favor = nil, crests = nil, aa = nil,
+                plat = nil, dc = nil, rc = nil, favor = nil, crests = nil, nvs = nil, aa = nil,
                 isSelf = isSelf == true,
             }
             byName[key] = row
@@ -578,12 +585,13 @@ local function buildRows()
         if rc ~= nil then row.rc = tonumber(rc) end
         if favor ~= nil then row.favor = tonumber(favor) end
         if crests ~= nil then row.crests = tonumber(crests) end
+        if nvs ~= nil then row.nvs = tonumber(nvs) end
         if aa ~= nil then row.aa = tonumber(aa) end
         if isSelf then row.isSelf = true; row.name = me ~= '' and me or row.name end
     end
 
     upsert(me, cachedWallet.plat, cachedWallet.dc, cachedWallet.rc,
-        cachedWallet.favor, cachedWallet.crests, cachedWallet.aa, true)
+        cachedWallet.favor, cachedWallet.crests, cachedWallet.nvs, cachedWallet.aa, true)
     -- While open: peer amounts from live ping files only (never stale sidecar).
     -- Sidecar only fills amounts when the panel is closed / no live yet and we
     -- have not just requested a poke (avoids showing wrong PP/CC after trades).
@@ -592,18 +600,18 @@ local function buildRows()
     if not liveOnly then
         for key, rec in pairs(peers) do
             if type(rec) == 'table' and allowed[key] then
-                upsert(rec.name or key, rec.plat, rec.dc, rec.rc, rec.favor, rec.crests, rec.aa, false)
+                upsert(rec.name or key, rec.plat, rec.dc, rec.rc, rec.favor, rec.crests, rec.nvs, rec.aa, false)
             end
         end
     end
     for key, rec in pairs(live) do
         if type(rec) == 'table' and allowed[key] then
-            upsert(rec.name or key, rec.plat, rec.dc, rec.rc, rec.favor, rec.crests, rec.aa, false)
+            upsert(rec.name or key, rec.plat, rec.dc, rec.rc, rec.favor, rec.crests, rec.nvs, rec.aa, false)
         end
     end
     -- Name rows for peers without live yet (amounts stay '-' while open).
     for _, name in pairs(allowed) do
-        upsert(name, nil, nil, nil, nil, nil, nil, false)
+        upsert(name, nil, nil, nil, nil, nil, nil, nil, false)
     end
 
     table.sort(rows, function(a, b)
@@ -640,8 +648,9 @@ local COL_HAIR = IM_COL32 and IM_COL32(27, 40, 54, 255) or nil      -- #1b2836
 local COL_ACCENT = IM_COL32 and IM_COL32(58, 166, 163, 255) or nil  -- #3aa6a3
 
 local function activeCurrency()
-    local cur = tostring(TG.fleetWalletCurrency or 'rc'):lower()
-    if cur ~= 'pp' and cur ~= 'dc' and cur ~= 'rc' and cur ~= 'cc' then return 'rc' end
+    local cur = tostring(TG.fleetWalletCurrency or 'cc'):lower()
+    -- RC is no-trade; keep it out of the pool selector (legacy 'rc' → CC).
+    if cur == 'rc' or (cur ~= 'pp' and cur ~= 'dc' and cur ~= 'cc') then return 'cc' end
     return cur
 end
 
@@ -748,7 +757,8 @@ local function pushFillBtn(fr, fg, fb, tr, tg, tb, hoverLift)
 end
 
 local function drawCurrencySegment()
-    local segs = { { 'pp', 'PP' }, { 'dc', 'DC' }, { 'rc', 'RC' }, { 'cc', 'CC' } }
+    -- Poolable currencies only (RC / NVS are no-trade — display in table, not here).
+    local segs = { { 'cc', 'CC' }, { 'dc', 'DC' }, { 'pp', 'PP' } }
     local cur = activeCurrency()
     local segW, segH = 52, 28
     local totalW = (#segs * segW) + (#segs - 1) + 2
@@ -1221,8 +1231,8 @@ function M.drawPanel()
         textC(C.header, 'Columns')
         local colChanged = false
         for _, spec in ipairs({
-            { 'pp', 'PP' }, { 'dc', 'DC' }, { 'rc', 'RC' },
-            { 'fav', 'Fav' }, { 'cc', 'CC' }, { 'aa', 'AA' },
+            { 'aa', 'AA' }, { 'cc', 'CC' }, { 'dc', 'DC' }, { 'fav', 'Fav' },
+            { 'nvs', 'NVS' }, { 'pp', 'PP' }, { 'rc', 'RC' },
         }) do
             local key, label = spec[1], spec[2]
             local on = cols[key] ~= false
@@ -1283,15 +1293,16 @@ function M.drawPanel()
     sectionGap()
 
     local colDefs = { { key = 'name', title = 'Name', w = 0 } }
-    if cols.pp ~= false then colDefs[#colDefs + 1] = { key = 'pp', title = 'PP', w = 52 } end
-    if cols.dc ~= false then colDefs[#colDefs + 1] = { key = 'dc', title = 'DC', w = 36 } end
-    if cols.rc ~= false then colDefs[#colDefs + 1] = { key = 'rc', title = 'RC', w = 36 } end
-    if cols.fav ~= false then colDefs[#colDefs + 1] = { key = 'fav', title = 'Fav', w = 44 } end
-    if cols.cc ~= false then colDefs[#colDefs + 1] = { key = 'cc', title = 'CC', w = 36 } end
     if cols.aa ~= false then colDefs[#colDefs + 1] = { key = 'aa', title = 'AA', w = 36 } end
+    if cols.cc ~= false then colDefs[#colDefs + 1] = { key = 'cc', title = 'CC', w = 36 } end
+    if cols.dc ~= false then colDefs[#colDefs + 1] = { key = 'dc', title = 'DC', w = 36 } end
+    if cols.fav ~= false then colDefs[#colDefs + 1] = { key = 'fav', title = 'Fav', w = 44 } end
+    if cols.nvs ~= false then colDefs[#colDefs + 1] = { key = 'nvs', title = 'NVS', w = 44 } end
+    if cols.pp ~= false then colDefs[#colDefs + 1] = { key = 'pp', title = 'PP', w = 52 } end
+    if cols.rc ~= false then colDefs[#colDefs + 1] = { key = 'rc', title = 'RC', w = 36 } end
     colDefs[#colDefs + 1] = { key = 'ops', title = 'Ops', w = 78 }
 
-    local tot = { pp = 0, dc = 0, rc = 0, fav = 0, cc = 0, aa = 0 }
+    local tot = { pp = 0, dc = 0, rc = 0, fav = 0, cc = 0, nvs = 0, aa = 0 }
     -- Vertical hairlines only (no per-row boxes); header/totals still use paint lines.
     -- Avoid SizingFixedFit — it collapses under AlwaysAutoResize when cells
     -- briefly report empty content.
@@ -1403,6 +1414,9 @@ function M.drawPanel()
                 elseif def.key == 'cc' then
                     rightText(valueColor('cc', row.crests, isSel), fmt(row.crests))
                     if row.crests then tot.cc = tot.cc + row.crests end
+                elseif def.key == 'nvs' then
+                    rightText(valueColor('nvs', row.nvs, isSel), fmt(row.nvs))
+                    if row.nvs then tot.nvs = tot.nvs + row.nvs end
                 elseif def.key == 'aa' then
                     rightText(valueColor('aa', row.aa, isSel), fmt(row.aa))
                     if row.aa then tot.aa = tot.aa + row.aa end
@@ -1477,6 +1491,7 @@ function M.drawPanel()
             elseif def.key == 'rc' then rightText(valueColor('rc', tot.rc, false), fmt(tot.rc))
             elseif def.key == 'fav' then rightText(valueColor('fav', tot.fav, false), fmt(tot.fav))
             elseif def.key == 'cc' then rightText(valueColor('cc', tot.cc, false), fmt(tot.cc))
+            elseif def.key == 'nvs' then rightText(valueColor('nvs', tot.nvs, false), fmt(tot.nvs))
             elseif def.key == 'aa' then rightText(valueColor('aa', tot.aa, false), fmt(tot.aa))
             else ImGui.Text('') end
         end

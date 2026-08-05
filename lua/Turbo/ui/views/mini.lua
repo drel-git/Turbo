@@ -391,13 +391,13 @@ function M.render(state, actions, ui)
                 pcall(MoneyView.renderMiniLine, {
                     tooltip = 'Open TurboGains.',
                     onClick = function()
+                        -- Open Gains only; leave the hub minimized (tool icon path
+                        -- already does this — expanding here opened both windows).
                         g.gainsWindowOpen = true
                         g.gainsWindowOpenReason = 'mini gains line'
                         g.gainsWindowOpenAt = os.time()
                         g.toolsSubTab = 'gains'
-                        g.minimizedGUI = false
                         g.statusMessage = 'Turbo Gains opened.'
-                        if actions.expandFromMini then actions.expandFromMini('tools') end
                         if g.saveSettings then g.saveSettings() end
                     end,
                 })

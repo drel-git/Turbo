@@ -65,16 +65,21 @@ function M.gather()
             end
             return n
         end, 'Celestial Crest'),
+        nightveil_scrip = alt_plus_bag(function()
+            local t = mq.TLO.Me.AltCurrency('Nightveil Scrip')
+            return t and t() or nil
+        end, 'Nightveil Scrip'),
         aa_unspent = num(function() return mq.TLO.Me.AAPoints() end),
     }
 end
 
 function M.encode(snap)
     snap = snap or M.gather()
-    return string.format('t%d:p%s:d%s:r%s:f%s:c%s:a%s',
+    return string.format('t%d:p%s:d%s:r%s:f%s:c%s:n%s:a%s',
         tonumber(snap.updated) or os.time(),
         enc(snap.platinum), enc(snap.diamond_coins), enc(snap.radiant_crystals),
-        enc(snap.tribute_favor), enc(snap.celestial_crests), enc(snap.aa_unspent))
+        enc(snap.tribute_favor), enc(snap.celestial_crests), enc(snap.nightveil_scrip),
+        enc(snap.aa_unspent))
 end
 
 function M.publish()

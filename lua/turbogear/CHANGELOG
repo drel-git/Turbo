@@ -1,3 +1,16 @@
+1.2.117
+- Fleet wallet: Nightveil Scrip column (alt currency + bag stacks).
+- Fleet wallet: pool selectors CC/DC/PP (RC removed — no trade); column order
+  Name AA CC DC Fav NVS PP RC Ops.
+- Gains: mini line opens Gains only (no longer expands the main Turbo hub).
+- Gains: leaving a farm zone auto-snapshots/tags that zone (not Nexus/PoK);
+  session UI keeps the farm zone while auto-paused in a lobby.
+- Setup: shortened Quick roster / Startup tools headers so they fit the panel.
+- Skip Review: mini badge uses the filtered count without opening the Review tab.
+- Control: Lua restart on the owner reclaim Control and restores the saved looter.
+- Wares: clear prior merchant inventory on open/close; no watched-item beep until
+  the new vendor list has loaded.
+
 1.2.116
 - Shortname fix for Hideous Hex and Cryptic Clutch augs.
 

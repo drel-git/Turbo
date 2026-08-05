@@ -324,7 +324,7 @@ local function challengeStatsFromSnap(currentSnap, xps)
         xp = tonumber(xps.xpGained) or 0,
         plat = tonumber(currentSnap.session and currentSnap.session.totalCp) or 0,
         platIsCopper = true,
-        zone = tostring(xps.currentZone or ''),
+        zone = tostring(xps.farmZone or xps.startZone or xps.currentZone or ''),
     }
 end
 
@@ -1341,7 +1341,7 @@ end
 --- Returns (bestXPhr, bestCpHr) for the current zone from snapshot history.
 local function zoneBestRates(xp, currentSnap)
     local xps = (type(xp) == 'table' and xp.session) or {}
-    local zone = tostring(xps.currentZone or '')
+    local zone = tostring(xps.farmZone or xps.startZone or xps.currentZone or '')
     if zone == '' then return 0, 0 end
     local xpRows = combinedXpSnapshotRows(xp)
     local moneyRows = combinedMoneySnapshotRows(currentSnap)
@@ -1361,9 +1361,26 @@ local function zoneBestRates(xp, currentSnap)
     return bestXP, bestCp
 end
 
+-- Prefer the last farm/camp zone over lobby zones (Nexus/PoK) so a paused
+-- session still reads as the place they were gaining.
+local function sessionDisplayZone(xps, currentSnap)
+    xps = type(xps) == 'table' and xps or {}
+    local current = tostring(xps.currentZone or '')
+    local farm = tostring(xps.farmZone or xps.startZone or '')
+    local sess = currentSnap and currentSnap.session
+    local safePaused = sess and sess.safeZonePaused == true
+    local paused = sess and (tonumber(sess.pausedAt) or 0) > 0
+    if farm ~= '' and (safePaused or (paused and current ~= '' and farm:lower() ~= current:lower())) then
+        return farm
+    end
+    if current ~= '' then return current end
+    return farm
+end
+
 local function renderSummaryCards(s, l, xp, xps, display, wallet, currentSnap)
     local elapsed, isPaused = sessionElapsed(s)
-    local zoneStr = tostring(xps.currentZone or '')
+    local zoneStr = sessionDisplayZone(xps, currentSnap)
+    if zoneStr == '' then zoneStr = tostring(xps.currentZone or '') end
     local timeSub = zoneStr ~= '' and zoneStr or 'TurboGains'
     if isPaused then
         timeSub = 'Paused - ' .. timeSub
@@ -1493,7 +1510,7 @@ end
 --- see in real time whether they are beating their personal record.
 local function renderCurrentZoneBest(xp, currentSnap)
     local xps = (type(xp) == 'table' and xp.session) or {}
-    local zone = tostring(xps.currentZone or '')
+    local zone = tostring(xps.farmZone or xps.startZone or xps.currentZone or '')
     if zone == '' then return end
 
     local xpRows = combinedXpSnapshotRows(xp)

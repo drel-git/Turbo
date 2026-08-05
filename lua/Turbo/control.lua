@@ -144,7 +144,13 @@ function M.heartbeat()
     if (t - state.lastHeartbeat) < HEARTBEAT_MS then return end
     state.lastHeartbeat = t
     local lease = M.read(true)
-    if M.isMine(lease) or M.isExpired(lease) then
+    -- Same owner + same server with a new Lua token (script restart): reclaim
+    -- immediately so the driver is not stuck in Browse until the old lease expires.
+    local sameOwnerRestart = lease
+        and trim(lease.owner) == trim(state.name)
+        and trim(lease.server or '') == trim(state.server or '')
+        and not M.isMine(lease)
+    if M.isMine(lease) or M.isExpired(lease) or sameOwnerRestart then
         M.claim(true)
     end
 end

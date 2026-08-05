@@ -564,12 +564,24 @@ function M.merchantLoading()
     return mq.TLO.Merchant.ItemsReceived() ~= true
 end
 
+function M.clearMerchantRows()
+    merchantRows = {}
+    lastMerchantScanMs = 0
+end
+
 function M.markMerchantOpened()
+    -- Drop prior vendor inventory immediately so watched-item alerts cannot
+    -- beep on the previous merchant while the new window is still loading.
+    merchantRows = {}
+    lastMerchantScanMs = 0
     merchantSnapshotPending = true
 end
 
 function M.tick(merchantOpen)
-    if not merchantOpen then return end
+    if not merchantOpen then
+        if #merchantRows > 0 then M.clearMerchantRows() end
+        return
+    end
     if merchantSnapshotPending and mq.TLO.Merchant.ItemsReceived() == true then
         M.snapshotMerchant(true)
     end

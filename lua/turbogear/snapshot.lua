@@ -550,6 +550,21 @@ local function fill_wallet_fields(snap)
         if total ~= nil then snap.radiant_crystals = total end
     end)
     pcall(function()
+        -- Lazarus custom currency: alt window + bag stacks (same pattern as DC/CC).
+        local t = mq.TLO.Me.AltCurrency('Nightveil Scrip')
+        local n = t and t() or nil
+        local alt = n ~= nil and tonumber(n) or nil
+        local bag = tonumber(mq.TLO.FindItemCount('=Nightveil Scrip')()) or 0
+        if bag == 0 then
+            bag = tonumber(mq.TLO.FindItemCount(57177)()) or 0
+        end
+        if alt ~= nil then
+            snap.nightveil_scrip = alt + bag
+        elseif bag > 0 then
+            snap.nightveil_scrip = bag
+        end
+    end)
+    pcall(function()
         local a = mq.TLO.Me.AAPoints()
         if a ~= nil then snap.aa_unspent = tonumber(a) end
     end)
@@ -565,6 +580,7 @@ function M.wallet_signature(snap)
         tostring(snap.ebon_crystals or ""),
         tostring(snap.tribute_favor or ""),
         tostring(snap.celestial_crests or ""),
+        tostring(snap.nightveil_scrip or ""),
         tostring(snap.aa_unspent or ""),
     }, "|")
 end
@@ -600,17 +616,18 @@ function M.gather_wallet()
     return snap
 end
 
---- Compact E3 var payload: t<unix>:p:d:r:f:c:a  (no spaces/pipes)
+--- Compact E3 var payload: t<unix>:p:d:r:f:c:n:a  (no spaces/pipes; n=Nightveil)
 function M.encode_wallet_e3(snap)
     if type(snap) ~= "table" then return "" end
     local function n(v)
         if v == nil then return "" end
         return tostring(math.floor(tonumber(v) or 0))
     end
-    return string.format("t%d:p%s:d%s:r%s:f%s:c%s:a%s",
+    return string.format("t%d:p%s:d%s:r%s:f%s:c%s:n%s:a%s",
         tonumber(snap.updated) or os.time(),
         n(snap.platinum), n(snap.diamond_coins), n(snap.radiant_crystals),
-        n(snap.tribute_favor), n(snap.celestial_crests), n(snap.aa_unspent))
+        n(snap.tribute_favor), n(snap.celestial_crests), n(snap.nightveil_scrip),
+        n(snap.aa_unspent))
 end
 
 function M.decode_wallet_e3(text)
@@ -625,8 +642,9 @@ function M.decode_wallet_e3(text)
         if v == nil or v == "" then return nil end
         return tonumber(v)
     end
-    local p, d, r, f, c, a = num(map.p), num(map.d), num(map.r), num(map.f), num(map.c), num(map.a)
-    if p == nil and d == nil and r == nil and f == nil and c == nil and a == nil then
+    local p, d, r, f, c, nv, a = num(map.p), num(map.d), num(map.r), num(map.f),
+        num(map.c), num(map.n), num(map.a)
+    if p == nil and d == nil and r == nil and f == nil and c == nil and nv == nil and a == nil then
         return nil
     end
     return {
@@ -636,6 +654,7 @@ function M.decode_wallet_e3(text)
         rc = r,
         favor = f,
         crests = c,
+        nvs = nv,
         aa = a,
     }
 end

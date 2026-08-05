@@ -552,6 +552,7 @@ local function merge_lite_snapshot(existing, snap)
         diamond_coins = snap.diamond_coins ~= nil and snap.diamond_coins or existing.diamond_coins,
         tribute_favor = snap.tribute_favor ~= nil and snap.tribute_favor or existing.tribute_favor,
         celestial_crests = snap.celestial_crests ~= nil and snap.celestial_crests or existing.celestial_crests,
+        nightveil_scrip = snap.nightveil_scrip ~= nil and snap.nightveil_scrip or existing.nightveil_scrip,
         aa_unspent = snap.aa_unspent ~= nil and snap.aa_unspent or existing.aa_unspent,
     }
     if incomplete then
@@ -596,6 +597,7 @@ local function merge_snapshot(existing, snap)
     if snap.diamond_coins == nil then snap.diamond_coins = existing.diamond_coins end
     if snap.tribute_favor == nil then snap.tribute_favor = existing.tribute_favor end
     if snap.celestial_crests == nil then snap.celestial_crests = existing.celestial_crests end
+    if snap.nightveil_scrip == nil then snap.nightveil_scrip = existing.nightveil_scrip end
     if snap.aa_unspent == nil then snap.aa_unspent = existing.aa_unspent end
     if not snap.spells_sig or snap.spells_sig == "" then
         snap.spells = existing.spells
@@ -894,6 +896,7 @@ local function write_wallet_sidecar(out)
                 ebon_crystals = s.ebon_crystals,
                 tribute_favor = s.tribute_favor,
                 celestial_crests = s.celestial_crests,
+                nightveil_scrip = s.nightveil_scrip,
                 aa_unspent = s.aa_unspent,
             }
         end
@@ -913,7 +916,7 @@ end
 
 local WALLET_KEYS = {
     'platinum', 'diamond_coins', 'radiant_crystals', 'ebon_crystals',
-    'tribute_favor', 'celestial_crests', 'aa_unspent',
+    'tribute_favor', 'celestial_crests', 'nightveil_scrip', 'aa_unspent',
 }
 
 --- Merge wallet-only fields (depth=wallet) and rewrite sidecar immediately.
@@ -1033,6 +1036,7 @@ local function persist_row(s)
         radiant_crystals = s.radiant_crystals, ebon_crystals = s.ebon_crystals,
         platinum = s.platinum, diamond_coins = s.diamond_coins,
         tribute_favor = s.tribute_favor, celestial_crests = s.celestial_crests,
+        nightveil_scrip = s.nightveil_scrip,
         aa_unspent = s.aa_unspent,
     }
 end
@@ -1136,6 +1140,7 @@ local function build_row_payload(key, live, serialize_fn, hash_fn)
         encode_field("diamond_coins", encode_scalar(live.diamond_coins)),
         encode_field("tribute_favor", encode_scalar(live.tribute_favor)),
         encode_field("celestial_crests", encode_scalar(live.celestial_crests)),
+        encode_field("nightveil_scrip", encode_scalar(live.nightveil_scrip)),
         encode_field("aa_unspent", encode_scalar(live.aa_unspent)),
     }
     local payload = "{" .. table.concat(parts, ",") .. "}"
@@ -1180,6 +1185,7 @@ local function assemble_payload_from_cache(key, live, cache, serialize_fn, hash_
         encode_field("diamond_coins", encode_scalar(live.diamond_coins)),
         encode_field("tribute_favor", encode_scalar(live.tribute_favor)),
         encode_field("celestial_crests", encode_scalar(live.celestial_crests)),
+        encode_field("nightveil_scrip", encode_scalar(live.nightveil_scrip)),
         encode_field("aa_unspent", encode_scalar(live.aa_unspent)),
     }
     local payload = "{" .. table.concat(parts, ",") .. "}"

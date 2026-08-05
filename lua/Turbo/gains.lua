@@ -226,6 +226,23 @@ local function currentZoneName()
     return zone
 end
 
+-- Safe zones: session timer auto-pauses on entry, auto-resumes on exit.
+-- Kept near zone helpers so farm-zone tracking can reuse the same set.
+local SAFE_ZONES = {
+    poknowledge = true, nexus = true, potranquility = true,
+    bazaar = true, guildhall = true, guildlobby = true,
+    freportw = true, freporte = true,
+}
+
+local function zoneKey(name)
+    return tostring(name or ''):lower():gsub(' ', '')
+end
+
+local function isSafeZoneName(name)
+    local key = zoneKey(name)
+    return key ~= '' and SAFE_ZONES[key] == true
+end
+
 -- =============================================================================
 -- Parsing & formatting
 -- =============================================================================
@@ -571,6 +588,9 @@ local function resetXP()
         aaPointsGained = 0,
         startZone = currentZoneName(),
         currentZone = currentZoneName(),
+        -- Last non-safe zone for this session (snapshots / UI keep farm context
+        -- when the player ports to Nexus / PoK mid-run).
+        farmZone = currentZoneName(),
     }
     M.state.xp.lastSampleMs = nowMs()
     M.state.xp.status = 'XP session reset.'
@@ -602,7 +622,12 @@ local function sampleXP(force)
     xs.currentPctExp = pctExp
     xs.currentPctAA = pctAA
     xs.currentZone = currentZoneName()
-    
+    if not isSafeZoneName(xs.currentZone) then
+        xs.farmZone = xs.currentZone
+    elseif tostring(xs.farmZone or '') == '' then
+        xs.farmZone = tostring(xs.startZone or xs.currentZone or '')
+    end
+
     local newXpGained = xpUnits - (xs.startXPUnits or xpUnits)
     local newAaGained = aaUnits - (xs.startAAUnits or aaUnits)
     local newLevelUps = level - (xs.startLevel or level)
@@ -728,13 +753,18 @@ local function loadXPSnapshots()
     end
 end
 
-local function addXPSnapshot()
+local function addXPSnapshot(zoneOverride)
     sampleXP(true)
     local xs = M.state.xp.session
+    local zone = tostring(zoneOverride or '')
+    if zone == '' then
+        zone = tostring(xs.farmZone or xs.startZone or '')
+    end
+    if zone == '' then zone = currentZoneName() end
     local newRow = {
         time = os.date('%H:%M:%S'),
         ts   = os.time(),   -- unix timestamp for age-based pruning
-        zone = currentZoneName(),
+        zone = zone,
         runtime = sessionSeconds(),
         xpGained = xs.xpGained or 0,
         aaGained = xs.aaGained or 0,
@@ -796,11 +826,17 @@ local function loadMoneySnapshots()
     if ok and type(data) == 'table' then M.state.moneySnapshots = data end
 end
 
-local function addMoneySnapshot()
+local function addMoneySnapshot(zoneOverride)
     local s = M.state.session
+    local xs = M.state.xp.session
     local salesCp = tonumber(s.salesCp) or 0
+    local zone = tostring(zoneOverride or '')
+    if zone == '' then
+        zone = tostring((xs and (xs.farmZone or xs.startZone)) or '')
+    end
+    if zone == '' then zone = currentZoneName() end
     local newSnap = {
-        time = os.date('%H:%M:%S'), ts = os.time(), zone = currentZoneName(), runtime = sessionSeconds(),
+        time = os.date('%H:%M:%S'), ts = os.time(), zone = zone, runtime = sessionSeconds(),
         totalCp = tonumber(s.totalCp) or 0, lootedCp = math.max(0, (tonumber(s.totalCp) or 0) - salesCp),
         salesCp = salesCp, events = tonumber(s.events) or 0,
         biggestCp = tonumber(s.biggestCp) or 0, biggestWho = tostring(s.biggestWho or ''),
@@ -1010,6 +1046,7 @@ saveLiveState = function(force)
         string.format('    biggestWho  = %q,', M.state.session.biggestWho or ''),
         string.format('    salesCp     = %d,', M.state.session.salesCp or 0),
         string.format('    salesEvents = %d,', M.state.session.salesEvents or 0),
+        string.format('    safeZonePaused = %s,', tostring(M.state.session.safeZonePaused == true)),
         '    byChar = {',
     }
     for name, info_ in pairs(M.state.session.byChar or {}) do
@@ -1103,6 +1140,7 @@ saveLiveState = function(force)
     table.insert(lines, string.format('      levelUps = %d,', xs.levelUps or 0))
     table.insert(lines, string.format('      aaPointsGained = %d,', xs.aaPointsGained or 0))
     table.insert(lines, string.format('      startZone = %q,', xs.startZone or ''))
+    table.insert(lines, string.format('      farmZone = %q,', xs.farmZone or xs.startZone or ''))
     table.insert(lines, string.format('      currentZone = %q,', xs.currentZone or currentZoneName()))
     table.insert(lines, '    },')
     table.insert(lines, '    snapshots = {')
@@ -1486,13 +1524,6 @@ end
 local recentEcho = {}
 local ECHO_DEDUPE_MS = 4000
 local lastAutoSnapshotZone = ''
-
--- Safe zones: session timer auto-pauses on entry, auto-resumes on exit.
-local SAFE_ZONES = {
-    poknowledge = true, nexus = true, potranquility = true,
-    bazaar = true, guildhall = true, guildlobby = true,
-    freportw = true, freporte = true,
-}
 local autoPausedForSafeZone = false
 
 local function onAnnounceEcho(line)
@@ -1624,14 +1655,23 @@ end
 --- Pause the session timer. Records the wall time so a later resume can
 --- compute how long we were paused for and add it to pausedAccum, keeping
 --- the elapsed display continuous from the user's perspective.
-function M.pauseSession(broadcast)
-    autoPausedForSafeZone = false  -- manual pause cancels safe-zone auto-resume
+function M.pauseSession(broadcast, opts)
+    opts = type(opts) == 'table' and opts or {}
+    local safeZone = opts.safeZone == true
+    if not safeZone then
+        autoPausedForSafeZone = false  -- manual pause cancels safe-zone auto-resume
+        M.state.session.safeZonePaused = false
+    end
     if M.state.session.pausedAt and M.state.session.pausedAt > 0 then
         info('Session timer is already paused.')
         return
     end
     sampleXP(true)
     M.state.session.pausedAt = os.time()
+    if safeZone then
+        autoPausedForSafeZone = true
+        M.state.session.safeZonePaused = true
+    end
     saveLiveState(true)
     info('\ayTimer paused.\ax')
     if broadcast then
@@ -1649,6 +1689,8 @@ function M.resumeSession(broadcast)
     if pausedFor < 0 then pausedFor = 0 end
     s.pausedAccum = (s.pausedAccum or 0) + pausedFor
     s.pausedAt    = 0
+    s.safeZonePaused = false
+    autoPausedForSafeZone = false
     sampleXP(true)
     saveLiveState(true)
     info('\agTimer resumed (was paused %ds).\ax', pausedFor)
@@ -2165,9 +2207,14 @@ local function checkZoneAutoSnapshot()
     local oldZone = lastAutoSnapshotZone
     lastAutoSnapshotZone = newZone   -- update BEFORE calling snapshot to prevent re-entry
     if hasData then
-        addXPSnapshot()
-        addMoneySnapshot()
-        info('\ayAuto-snapshot: left %s\ax', oldZone)
+        -- Tag the farm zone we left, not the lobby we just entered (Nexus/PoK).
+        local snapZone = oldZone
+        if isSafeZoneName(snapZone) then
+            snapZone = tostring(xs.farmZone or xs.startZone or oldZone)
+        end
+        addXPSnapshot(snapZone)
+        addMoneySnapshot(snapZone)
+        info('\ayAuto-snapshot: left %s\ax', snapZone)
     end
 end
 
@@ -2185,13 +2232,11 @@ local function checkSafeZonePause()
     local isPaused = s.pausedAt and s.pausedAt > 0
     if inSafe and not isPaused then
         -- Entering safe zone while timer is running -> auto-pause
-        M.pauseSession(false)
-        autoPausedForSafeZone = true
+        M.pauseSession(false, { safeZone = true })
         info('\ayAuto-paused: entered %s\ax', xs.currentZone or zone)
     elseif not inSafe and isPaused and autoPausedForSafeZone then
         -- Leaving safe zone and WE were the ones who paused -> auto-resume
         M.resumeSession(false)
-        autoPausedForSafeZone = false
         info('\ayAuto-resumed: left safe zone\ax')
     end
 end

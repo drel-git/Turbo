@@ -172,7 +172,7 @@ local TG = {
     showQuickStartButton = true,
     --- Fleet wallet `$` popup: group | e3 | live | picks
     fleetWalletScope = 'group',
-    fleetWalletCurrency = 'rc',
+    fleetWalletCurrency = 'cc',
     fleetWalletPicks = {},
     fleetWalletForgotten = {},
     fleetWalletColumns = { pp = true, dc = true, rc = true, fav = true, cc = true, aa = true },
@@ -1494,7 +1494,7 @@ saveSettings = function()
     f:write(string.format('  showReviewModeButtons = %s,\n', tostring(TG.showReviewModeButtons ~= false)))
     f:write(string.format('  showQuickStartButton = %s,\n', tostring(TG.showQuickStartButton ~= false)))
     f:write(string.format('  fleetWalletScope = %q,\n', tostring(TG.fleetWalletScope or 'group')))
-    f:write(string.format('  fleetWalletCurrency = %q,\n', tostring(TG.fleetWalletCurrency or 'rc')))
+    f:write(string.format('  fleetWalletCurrency = %q,\n', tostring(TG.fleetWalletCurrency or 'cc')))
     f:write('  fleetWalletPicks = {\n')
     for k, v in pairs(TG.fleetWalletPicks or {}) do
         if v then f:write(string.format('    [%q] = true,\n', tostring(k))) end
@@ -5090,9 +5090,15 @@ require('Turbo.setup_status').install(TG, {
 })
 
 function TG.refreshSharedControl(force)
+    local wasOwner = TG.sharedControlStatus and TG.sharedControlStatus.isOwner == true
     local ok, st = pcall(function() return TG.sharedControl.status(force == true) end)
     if ok and st then
         TG.sharedControlStatus = st
+        -- Ownership just gained (restart reclaim or Take Control): restore
+        -- saved Turbo/looter toggles that startup skipped while in Browse.
+        if st.isOwner == true and not wasOwner and TG.restoreSavedLiveToggles then
+            pcall(TG.restoreSavedLiveToggles)
+        end
         return st
     end
     TG.sharedControlStatus = {
@@ -5125,6 +5131,9 @@ end
 function TG.takeSharedControl()
     local ok = TG.sharedControl.takeControl()
     TG.refreshSharedControl(true)
+    if ok and TG.restoreSavedLiveToggles then
+        pcall(TG.restoreSavedLiveToggles)
+    end
     TG.statusMessage = ok and 'Turbo control moved to this box.' or 'Could not take Turbo control.'
     return ok
 end
@@ -5927,7 +5936,7 @@ TG.TURBO_FOOTER_HELP_POPUP = 'TurboFooterHelp##popup'
 
 --- Cached wallet values — refreshed on AUTO_REFRESH_MS timer alongside collectGroupMembers.
 --- Avoids per-frame TLO calls when wallet strip is always visible.
-local cachedWallet = { plat=0, aa=0, dc=0, favor=0, rc=0, crests=0, lastUpdateMS=0 }
+local cachedWallet = { plat=0, aa=0, dc=0, favor=0, rc=0, crests=0, nvs=0, lastUpdateMS=0 }
 
 local function walletBagCount(itemName)
     -- Exact-name bag count only (single TLO; not a bag walk).
@@ -5965,6 +5974,15 @@ local function refreshWalletCache()
         return n or 0
     end)
     if ok4 then cachedWallet.crests = crests + walletBagCount('Celestial Crest') end
+    local ok5, nvs = pcall(function()
+        local t = mq.TLO.Me.AltCurrency('Nightveil Scrip')
+        return t and tonumber(t()) or 0
+    end)
+    if ok5 then
+        cachedWallet.nvs = nvs + walletBagCount('Nightveil Scrip')
+    else
+        cachedWallet.nvs = walletBagCount('Nightveil Scrip')
+    end
     cachedWallet.lastUpdateMS = mq.gettime()
 end
 
@@ -10810,6 +10828,11 @@ local function turboRenderLeanMiniBar(g, hitch)
         g.skipDisplayRows = nil
         g.skipDisplayTotal = nil
     end
+    -- Mirror full-frame path: rebuild filtered total for the mini badge so the
+    -- count is correct without opening the Review tab.
+    if skipTracker and skipTracker.is_ready() and g.skipDisplayRows == nil then
+        rebuildSkipDisplayRows()
+    end
     if TG.hitchlog then TG.hitchlog.span_end() end
 
     if TG.hitchlog then TG.hitchlog.span_begin('state_tlo') end
@@ -12065,7 +12088,7 @@ function TG.renderWindow()
 
                 if #g.members > 0 then
                     ImGui.Separator()
-                    local quickOpen = ImGui.CollapsingHeader('Edit quick roster for mini view###setup_quick_roster')
+                    local quickOpen = ImGui.CollapsingHeader('Quick roster###setup_quick_roster')
                     tip('Choose which character buttons appear in the mini view. This does not change INI assignments.')
                     local rosterConfigured = false
                     local rosterSelected = 0

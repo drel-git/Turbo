@@ -1400,10 +1400,18 @@ local function drawWatchedTab(g, iniPath, watchedHits, qtyMap)
 end
 
 local function maybeAlertWatchedInStock(g, iniPath, hits)
+    -- Wait until the new merchant list is fully received; otherwise a stale
+    -- previous vendor inventory can false-beep on an empty (or different) vendor.
+    if Wares.merchantLoading and Wares.merchantLoading() then return end
+    local itemsReady = false
+    pcall(function() itemsReady = mq.TLO.Merchant.ItemsReceived() == true end)
+    if not itemsReady then return end
     hits = hits or cachedWatchedMerchantHits(g, iniPath, false)
     if #hits == 0 then return end
     local merchantName = mq.TLO.Target.CleanName() or mq.TLO.Target.Name() or 'merchant'
-    local alertKey = merchantName:lower() .. '|' .. table.concat(hits, '|'):lower()
+    local merchantId = 0
+    pcall(function() merchantId = tonumber(mq.TLO.Target.ID()) or 0 end)
+    local alertKey = string.format('%s|%d|%s', merchantName:lower(), merchantId, table.concat(hits, '|'):lower())
     if lastWatchAlertKey == alertKey then return end
     lastWatchAlertKey = alertKey
     g.statusMessage = string.format('TurboWares: watched in stock - %s', table.concat(hits, ', '))
@@ -1463,6 +1471,10 @@ function M.render(g)
 
     local merchantWnd = mq.TLO.Window('MerchantWnd')
     if not merchantWnd.Open() then
+        if merchantWasOpen then
+            if Wares.clearMerchantRows then Wares.clearMerchantRows() end
+            invalidateWaresCaches(g, 'merchant')
+        end
         merchantWasOpen = false
         lastWatchAlertKey = nil
         return
@@ -1470,13 +1482,15 @@ function M.render(g)
 
     if not merchantWasOpen then
         merchantWasOpen = true
+        lastWatchAlertKey = nil
         if g.waresAutoShow ~= false then
             g.waresWindowOpen = true
         end
         Wares.markMerchantOpened()
         invalidateWaresCaches(g, 'all')
         cachedInventoryRows(g, true)
-        cachedMerchantRows(g, true)
+        -- Do not force-scan merchant rows until ItemsReceived; markMerchantOpened
+        -- already cleared stale inventory from the previous vendor.
     end
 
     if g.waresAutoShow == false or not g.waresWindowOpen then return end
@@ -1494,8 +1508,10 @@ function M.render(g)
         invalidateSellCountCache()
     end
     cachedReadBuyWatch(iniPath, false)
-    local alertHits = cachedWatchedMerchantHits(g, iniPath, false)
-    maybeAlertWatchedInStock(g, iniPath, alertHits)
+    if not (Wares.merchantLoading and Wares.merchantLoading()) then
+        local alertHits = cachedWatchedMerchantHits(g, iniPath, false)
+        maybeAlertWatchedInStock(g, iniPath, alertHits)
+    end
 
     local merchantH = merchantWnd.Height()
     local merchantX = merchantWnd.X() + merchantWnd.Width()
