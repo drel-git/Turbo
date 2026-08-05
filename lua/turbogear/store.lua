@@ -962,10 +962,32 @@ function Store.flush_wallet_sidecar()
     pcall(write_wallet_sidecar, Store.sources)
 end
 
--- Persist-slim: drop heavy focus/clicky blobs (those made own-row serialize
--- 30-60s). Keep compact stats/baseStats/classes/slots so peer Suggestions and
--- worn totals work after the viewer reloads the shared cache file. Viewer UI
--- never re-enriches peer rows from live TLOs -- disk must retain compare stats.
+-- Persist-slim: drop clicky / other fat blobs (those made own-row serialize
+-- 30-60s historically). Keep compact stats/baseStats/classes/slots AND compact
+-- focusEffects/wornFocusEffects (tiny SPA summaries) so Focus + Suggestions
+-- survive cache reload. Viewer UI never re-enriches peer rows from live TLOs.
+local function slim_focus_list(list)
+    if type(list) ~= "table" or list[1] == nil then return nil end
+    local out = {}
+    for i, entry in ipairs(list) do
+        if type(entry) == "table" then
+            out[i] = {
+                typeId = entry.typeId,
+                typeName = entry.typeName,
+                maxEffect = entry.maxEffect,
+                effectiveLevel = entry.effectiveLevel,
+                resist = entry.resist,
+                spellType = entry.spellType,
+                spellName = entry.spellName,
+                spellId = entry.spellId,
+                rank = entry.rank,
+                description = entry.description,
+            }
+        end
+    end
+    return out[1] ~= nil and out or nil
+end
+
 local function slim_aug(a)
     if type(a) ~= "table" then return a end
     local out = {
@@ -975,6 +997,10 @@ local function slim_aug(a)
     }
     if type(a.stats) == "table" then out.stats = a.stats end
     if type(a.baseStats) == "table" then out.baseStats = a.baseStats end
+    local focus = slim_focus_list(a.focusEffects)
+    if focus then out.focusEffects = focus end
+    local worn = slim_focus_list(a.wornFocusEffects)
+    if worn then out.wornFocusEffects = worn end
     return out
 end
 
@@ -1003,6 +1029,10 @@ local function slim_item(it)
     if type(it.baseStats) == "table" then out.baseStats = it.baseStats end
     if type(it.classes) == "table" then out.classes = it.classes end
     if type(it.slots) == "table" then out.slots = it.slots end
+    local focus = slim_focus_list(it.focusEffects)
+    if focus then out.focusEffects = focus end
+    local worn = slim_focus_list(it.wornFocusEffects)
+    if worn then out.wornFocusEffects = worn end
     return out
 end
 

@@ -231,7 +231,7 @@ end
 local SAFE_ZONES = {
     poknowledge = true, nexus = true, potranquility = true,
     bazaar = true, guildhall = true, guildlobby = true,
-    freportw = true, freporte = true,
+    freportw = true, freporte = true, freporttemple = true,
 }
 
 local function zoneKey(name)

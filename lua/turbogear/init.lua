@@ -582,6 +582,29 @@ local function tgear_command(...)
             end
             Engine.request_all(true, { depth = "full" })
         end
+    elseif arg == "requestsource" or arg == "reqsource" then
+        -- One-peer full request (Focus character view). Viewer UI delegates to bg.
+        local target = tostring(rest or ""):match("^%s*(.-)%s*$") or ""
+        if target == "" then
+            print("[TurboGear] requestsource: pass a character name")
+        elseif not state.bg then
+            request_local_bg_start("requestsource command")
+            mq.cmd('/timed 2 /squelch /tgearbg requestsource ' .. target)
+        else
+            local want = target:lower()
+            local key = nil
+            for k, snap in pairs(Store.sources or {}) do
+                if type(snap) == "table" and tostring(snap.name or ""):lower() == want then
+                    key = k
+                    break
+                end
+            end
+            if not key then
+                print("[TurboGear] requestsource: no Store row for " .. target)
+            elseif not Engine.request_source(key, true, { depth = "full" }) then
+                print("[TurboGear] requestsource: engine not ready")
+            end
+        end
     elseif arg == "publish" or arg == "publishnow" or arg == "inventory" then
         require('snapshot').invalidate()
         local ok = false

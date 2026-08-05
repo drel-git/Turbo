@@ -1,3 +1,9 @@
+1.2.118
+- Gains: Marrs (freeporttemple) added as a safe zone to pause counter
+- Focus: focus data persists and loads again; peer Focus fills from Store
+- Focus: opening a peer with no focus requests that one box (once)
+- Focus: Refresh button matches Sync teal
+
 1.2.117
 - Fleet wallet: Nightveil Scrip column (alt currency + bag stacks).
 - Fleet wallet: pool selectors CC/DC/PP (RC removed — no trade); column order

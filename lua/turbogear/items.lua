@@ -315,11 +315,28 @@ local function item_meta_key(id, aug_type)
     return tostring(id) .. ":" .. tostring(tonumber(aug_type) or 0)
 end
 
+local function focus_list_nonempty(list)
+    return type(list) == "table" and list[1] ~= nil
+end
+
 local function collect_item_meta(item, id, aug_type)
     local key = item_meta_key(id, aug_type)
-    if key and item_meta_cache[key] then return item_meta_cache[key] end
+    local cached = key and item_meta_cache[key] or nil
+    if cached then
+        -- Empty focus must not stick: re-probe Focus/Worn TLOs until one succeeds,
+        -- then lock the non-empty result. Stats/slots stay cached either way.
+        if cached.focusConfirmed then return cached end
+        cached.focusEffects = focus_extract.collect_focus_effects(item)
+        cached.wornFocusEffects = focus_extract.collect_worn_focus_effects(item)
+        if focus_list_nonempty(cached.focusEffects) or focus_list_nonempty(cached.wornFocusEffects) then
+            cached.focusConfirmed = true
+        end
+        return cached
+    end
 
     local classes, all_classes = collect_classes(item)
+    local focusEffects = focus_extract.collect_focus_effects(item)
+    local wornFocusEffects = focus_extract.collect_worn_focus_effects(item)
     local meta = {
         stats = collect_stats(item),
         classes = classes,
@@ -332,8 +349,10 @@ local function collect_item_meta(item, id, aug_type)
         tribute = first_num(item, { "Tribute", "Favor", "TributeValue" }),
         lore = safe_bool(item, "Lore") or safe_bool(item, "IsLore") or safe_bool(item, "LoreItem"),
         loreGroup = first_num(item, { "LoreGroup", "LoreGroupId", "LoreID" }),
-        focusEffects = focus_extract.collect_focus_effects(item),
-        wornFocusEffects = focus_extract.collect_worn_focus_effects(item),
+        focusEffects = focusEffects,
+        wornFocusEffects = wornFocusEffects,
+        -- Only confirm when MQ returned something; empty stays re-probeable.
+        focusConfirmed = focus_list_nonempty(focusEffects) or focus_list_nonempty(wornFocusEffects),
     }
     if key then item_meta_cache[key] = meta end
     return meta

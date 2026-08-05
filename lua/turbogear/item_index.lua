@@ -512,6 +512,16 @@ function M.set_priority_owner(name)
     M.priority_owner = clean_text(name)
 end
 
+--- Flatten one Store/snapshot into index rows (no MQ TLOs). Used by Focus to
+--- paint a selected character immediately without waiting on the fleet rebuild.
+function M.rows_from_snap(snap)
+    if type(snap) ~= "table" or not snap.name then return {} end
+    local rows = {}
+    add_equipped(rows, snap)
+    add_storage(rows, snap)
+    return rows
+end
+
 local function finish_job(j)
     if not j then return M.rows, M.version end
     M.rows = j.rows

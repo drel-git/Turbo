@@ -1,5 +1,7 @@
 -- TurboGear/tabs/focus.lua
--- Read-only cached focus browser powered by item_index rows.
+-- Focus browser: character scope paints from Store immediately; other scopes
+-- use the budgeted item_index. Peer focus is requested once per peer (full
+-- depth) when that character is selected with empty focus — never request_all.
 
 local ImGui = require('ImGui')
 local theme = require('theme')
@@ -18,6 +20,10 @@ local M = {}
 
 local search_text = ""
 local filtered_key, filtered_entries = nil, {}
+-- Once per Lua session: local full gather for self when Focus is empty.
+local focus_auto_refill_done = false
+-- Once per peer key per session: targeted full request (not fleet-wide).
+local focus_peer_requested = {}
 
 characters.set_on_changed(function()
     filtered_key = nil
@@ -389,6 +395,100 @@ local function sort_grouped_entries(entries)
     for i, wrapped in ipairs(wrappers) do entries[i] = wrapped.entry end
 end
 
+local function snap_item_count(snap)
+    if type(snap) ~= "table" then return 0 end
+    return #(snap.equipped or {}) + #(snap.bags or {}) + #(snap.bank or {})
+end
+
+local function list_has_focus(list)
+    for _, it in ipairs(list or {}) do
+        if type(it) == "table" then
+            if (type(it.focusEffects) == "table" and it.focusEffects[1] ~= nil)
+                or (type(it.wornFocusEffects) == "table" and it.wornFocusEffects[1] ~= nil) then
+                return true
+            end
+            for _, aug in ipairs(it.augs or {}) do
+                if type(aug) == "table" and not aug.empty then
+                    if (type(aug.focusEffects) == "table" and aug.focusEffects[1] ~= nil)
+                        or (type(aug.wornFocusEffects) == "table" and aug.wornFocusEffects[1] ~= nil) then
+                        return true
+                    end
+                end
+            end
+        end
+    end
+    return false
+end
+
+local function snap_has_any_focus(snap)
+    if type(snap) ~= "table" then return false end
+    return list_has_focus(snap.equipped) or list_has_focus(snap.bags) or list_has_focus(snap.bank)
+end
+
+local function focus_snap_sig(snap)
+    if type(snap) ~= "table" then return "0" end
+    local n = 0
+    local function count_list(list)
+        for _, it in ipairs(list or {}) do
+            n = n + #(it.focusEffects or {}) + #(it.wornFocusEffects or {})
+            for _, aug in ipairs(it.augs or {}) do
+                if type(aug) == "table" and not aug.empty then
+                    n = n + #(aug.focusEffects or {}) + #(aug.wornFocusEffects or {})
+                end
+            end
+        end
+    end
+    count_list(snap.equipped)
+    count_list(snap.bags)
+    count_list(snap.bank)
+    return string.format("%s:%s:%d:%d",
+        tostring(snap.inventoryUpdated or snap.updated or 0),
+        tostring(snap.depth or ""),
+        snap_item_count(snap),
+        n)
+end
+
+local function character_focus_snap(source_key)
+    source_key = views.validate_source_key(source_key or "__self__")
+    if source_key == "__self__" then
+        local ok, snap_mod = pcall(require, 'snapshot')
+        if ok and snap_mod and snap_mod.cached then
+            local cached = snap_mod.cached()
+            if type(cached) == "table" and snap_item_count(cached) > 0 then
+                return cached, source_key, true
+            end
+        end
+        local mine = Store.my_key and Store.my_key() or nil
+        if mine then
+            local store_self = Store.get(mine)
+            if type(store_self) == "table" then return store_self, source_key, true end
+        end
+        return nil, source_key, true
+    end
+    return Store.get(source_key), source_key, false
+end
+
+local function entries_from_index_rows(rows, e3_names, source_owner)
+    local out = {}
+    local needle = tostring(search_text or ""):lower()
+    for _, row in ipairs(rows or {}) do
+        if row_source_allowed(row, e3_names, source_owner) and row_location_allowed(row) then
+            if Settings.focusIncludeFocus ~= false then
+                add_effect_entries(out, row, row.focusEffects, "Focus", needle)
+            end
+            if Settings.focusIncludeWorn ~= false then
+                add_effect_entries(out, row, row.wornFocusEffects, "Worn", needle)
+            end
+        end
+    end
+    if (Settings.focusGroupMode or "none") == "none" then
+        sort_entries(out)
+    else
+        sort_grouped_entries(out)
+    end
+    return out
+end
+
 local function visible_entries()
     if Settings.focusSourceScope == "loadout" then
         local ok_loadout, loadout = pcall(require, 'loadout')
@@ -424,34 +524,121 @@ local function visible_entries()
         return filtered_entries
     end
 
+    -- Character scope: paint from Store/self cache immediately (no fleet index wait).
+    if Settings.focusSourceScope == "character" then
+        local snap, source_key = character_focus_snap(Settings.focusSourceKey)
+        local sig = tostring(source_key) .. "\2" .. focus_snap_sig(snap)
+            .. "\2" .. tostring(Store.content_version or 0)
+        local key = controls_key(sig)
+        if filtered_key == key then return filtered_entries end
+
+        local rows = {}
+        if type(snap) == "table" and item_index.rows_from_snap then
+            rows = item_index.rows_from_snap(snap)
+        end
+        local source_owner = views.clean_name(views.source_owner_name(source_key))
+        local out = entries_from_index_rows(rows, nil, source_owner)
+        filtered_entries = out
+        filtered_key = key
+        return filtered_entries
+    end
+
     local rows, index_version = item_index.get(false)
     local key = controls_key(index_version)
     if filtered_key == key then return filtered_entries end
 
-    local out = {}
-    local needle = tostring(search_text or ""):lower()
     local e3_names = Settings.focusSourceScope == "e3" and views.e3_connected_names() or nil
-    local source_owner = Settings.focusSourceScope == "character" and views.clean_name(views.source_owner_name(Settings.focusSourceKey)) or nil
-    for _, row in ipairs(rows or {}) do
-        if row_source_allowed(row, e3_names, source_owner) and row_location_allowed(row) then
-            if Settings.focusIncludeFocus ~= false then
-                add_effect_entries(out, row, row.focusEffects, "Focus", needle)
-            end
-            if Settings.focusIncludeWorn ~= false then
-                add_effect_entries(out, row, row.wornFocusEffects, "Worn", needle)
-            end
-        end
-    end
-
-    if (Settings.focusGroupMode or "none") == "none" then
-        sort_entries(out)
-    else
-        sort_grouped_entries(out)
-    end
-
+    local out = entries_from_index_rows(rows, e3_names, nil)
     filtered_entries = out
     filtered_key = key
     return filtered_entries
+end
+
+local function refill_focus_from_local_full(reason)
+    -- Local full gather only (no fleet request_all). Clears sticky empty meta.
+    pcall(function()
+        local items = require('items')
+        if items.clear_meta_cache then items.clear_meta_cache() end
+    end)
+    pcall(function()
+        local snap = require('snapshot')
+        if snap.invalidate then snap.invalidate() end
+        if snap.ensure_full then snap.ensure_full() end
+    end)
+    pcall(function()
+        local Eng = require('engine').Engine
+        if Eng and Eng.publish then
+            Eng.publish(true, "full", { skipLockouts = true, reason = reason or "focus_refresh" })
+        end
+    end)
+    item_index.refresh()
+    filtered_key = nil
+end
+
+local function request_peer_focus_full(source_key, snap, force)
+    source_key = tostring(source_key or "")
+    if source_key == "" or source_key == "__self__" then return false end
+    if not force and focus_peer_requested[source_key] then return false end
+    focus_peer_requested[source_key] = true
+    if snap and snap.name and item_index.set_priority_owner then
+        item_index.set_priority_owner(snap.name)
+    end
+    local ok = false
+    pcall(function()
+        if Engine and Engine.ok and Engine.request_source then
+            ok = Engine.request_source(source_key, true, { depth = "full" }) == true
+        end
+    end)
+    -- Viewer UI has no actor mailbox: ask the local bg responder to send it.
+    if not ok then
+        local name = tostring((snap and snap.name) or ""):match("^%s*(.-)%s*$") or ""
+        if name ~= "" then
+            pcall(function()
+                local mq = require('mq')
+                mq.cmd('/squelch /tgearbg requestsource ' .. name)
+                ok = true
+            end)
+        end
+    end
+    return ok
+end
+
+-- Returns true when a local self refill ran (caller should rebuild entries once).
+local function maybe_auto_refill_focus(entries)
+    if Settings.focusSourceScope == "loadout" then return false end
+
+    if Settings.focusSourceScope == "character" then
+        local snap, source_key, is_self = character_focus_snap(Settings.focusSourceKey)
+        local entry_n = type(entries) == "table" and #entries or 0
+        if entry_n > 0 then
+            if is_self then focus_auto_refill_done = true end
+            return false
+        end
+        if snap_item_count(snap) <= 0 then return false end
+        -- Filters may hide rows while snap already has focus; do not re-request.
+        if snap_has_any_focus(snap) then return false end
+        if is_self then
+            if focus_auto_refill_done then return false end
+            focus_auto_refill_done = true
+            refill_focus_from_local_full("focus_auto_refill")
+            return true
+        end
+        request_peer_focus_full(source_key, snap, false)
+        return false
+    end
+
+    -- Non-character scopes: one local self refill if the whole view is empty.
+    if focus_auto_refill_done then return false end
+    if type(entries) == "table" and #entries > 0 then
+        focus_auto_refill_done = true
+        return false
+    end
+    local ok, snap_mod = pcall(require, 'snapshot')
+    local self_snap = ok and snap_mod and snap_mod.cached and snap_mod.cached() or nil
+    if snap_item_count(self_snap) <= 0 then return false end
+    focus_auto_refill_done = true
+    refill_focus_from_local_full("focus_auto_refill")
+    return true
 end
 
 local function draw_controls()
@@ -464,30 +651,27 @@ local function draw_controls()
         draw_scope_picker()
         ImGui.SameLine()
     end
-    if theme.themed_button("Refresh##focus_refresh", Theme.blue) then
+    -- Same teal as Sync Now: obvious fallback if focus looks stale/empty.
+    if theme.themed_button("Refresh##focus_refresh", Theme.sync or Theme.green) then
         if Settings.focusSourceScope == "loadout" then
             pcall(function() require('loadout').invalidate() end)
+            filtered_key = nil
+        elseif Settings.focusSourceScope == "character" then
+            local snap, source_key, is_self = character_focus_snap(Settings.focusSourceKey)
+            if is_self then
+                refill_focus_from_local_full("focus_refresh")
+            else
+                -- Manual Refresh may re-request the selected peer.
+                focus_peer_requested[tostring(source_key)] = nil
+                request_peer_focus_full(source_key, snap, true)
+                filtered_key = nil
+            end
         else
-            -- Force a fresh full gather so Focus/Worn spells are re-read (item
-            -- meta cache can otherwise stick on empty focus from an early read).
-            pcall(function()
-                local items = require('items')
-                if items.clear_meta_cache then items.clear_meta_cache() end
-            end)
-            pcall(function()
-                local snap = require('snapshot')
-                if snap.invalidate then snap.invalidate() end
-                if snap.ensure_full then snap.ensure_full() end
-            end)
-            pcall(function()
-                local Engine = require('engine').Engine
-                if Engine and Engine.publish then
-                    Engine.publish(true, "full", { skipLockouts = true, reason = "focus_refresh" })
-                end
-            end)
-            item_index.refresh()
+            refill_focus_from_local_full("focus_refresh")
         end
-        filtered_key = nil
+    end
+    if ImGui.IsItemHovered and ImGui.IsItemHovered() then
+        ImGui.SetTooltip("Re-read focus for this character. Auto-loads on open; use if rows look empty or stale.")
     end
     ImGui.SameLine()
     if toggle_button("Focus##focus_include_focus", Settings.focusIncludeFocus ~= false) then
@@ -714,6 +898,10 @@ local function draw_focus_content()
     ImGui.Spacing()
 
     local entries = visible_entries()
+    if maybe_auto_refill_focus(entries) then
+        filtered_key = nil
+        entries = visible_entries()
+    end
     if Settings.focusSourceScope == "loadout" then
         local ok_loadout, loadout = pcall(require, 'loadout')
         local list_id = Settings.focusLoadoutList or ""
@@ -741,7 +929,7 @@ local function draw_focus_content()
     if #entries == 0 then
         local empty = Settings.focusSourceScope == "loadout"
             and "No focus effects on this loadout list for the current filters."
-            or "No cached focus rows match the current filters. Sync after this build so snapshots include focus data."
+            or "No cached focus rows match the current filters. Open Refresh after gear changes, or wait for a full sync."
         col_text(Theme.placeholder or Theme.dim, empty)
         return
     end
