@@ -1,10 +1,11 @@
 -- TurboGear/announcer.lua
 -- BiS linked-needs (hybrid, 1.2.107+ / fail-open 1.2.110+): raid/group/say
--- links are evaluated locally on every box. The driver answers from the full
--- announce catalog when ready, else from the disk-cached direct catalog while
--- the full index is still warming. Peers LOOT_NEED the announce beacon; the
--- beacon holds briefly and emits one grouped [TG] line. needs_index is
--- optional enrichment, not a gate for linked announces.
+-- item LINKS are evaluated locally on every box (LazBiS-style: typed names
+-- alone do not announce). The driver answers from the full announce catalog
+-- when ready, else from the disk-cached direct catalog while the full index
+-- is still warming. Peers LOOT_NEED the announce beacon; the beacon holds
+-- briefly and emits one grouped [TG] line. needs_index is optional
+-- enrichment, not a gate for linked announces.
 
 local mq  = require('mq')
 local cfg = require('config')
@@ -2340,46 +2341,22 @@ local function try_process_chat(line, allow_queue, opts)
         return added
     end
 
-    if not opts.replay and SharedSettings.announceUseActor ~= false
-        and not ui_coordinator
-        and (opts.other_event == true or is_other_player_chat_line(line))
-        and not link_hybrid_enabled()
-    then
-        return false
-    end
-
-    local snap = snap_for_announce()
-    if not snap then return false end
-    local group_local = opts.self_event == true or is_self_loot_line(line)
-        or (ui_coordinator and is_player_link_chat_line(line))
-    if group_local then
-        if is_player_link_chat_line(line) and has_unparseable_item_link_payload(line) then
+    -- No parsed item link. LazBiS bails unless ExtractLinks found an item;
+    -- we keep one escape hatch when a link payload is present but unparseable
+    -- (raw \x12 frames / hex dump). Typed BiS names alone never announce.
+    if is_player_link_chat_line(line) and has_unparseable_item_link_payload(line) then
+        local group_local = opts.self_event == true or is_self_loot_line(line)
+            or (ui_coordinator and is_player_link_chat_line(line))
+        if group_local then
             local queued = queue_group_text_target_checks(line, opts.replay and "replay" or "text-targeted")
             if queued > 0 then
                 runtime.last_chat_note = "linked text fallback"
                 return true
             end
         end
-        local added = scan_group_text_needs_from_cache(line, opts.replay and "replay" or "line")
-        return added > 0
     end
-    if not ensure_catalog_for_chat(snap, false) then
-        return try_process_direct_chat_text_while_warming(line, snap, allow_queue, opts.replay and "replay" or "line")
-    end
-
-    local announced = 0
-    for _, hit in ipairs(catalog.find_announce_needs_in_line(snap, line)) do
-        local source = opts.replay and "replay" or "line"
-        note_loot_seen(hit.item_name or "?", source)
-        if announce_from_need(hit.need, source, hit.link, hit.item_id, snap, true, hit.item_name, {
-            group_local = group_local,
-        }) then
-            announced = announced + 1
-        else
-            note_skip(hit.item_name or "?", explain_skip(snap, hit.item_name, 0, true))
-        end
-    end
-    return announced > 0
+    runtime.last_chat_note = "no item link"
+    return false
 end
 
 local function on_chat(line)
@@ -2445,6 +2422,8 @@ end
 
 M._parse_item_links_for_test = parse_item_links
 M._has_unparseable_item_link_payload_for_test = has_unparseable_item_link_payload
+M._try_process_chat_for_test = try_process_chat
+M._runtime_for_test = runtime
 
 -- Driver boxes run UI (announce-active) + bg (announce-passive). Actors land
 -- on the bg mailbox only; without a local relay, corpse-aware LOOT_LINK never

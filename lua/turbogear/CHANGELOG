@@ -1,3 +1,7 @@
+1.2.119
+- Announce: only item links trigger [TG]. Typed BiS names in chat are ignored.
+  Unparseable link payloads still fall back so broken links can announce.
+
 1.2.118
 - Gains: Marrs (freeporttemple) added as a safe zone to pause counter
 - Focus: focus data persists and loads again; peer Focus fills from Store

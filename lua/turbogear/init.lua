@@ -269,7 +269,7 @@ local function status_lines(max_peers, colorize)
     if type(ast.link_capture) == "table" then
         local lc = ast.link_capture
         lines[#lines + 1] = string.format("[TurboGear]   link capture: chatLinks=%s linkdb=%s cachedLinks=%d seenAnnounces=%d",
-            lc.chat_links and "yes" or "NO (MQ build lacks ExtractLinks - text-only announces)",
+            lc.chat_links and "yes" or "NO (MQ build lacks ExtractLinks - frame/control-tag parse only)",
             lc.linkdb and "yes" or "no",
             tonumber(lc.cached) or 0, tonumber(lc.seen) or 0)
     end

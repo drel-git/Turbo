@@ -36,11 +36,18 @@ package.preload['state'] = function()
     return { bg = false, lean = function() return false end }
 end
 
+local text_line_scan_calls = 0
 package.preload['bis_catalog'] = function()
     return {
         announce_catalog_ready = function() return true end,
         direct_build_progress = function() return nil end,
         announce_list_specs = function() return {} end,
+        find_announce_needs_in_line = function()
+            text_line_scan_calls = text_line_scan_calls + 1
+            return { { item_name = "Infused Flux of Potency", item_id = 1, need = { item_name = "Infused Flux of Potency" } } }
+        end,
+        ensure_announce_catalog = function() end,
+        check_announce_need_direct = function() return nil end,
     }
 end
 
@@ -81,21 +88,41 @@ package.preload['store'] = function()
     }
 end
 
+local text_needs_calls = 0
 package.preload['needs_index'] = function()
     return {
-        char_count = function() return 0 end,
-        ready = function() return false end,
+        char_count = function() return 1 end,
+        ready = function() return true end,
+        group_ready = function() return true end,
         needers_for = function() return {} end,
-        text_needs = function() return {} end,
+        text_needs = function()
+            text_needs_calls = text_needs_calls + 1
+            return {
+                {
+                    name = "Infused Flux of Potency",
+                    id = 1,
+                    needers = { { character = "Tester" } },
+                },
+            }
+        end,
         needs_tick = function() return false end,
         tick = function() end,
         status = function() return {} end,
     }
 end
 
+package.preload['roster_sets'] = function()
+    return {
+        resolve_active = function() return nil end,
+        member_set = function() return nil end,
+    }
+end
+
 local A = require('announcer')
 local parse = A._parse_item_links_for_test
 local has_unparseable = A._has_unparseable_item_link_payload_for_test
+local try_chat = A._try_process_chat_for_test
+local runtime = A._runtime_for_test
 
 local passed, failed = 0, 0
 local function check(cond, label)
@@ -145,6 +172,23 @@ check(has_unparseable("You tell your raid, '\x12RAWNOXIOUS\x12'") == true, 'fall
 check(has_unparseable("You tell your raid, '00989C0000000000000000000000000000000000000000000C7776F6Noxious Bloom'") == true,
     'fallback detector sees long hex payload')
 check(has_unparseable("You tell your raid, 'hello team'") == false, 'fallback detector ignores normal chat')
+
+-- Links-only: typed BiS names must not announce (even when index would match).
+text_needs_calls = 0
+text_line_scan_calls = 0
+local typed = try_chat("You tell your party, 'Infused Flux of Potency'", false)
+check(typed == false, 'typed BiS name does not announce')
+check(text_needs_calls == 0, 'typed name does not run needs_index.text_needs')
+check(text_line_scan_calls == 0, 'typed name does not run catalog line scan')
+check(runtime.last_chat_note == "no item link", 'typed name notes no item link')
+
+local typed_say = try_chat("You say, 'Exalted Glowing Bath Token'", false)
+check(typed_say == false, 'typed BiS name in say does not announce')
+check(runtime.last_chat_note == "no item link", 'say typed name notes no item link')
+
+-- Control-tag lines still count as parsed "links" (TurboLoot ANNOUNCE path).
+local announce_links = parse("Ghee tells the group, '[ANNOUNCE] Imbued Feather (ID: 209)'")
+check(#announce_links == 1, 'ANNOUNCE still parses as a link for announce path')
 
 io.write(string.format('announcer parser: %d passed, %d failed\n', passed, failed))
 os.exit(failed == 0 and 0 or 1)
