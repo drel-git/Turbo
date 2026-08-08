@@ -1,3 +1,6 @@
+1.2.120
+- Bug fix for plaintext triggering TurboGear announced needs.
+
 1.2.119
 - Announce: only item links trigger [TG]. Typed BiS names in chat are ignored.
   Unparseable link payloads still fall back so broken links can announce.

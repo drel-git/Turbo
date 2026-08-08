@@ -49,6 +49,9 @@ function M.should_skip_line(line, me_name)
     if line:find("%[TG%]", 1, false) ~= nil then return true end
     if line:find("%[TurboGear%]", 1, false) ~= nil then return true end
     local lower = line:lower()
+    -- Rez status lines often embed a clicky item link; never treat as loot.
+    if lower:find("[rez]", 1, true) ~= nil then return true end
+    if lower:find("attempting to rez with", 1, true) ~= nil then return true end
     if lower:find("turbounload", 1, true) ~= nil then return true end
     if lower:find(" tells you,", 1, true) ~= nil then return true end
     if lower:find("^you receive ") and lower:find(" merchant", 1, true) then return true end

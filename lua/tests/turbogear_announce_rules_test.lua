@@ -22,6 +22,15 @@ check(R.should_skip_line("Drel tells the group, 'turbounload now'", "Hez") == tr
 check(R.should_skip_line("Drel tells the group, 'Sword of Truth'", "Hez") == false, 'no skip: normal group chat')
 check(R.should_skip_line("replayed text - hez", "Hez") == true, 'skip: trailing - <me> suffix (unquoted)')
 check(R.should_skip_line("Drel tells the group, 'grats - hez'", "Hez") == false, 'no skip: quoted line does not match <me> suffix')
+check(R.should_skip_line(
+    "Sarku tells the group, '[Rez] => Chaan <= {attempting to rez with Exalted Glowing Bath Token}'",
+    "Hez") == true, 'skip: [Rez] status with clicky name')
+check(R.should_skip_line(
+    "Creatos tells the group, 'attempting to rez with Blessing of Resurrection'",
+    "Hez") == true, 'skip: rez phrase without [Rez] tag')
+check(R.should_skip_line(
+    "Drel tells the group, '[ANNOUNCE] Exalted Glowing Bath Token (ID: 12)'",
+    "Hez") == false, 'no skip: TurboLoot announce line')
 
 -- line classification
 check(R.is_player_link_chat_line("You tell the group, 'Sword'") == true, 'link line: self group')
