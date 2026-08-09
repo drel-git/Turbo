@@ -1,3 +1,9 @@
+1.2.138
+- Announce: [TG] only from live chat links / [ANNOUNCE] / [SKIP]. lootseen and
+  LOOT_LINK refresh Linked/Go-loot corpse ids only (stops re-announce when
+  looters revisit old corpses). IGNORE and other control tags no longer seed
+  chat announce.
+
 1.2.137
 - Announce: only live-chat BiS paint may /g [TG]. Peer LOOT_NEED and loot
   replay no longer emit (fixes plaintext Discord-only doubles when a bot UI

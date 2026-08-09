@@ -97,5 +97,5 @@ captured = "SKIP"
 A.tick()
 check(captured == "SKIP", "needs_index skipped when disabled")
 
-print(string.format("announcer thin tick (1.2.137): %d passed, %d failed", pass, fail))
+print(string.format("announcer thin tick (1.2.138): %d passed, %d failed", pass, fail))
 os.exit(fail == 0 and 0 or 1)

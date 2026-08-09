@@ -124,6 +124,15 @@ package.preload['roster_sets'] = function()
     }
 end
 
+package.preload['engine'] = function()
+    return {
+        Engine = {
+            ok = true,
+            broadcast_loot_links = function() end,
+        },
+    }
+end
+
 local A = require('announcer')
 local parse = A._parse_item_links_for_test
 local has_unparseable = A._has_unparseable_item_link_payload_for_test
@@ -252,6 +261,33 @@ check(peer_dirty_plain == false, 'peer typed name without hex still ignored')
 -- Control-tag lines still count as parsed "links" (TurboLoot ANNOUNCE path).
 local announce_links = parse("Ghee tells the group, '[ANNOUNCE] Imbued Feather (ID: 209)'")
 check(#announce_links == 1, 'ANNOUNCE still parses as a link for announce path')
+
+local ignore_links = parse("Ghee tells the group, '[IGNORE] Imbued Feather (ID: 209)'")
+check(#ignore_links == 0, 'IGNORE control tag does not seed announce parse')
+
+-- lootseen / LOOT_LINK: Linked handoff only, never queues [TG] paint.
+local runtime = A._runtime_for_test
+A.on_loot_seen("Imbued Feather", 0, "", "structured", 209)
+check(tostring(runtime.last_chat_note or ""):find("no emit", 1, true) ~= nil,
+    'lootseen sets no-emit note')
+local linked = A.linked_items()
+local saw_feather = false
+for _, row in ipairs(linked or {}) do
+    if tostring(row.item_name or "") == "Imbued Feather"
+        and tonumber(row.corpse_id) == 209
+    then
+        saw_feather = true
+        break
+    end
+end
+check(saw_feather, 'lootseen still attaches corpse id for Go-loot')
+
+A.on_loot_link({
+    from = "OtherBot",
+    items = {{ name = "Elemental Gauntlet Mold", id = 0, corpse_id = 148 }},
+})
+check(tostring(runtime.last_chat_note or ""):find("no emit", 1, true) ~= nil,
+    'LOOT_LINK sets no-emit note')
 
 io.write(string.format('announcer parser: %d passed, %d failed\n', passed, failed))
 os.exit(failed == 0 and 0 or 1)

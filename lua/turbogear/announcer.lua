@@ -1,9 +1,9 @@
 -- TurboGear/announcer.lua
--- BiS linked-needs (1.2.137+):
--- Item LINKS only (no typed names). Driver: load the BiS catalog once, then
--- per-link roster walk using the same ownership as the BiS grid (evaluate_slot /
--- bis_search / live self) and emit one [TG] immediately.
--- needs_index / dcat / reverse-catalog / peer-confirm are NOT on this path.
+-- BiS linked-needs (1.2.138+):
+-- [TG] only from live chat: item links, [ANNOUNCE], [SKIP]. Driver paints BiS
+-- ownership (evaluate_slot / bis_search / live self) and emits once.
+-- lootseen / LOOT_LINK / LOOT_NEED / replay: Linked+Go-loot handoff only, no [TG].
+-- needs_index / dcat / reverse-catalog are NOT on the emit path.
 
 local mq  = require('mq')
 local cfg = require('config')
@@ -625,17 +625,11 @@ end
 local function parse_item_links(line)
     local out = {}
     local seen = {}
+    -- Only TurboLoot leave-on-corpse tags may seed chat [TG]. IGNORE/SELL/etc.
+    -- must not announce when they appear in group.
     local function is_control_tag(tag)
         local tag_l = tostring(tag or ""):lower()
-        return tag_l:find("announce", 1, true)
-            or tag_l:find("skip", 1, true)
-            or tag_l:find("ignore", 1, true)
-            or tag_l:find("sell", 1, true)
-            or tag_l:find("bank", 1, true)
-            or tag_l:find("tribute", 1, true)
-            or tag_l:find("destroy", 1, true)
-            or tag_l:find("keep", 1, true)
-            or tag_l:find("value", 1, true)
+        return tag_l:find("announce", 1, true) or tag_l:find("skip", 1, true)
     end
     local function add_item(name, id, link)
         id = tonumber(id) or 0
@@ -930,6 +924,64 @@ local function record_linked_item(bucket, status)
         corpse_id = row_corpse_id(bucket),
         corpse_at = tonumber(bucket.corpse_at),
     })
+    prune_linked_items(now)
+end
+
+-- Structured lootseen / LOOT_LINK: refresh Linked corpse ids (Go-loot) without
+-- opening a group bucket or /g [TG]. Chat links / [ANNOUNCE] / [SKIP] own emit.
+local function note_linked_loot_handoff(links, source)
+    if type(links) ~= "table" then return end
+    local now = os.clock()
+    prune_linked_items(now)
+    source = tostring(source or "structured")
+    for _, item in ipairs(links) do
+        local item_name = trim(item and item.name or "")
+        if catalog.clean_link_item_name then
+            item_name = catalog.clean_link_item_name(item_name) or item_name
+        end
+        if item_name ~= "" then
+            note_loot_seen(item_name, source)
+            local item_id = tonumber(item.id) or 0
+            local item_link = tostring(item.link or "")
+            local cid = tonumber(item.corpse_id)
+            local key = grouped_item_key(item_name, item_id, item_link)
+            local display_key = linked_item_display_key(item_name)
+            local updated = false
+            for i, row in ipairs(linked_items) do
+                if row.key == key or (display_key ~= "" and row.display_key == display_key) then
+                    if item_link ~= "" then row.item_link = item_link end
+                    if item_id > 0 then row.item_id = item_id end
+                    row.source = source
+                    row.at = now
+                    if cid and cid > 0 then
+                        row.corpse_id = math.floor(cid)
+                        row.corpse_at = now
+                    end
+                    table.remove(linked_items, i)
+                    table.insert(linked_items, 1, row)
+                    updated = true
+                    break
+                end
+            end
+            if not updated and cid and cid > 0 and key ~= "" and key ~= "name:" then
+                linked_item_seq = linked_item_seq + 1
+                table.insert(linked_items, 1, {
+                    id = linked_item_seq,
+                    key = key,
+                    display_key = display_key,
+                    item_name = item_name,
+                    item_id = item_id,
+                    item_link = item_link,
+                    needers = {},
+                    source = source,
+                    status = "handoff",
+                    at = now,
+                    corpse_id = math.floor(cid),
+                    corpse_at = now,
+                })
+            end
+        end
+    end
     prune_linked_items(now)
 end
 
@@ -2515,6 +2567,15 @@ local function try_process_item_links(links, source, allow_queue, line, opts)
         diag.count("announce.replay_no_emit")
         return false
     end
+    -- Structured / actor loot is Linked+Go-loot only. Live chat owns [TG].
+    local src_l = source:lower()
+    if src_l == "actor" or src_l == "structured" or src_l:find("lootseen", 1, true)
+        or src_l:find("loot_link", 1, true) or opts.no_emit == true
+    then
+        runtime.last_chat_note = "structured (no emit)"
+        diag.count("announce.structured_no_emit")
+        return false
+    end
 
     -- Driver / group path: BiS paint for each linked item (no warm mute).
     if opts.group_local then
@@ -2747,7 +2808,6 @@ function M.on_loot_link(msg)
         end
         return
     end
-    if not SharedSettings.bisAnnounceEnabled then return end
 
     refresh_settings_if_due()
     local links = {}
@@ -2766,18 +2826,11 @@ function M.on_loot_link(msg)
     end
     if #links == 0 then return end
     remember_recent_replay("", links, "actor")
+    -- Linked/Go-loot corpse handoff only. Never /g [TG] from LOOT_LINK.
     diag.time("announce.actor", function()
-        local defer, _, holder = should_defer_chat_announce()
-        -- Peers: live-check and LOOT_NEED the beacon. Only the announce driver
-        -- aggregates (group_local). Pre-1.2.109 peers incorrectly aggregated.
-        if link_hybrid_enabled() and (defer or state.bg == true) then
-            report_links_to_holder(links, holder ~= "" and holder or from, "actor", true)
-            return
-        end
-        try_process_item_links(links, "actor", true, nil, {
-            reply_to = from,
-            group_local = true,
-        })
+        note_linked_loot_handoff(links, "actor")
+        runtime.last_chat_note = "loot link handoff (no emit)"
+        diag.count("announce.loot_link_no_emit")
     end)
 end
 
@@ -2791,7 +2844,6 @@ function M.on_loot_seen(item_name, item_id, item_link, source, corpse_id)
         forward_loot_to_local_ui(item_name, item_id, corpse_id)
         return false
     end
-    if not SharedSettings.bisAnnounceEnabled then return false end
     refresh_settings_if_due()
 
     local links = {{
@@ -2803,22 +2855,15 @@ function M.on_loot_seen(item_name, item_id, item_link, source, corpse_id)
     if item_link ~= "" then
         pcall(function() item_actions.remember_item_link(item_name, item_id, item_link) end)
     end
-    remember_recent_replay("", links, tostring(source or "structured"))
     local src = tostring(source or "structured")
+    remember_recent_replay("", links, src)
+    -- Linked/Go-loot only. Chat [ANNOUNCE]/[SKIP]/links own [TG].
     diag.time("announce.structured_loot", function()
-        -- Non-driver boxes must live-check and LOOT_NEED the beacon (same as
-        -- on_loot_link). Aggregating here with group_local stole peer reports.
-        local defer, _, holder = should_defer_chat_announce()
-        if link_hybrid_enabled() and (defer or state.bg == true) then
-            report_links_to_holder(links, holder, src, true)
-            return
-        end
-        try_process_item_links(links, src, true, nil, {
-            group_local = true,
-        })
+        note_linked_loot_handoff(links, src)
+        runtime.last_chat_note = "lootseen handoff (no emit)"
+        diag.count("announce.lootseen_no_emit")
     end)
-    -- Tell peer drivers about the corpse-left item even when this box is not
-    -- the announce UI - Go-loot buttons live on the driver panel.
+    -- Relay corpse id to peer UI panels (still no emit on receipt).
     pcall(function()
         local Engine = require('engine').Engine
         if Engine and Engine.ok and Engine.broadcast_loot_links then
