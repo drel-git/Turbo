@@ -181,8 +181,10 @@ end
 -- Needers in a grouped announce whose need came from CACHED peer snapshots and
 -- should be live-confirmed over actors before the [TG] line goes out. Skips:
 --   * the local character (needers_for already live-confirms it),
---   * "actor-reply" needers (the peer just self-evaluated on its own box), and
---   * "local-live" needers (beacon already ran check_announce_need on itself).
+--   * "actor-reply" needers (the peer just self-evaluated on its own box),
+--   * "local-live" needers (beacon already ran check_announce_need on itself),
+--   * "bis-paint" / "store-snap" / "direct-cache" (same ownership as BiS grid).
+-- Still confirms stale needs-index ("index") / generic targeted sources.
 -- order: bucket.order (display names); sources: lower(name) -> source string.
 function M.confirmable_needers(order, sources, me_name)
     local out = {}
@@ -191,7 +193,13 @@ function M.confirmable_needers(order, sources, me_name)
     for _, name in ipairs(order or {}) do
         local key = M.normalize_item_name(name)
         local src = tostring(sources[key] or "")
-        if key ~= "" and key ~= me and src ~= "actor-reply" and src ~= "local-live" then
+        if key ~= "" and key ~= me
+            and src ~= "actor-reply"
+            and src ~= "local-live"
+            and src ~= "direct-cache"
+            and src ~= "store-snap"
+            and src ~= "bis-paint"
+        then
             out[#out + 1] = name
         end
     end

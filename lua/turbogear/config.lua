@@ -35,7 +35,7 @@ M.CFG = {
     script_name  = 'TurboGear',    -- display/settings/cache name
     lua_name     = 'turbogear',     -- folder/module name used by /lua run and /lua stop
     bg_lua_name  = 'turbogear_bg',  -- wrapper responder name; leaves /lua run turbogear free for UI
-    version      = '1.2.120',
+    version      = '1.2.137',
     mailbox      = 'turbogear',     -- shared actor mailbox name across all boxes
     proto        = 1,              -- snapshot protocol version (guards mismatched boxes)
     frame_round  = 5.0,
@@ -60,7 +60,7 @@ M.CFG = {
     -- route through a full snapshot.gather (bag walk).
     perf_equip_poll = true,
     perf_equip_poll_interval_s = 1.0,
-    -- LazBis-shaped: local BiS colors use live FindItem; worn→Store persist is
+    -- BiS-shaped: local BiS colors use live FindItem; worn→Store persist is
     -- debounced (never saveNow on the UI thread per equip).
     perf_live_self_bis = true,
     perf_worn_persist_debounce_s = 2.5,
@@ -134,19 +134,17 @@ M.CFG = {
     announce_replay_ttl_s = 90,
     announce_replay_max = 24,
     announce_seen_ttl_s = 90,      -- fleet-wide dedupe: suppress re-announcing an item seen in any [TG] line this recently
-    announce_item_cooldown_s = 30, -- LazBis-style same-item spam guard for linked-needs output
+    announce_item_cooldown_s = 20, -- same-item [TG] spam guard (chat/actor; announcetest bypasses)
     announce_coordinator_beacon_s = 30, -- driver UI stamps shared settings this often while announce-active
     announce_coordinator_ttl_s = 90,    -- bg responders defer to the driver while its stamp is fresher than this
-    announce_confirm_needers = true,    -- live-confirm cache-derived peer needers over actors before sending [TG]
-    announce_confirm_wait_s = 2.0,      -- max hold on a grouped announce while confirm replies arrive (fail-open)
-    announce_confirm_refresh_cooldown_s = 30.0, -- min gap between fresh-snapshot requests for a stale-confirmed peer
-    -- Hybrid linked [TG]: peers self-report via LOOT_NEED from raid/group/say;
-    -- beacon holds briefly to coalesce. needs_index is enrichment only (not a gate).
+    announce_confirm_needers = false,   -- off: BiS paint emits without actor confirm hold
+    announce_confirm_wait_s = 2.0,      -- unused while confirm_needers is false
+    announce_confirm_refresh_cooldown_s = 30.0,
+    -- Hybrid: peers may still LOOT_NEED as enrichment; driver does not wait on it.
     announce_link_hybrid = true,
-    announce_peer_report_wait_s = 2.0, -- beacon hold when still waiting for needers
-    -- When local/Store already found needers, only hold briefly for late LOOT_NEED.
-    announce_peer_report_short_s = 0.35,
-    needs_index_enabled = true,  -- optional enrichment for linked announces; still used for text scans
+    announce_peer_report_wait_s = 0.5, -- short hold only for rare actor-bucket coalescing
+    announce_peer_report_short_s = 0.15,
+    needs_index_enabled = true,  -- Search/Stats enrichment only — never gates linked [TG]
     needs_index_build_peers = true,
     needs_index_budget_ms = 4,     -- inverted needs-index rebuild budget per tick (UI)
     needs_index_budget_lean_ms = 2, -- minimized/lean should yield quickly while zoning/running
@@ -181,7 +179,7 @@ M.SettingsFile = string.format("%s/%s_%s.lua", mq.configDir, M.CFG.script_name, 
 M.CacheFile    = string.format("%s/%s_cache.lua", mq.configDir, M.CFG.script_name)
 M.WalletFile   = string.format("%s/%s_wallet.lua", mq.configDir, M.CFG.script_name) -- lean fleet-wallet sidecar
 M.DbFile       = string.format("%s/%s_cache.db", mq.configDir, M.CFG.script_name)  -- Phase 3 SQLite backend
-M.BisSearchFile = string.format("%s/%s_bissearch.lua", mq.configDir, M.CFG.script_name) -- LazBiS-lite peer BiS maps
+M.BisSearchFile = string.format("%s/%s_bissearch.lua", mq.configDir, M.CFG.script_name) -- peer BiS FindItem maps
 M.BgReadyFile  = string.format("%s/%s_bgready", mq.configDir, M.CFG.script_name)   -- R5 bg-responder readiness ack
 M.PatchLockFile = string.format("%s/turbo_patch.lock", mq.configDir)              -- patcher writes this to stop Turbo before updating
 M.SharedSettingsFile = string.format("%s/%s_shared.lua", mq.configDir, M.CFG.script_name)
@@ -1088,7 +1086,7 @@ function M.known_class(class_name)
     return c
 end
 
--- Map ShortName / aliases → LazBiS catalog keys ("Shadow Knight", not "SHD").
+-- Map ShortName / aliases → BiS catalog keys ("Shadow Knight", not "SHD").
 local CLASS_CANON = {
     war = "Warrior", warrior = "Warrior",
     clr = "Cleric", cleric = "Cleric",

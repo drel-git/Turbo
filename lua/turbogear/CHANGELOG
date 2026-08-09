@@ -1,3 +1,102 @@
+1.2.137
+- Announce: only live-chat BiS paint may /g [TG]. Peer LOOT_NEED and loot
+  replay no longer emit (fixes plaintext Discord-only doubles when a bot UI
+  wakes and replays recent links).
+
+1.2.136
+- Announce: same-item [TG] cooldown is 20s and applies to chat/actor again
+  (was bypassed via manual=true). /tgear announcetest still bypasses.
+
+1.2.135
+- Announce: late peer LOOT_NEED no longer posts a second plaintext [TG] after
+  BiS-paint already sent the linked line (stamp item cooldown before mq.cmd).
+
+1.2.134
+- Announce: trim MQ console spam (scan/sending lines debug-only via /tgear debug).
+- Announce: multi-link chat paints all items first, then bursts /g [TG] with the
+  existing outbox pace so several links feel batched again.
+- Startup: drop false "BiS catalog not loaded" NOTICE on bg / after catalog is ready.
+
+1.2.133
+- Announce: chat links painted no-row while announcetest worked — keepLinks left
+  \x12 frames / leading hex / trailing `">` in the item name; MQ pretty-printed
+  the link but BiS match saw junk. Cleaner strips those; emit prefers ParseItemLink.
+
+1.2.132
+- Announce: chat emit was stuck at "queued bis-paint" — double paint walk via
+  explain_* on every char; now one walk (need+why), flush after emit is bound,
+  console "linked-needs scan:" progress line.
+
+1.2.131
+- Announce: BiS thin path — links only, catalog loaded once, BiS-grid ownership
+  (evaluate_slot / bis_search / live), immediate [TG]. Tick no longer warms
+  dcat/reverse-catalog or gates on needs_index; confirm holds off by default;
+  chat flushes all queued link paints in-call.
+
+1.2.130
+- Announce: clean self-link `">` junk when queueing chat links; faster BiS paint
+  cell prefilter (Fungus↔Slime / Bloom↔Fungal) before evaluate_slot.
+
+1.2.129
+- Announce: BiS paint name-filters slots before evaluate_slot (sapphire was fast
+  because it matched early; bloom/slimes walked every slot and looked dead).
+- Announce: multi-link chat lines emit the first item inline; rest on tick.
+
+1.2.128
+- Announce: flush BiS-paint emit in the chat call stack (not tick-only); bypass
+  local item cooldowns for chat/actor; print sending/failed in console.
+- /tgear announcetest group now SENT the real /g [TG] (same emit path as links).
+
+1.2.127
+- Announce: chat/actor links enqueue a BiS-paint scan on the tick (not inside
+  mq.event). Paint was multi-second and left ghost group=1 pending with no
+  [TG]; emit [TG] immediately when paint finds needers.
+- Status: pending scan=N; always show last group scan / detail when present.
+
+1.2.126
+- Announce: BiS-shaped slot walk (class+template+visible) with BiS paint
+  ownership; always drain [TG] queues even on tick early-out.
+- /tgear announcetest group uses BiS paint (not needs-index).
+
+1.2.125
+- Announce: walk BiS grid slots directly for linked needs (paint status + link
+  match); strip self-link name junk (`">`); stop memoizing empty lookups that
+  caused sticky no-row; scan detail includes class.
+
+1.2.124
+- Announce: linked needs use BiS paint as source of truth — same evaluate_slot
+  path as the grid (bis_search for peers, live FindItem for self, else Store).
+- Announce: drop needs-index enrichment and peer-wait mute from the link path;
+  brief coalesce only. Status label: ready (bis paint).
+
+1.2.123
+- Announce: when Store finds 0 needers, wait again for peer live LOOT_NEED
+  (~2s) so stale peer cache cannot mute a real need; brief coalesce only when
+  needers are already known.
+- Announce: non-driver on_loot_seen reports LOOT_NEED to the beacon (same as
+  actor LOOT_LINK) instead of aggregating as a second driver.
+- Status: last scan detail shows per-char need/owned/no-row for linked items.
+
+1.2.122
+- Announce: BiS-shaped path — links only, load catalog once, per-link list
+  walk + Store ownership. No long warmup mute; needs_index/dcat optional.
+- Announce: drop the multi-second empty hybrid wait; brief coalesce only.
+
+1.2.121
+- Announce: peer chat with no real item link no longer text-scans BiS names
+  (fixes plaintext [TG] when someone other than the driver types an item name).
+- Announce: recover MQ self-link hex dumps (hex + item name) so real links
+  still announce when ExtractLinks is empty.
+- Announce: linked needs answer from Store/list walk without waiting on needs
+  index warm; short-path [TG] when needers are already known (no hitchy sync
+  catalog build on the chat frame).
+- Announce: enrich peer class from Group/Spawn before Store need scans so
+  discover stubs (class ?/blank) still contribute needers.
+- Announce: prefer linked item name over a mismatched ParseItemLink id when
+  matching BiS rows (avoids false "no needers" on hex self-links).
+- Announce: blank/? peer class still checks shared template BiS (fungal/augs);
+  multi hex+name dumps in one chat line parse as multiple links.
+
 1.2.120
 - Bug fix for plaintext triggering TurboGear announced needs.
 

@@ -189,9 +189,9 @@ local function status_lines(max_peers, colorize)
         tonumber(ast.announce_roster_count) or 0,
         tostring(ast.announce_roster_names or "") ~= "" and (" | " .. tostring(ast.announce_roster_names or "")) or "",
         ast.announce_roster_truncated and ", ..." or "")
-    lines[#lines + 1] = string.format("[TurboGear]   pending: chat=%d actor=%d group=%d target=%d outbox=%d | duplicate=%d | dropped pending=%d outbox=%d | replay rx=%d tx=%d checked=%d",
+    lines[#lines + 1] = string.format("[TurboGear]   pending: chat=%d actor=%d group=%d scan=%d target=%d outbox=%d | duplicate=%d | dropped pending=%d outbox=%d | replay rx=%d tx=%d checked=%d",
         ast.pending_chat or 0, ast.pending_actor or 0, ast.pending_group or 0,
-        ast.target_checks_pending or 0, ast.pending_outbox or 0,
+        ast.pending_link_scan or 0, ast.target_checks_pending or 0, ast.pending_outbox or 0,
         ast.duplicate_suppressed or 0, ast.pending_dropped or 0, ast.outbox_dropped or 0,
         ast.replay_received or 0, ast.replay_sent or 0, ast.replay_checked or 0)
     if (ast.target_checks_pending or 0) > 0 or (ast.target_checks_completed or 0) > 0 then
@@ -273,7 +273,10 @@ local function status_lines(max_peers, colorize)
             lc.linkdb and "yes" or "no",
             tonumber(lc.cached) or 0, tonumber(lc.seen) or 0)
     end
-    if (ast.last_group_scan_items or 0) > 0 then
+    if (tostring(ast.last_group_scan_age or "") ~= "" and ast.last_group_scan_age ~= "never")
+        or (ast.last_group_scan_items or 0) > 0
+        or tostring(ast.last_group_scan_detail or "") ~= ""
+    then
         lines[#lines + 1] = string.format("[TurboGear]   last group scan: %s via %s | items=%d snaps=%d names=%d (%s)",
             ast.last_group_scan_mode or "?",
             ast.last_group_scan_source or "?",
@@ -281,6 +284,10 @@ local function status_lines(max_peers, colorize)
             ast.last_group_scan_snaps or 0,
             ast.last_group_scan_added or 0,
             ast.last_group_scan_age or "?")
+        if tostring(ast.last_group_scan_detail or "") ~= "" then
+            lines[#lines + 1] = string.format("[TurboGear]   last scan detail: %s",
+                tostring(ast.last_group_scan_detail):sub(1, 160))
+        end
     end
     if colorize then
         local function color_for(line)
@@ -1184,8 +1191,17 @@ do
         state.bg and "responder" or "UI", my_key(), tostring(state.local_guard_role or "?"), tostring(Engine.ok),
         cfg.SharedSettings.bisAnnounceEnabled ~= false and "ON" or "OFF",
         ast.index_label or (announce_ready and "ready" or "warming")))
-    if state.bg and not announce_ready then
-        print("\at[TurboGear]\ax \ayNOTICE:\ax announce catalog warming - linked loot uses bounded direct checks while /tgear status warms")
+    -- Only the UI driver emits [TG]. Skip bg warm-false noise, and only warn
+    -- when the catalog is actually not resident yet.
+    if not state.bg and cfg.SharedSettings.bisAnnounceEnabled ~= false then
+        local catalog_loaded = false
+        pcall(function()
+            local c = require('bis_catalog')
+            catalog_loaded = c.catalog_loaded and c.catalog_loaded() == true
+        end)
+        if not catalog_loaded then
+            print("\at[TurboGear]\ax \ayNOTICE:\ax BiS catalog not loaded yet - linked [TG] starts once catalog is resident")
+        end
     end
 end
 

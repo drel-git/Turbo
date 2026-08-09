@@ -10,7 +10,7 @@ local SharedSettings, SaveSharedSettings = cfg.SharedSettings, cfg.SaveSharedSet
 
 local M = {}
 
--- Lazy catalog load (P2): the generated catalog (catalogs/lazbis.lua, ~34k
+-- Lazy catalog load (P2): the generated BiS catalog (~34k
 -- lines) is only require()'d on first field access, so pure viewers and bg
 -- publishers that never open BiS or evaluate announce-needs don't pay the parse
 -- + resident-memory cost. Access goes through a proxy whose __index materializes
@@ -52,6 +52,7 @@ local direct_class_catalogs = {}   -- class-shared direct catalogs (no user list
 local static_sig_cache = {}        -- short-TTL memo for catalog_static_sig
 local direct_async = {}            -- in-progress async direct-catalog builds
 local catalog_build = nil
+local link_entry_memo = {}         -- class+item -> announce entry (per-link walk cache)
 
 local function trim(s)
     return tostring(s or ""):gsub("^%s+", ""):gsub("%s+$", "")
@@ -511,6 +512,7 @@ function M.set_list_announce_enabled(id, enabled)
     static_sig_cache = {}
     direct_async = {}
     catalog_build = nil
+    link_entry_memo = {}
     pcall(function() require('announcer').invalidate() end)
 end
 
@@ -607,7 +609,7 @@ function M.resolve_entry(list_id, class_name, slot)
                 out.learned_from = ability and (DS.learned_from and DS.learned_from(ability) or nil)
                 return out
             end
-            -- Ability slot for another class -> empty cell (not LazBiS Pack fallback).
+            -- Ability slot for another class -> empty cell (not BiS Pack fallback).
             if DS.is_ability_slot and DS.is_ability_slot(slot) then
                 return nil
             end
@@ -710,7 +712,7 @@ function M.evaluate_slot(list_id, snap, slot, category)
     local entry = M.resolve_entry(list_id, snap and snap.class, slot)
     if not entry then return { category = category, slot = slot, empty = true } end
     entry.group = category or entry.group
-    -- Peer columns: prefer LazBiS-lite FindItem maps over empty/stale snapshots.
+    -- Peer columns: prefer BiS FindItem maps over empty/stale snapshots.
     local ok_bs, bis_search = pcall(require, 'bis_search')
     if ok_bs and bis_search and bis_search.slot_rec and snap and not snap._bis_search_skip then
         local is_self = false
@@ -775,7 +777,7 @@ function M.find_link_need(snap, item_name, item_id)
     return M.find_announce_need(snap, item_name, item_id)
 end
 
--- Announce path: static catalog reverse index (LazBiS-style) + O(1) snapshot ownership
+-- Announce path: static catalog reverse index (BiS-style) + O(1) snapshot ownership
 -- check per linked item. Avoids pre-evaluating hundreds of missing rows on every loot link.
 
 local BUILD_BUDGET_MS = 8
@@ -975,7 +977,7 @@ function M.announce_list_specs()
     return specs
 end
 
--- LazBiS scans the current zone list first; fall back to raid BiS lists for line text.
+-- Prefer the current zone list first; fall back to raid BiS lists for line text.
 function M.list_ids_for_line_scan()
     local zm = catalog.zone_map
     if zm then
@@ -1344,12 +1346,28 @@ local function is_local_snap(snap)
         and (my_server == "" or trim(snap.server or ""):lower() == my_server)
 end
 
+-- Same ownership answer as the BiS grid cell for this list/slot (peers use
+-- bis_search when present; local uses live FindItem; else Store snapshot).
+local function paint_row_for_rec(rec, snap, opts)
+    local entry = rec and rec.entry
+    if not entry then return nil end
+    local list_id = tostring(rec.list_id or "")
+    local slot = trim(entry.slot or "")
+    if list_id ~= "" and slot ~= "" and M.list(list_id) then
+        local row = M.evaluate_slot(list_id, snap, slot, entry.group or entry.category)
+        if row and not row.empty then return row end
+    end
+    return bis.evaluate_entry(entry, snap, opts)
+end
+
 local function need_from_rec(rec, snap, opts)
     opts = type(opts) == "table" and opts or {}
-    local row = bis.evaluate_entry(rec.entry, snap)
-    if row.status ~= "missing" then return nil end
-    -- Snapshot can lag a few seconds after loot/bank; confirm with live FindItem.
-    if opts.skip_live ~= true and is_local_snap(snap) and bis.live_own_item(rec.entry, rec.item_name, nil) then return nil end
+    local row = paint_row_for_rec(rec, snap, opts)
+    if not row or row.empty or row.status ~= "missing" then return nil end
+    -- Local just-looted safety when live column was skipped.
+    if opts.skip_live ~= true and is_local_snap(snap) and bis.live_own_item(rec.entry, rec.item_name, nil) then
+        return nil
+    end
     return {
         list = { id = rec.list_id, name = rec.list_name },
         entry = rec.entry,
@@ -1469,7 +1487,7 @@ function M.direct_catalog_prefetch(class_name, owner_name, budget_ms)
 end
 
 -- ===== Disk cache for direct catalogs =================================== --
--- Catalogs depend only on the lazbis data + announce settings + user lists,
+-- Catalogs depend only on the BiS data + announce settings + user lists,
 -- all captured below. Build once EVER per signature, persist, and load in
 -- ~100-300ms on later launches - warm-up cost becomes a one-time event
 -- instead of a per-session multi-second burn on slow machines.
@@ -1488,7 +1506,7 @@ local function dcat_path(sig)
 end
 
 -- Cheap structural fingerprint of the generated catalog: invalidates disk
--- caches when the lazbis data changes shape. (Same-shape content edits slip
+-- caches when the BiS data changes shape. (Same-shape content edits slip
 -- through - delete Config/TurboGear_dcat_*.lua after regenerating the
 -- catalog if results look stale.)
 local catalog_fingerprint_cache
@@ -1764,6 +1782,379 @@ function M.check_announce_need_direct(snap, item_name, item_id, opts)
         if need then return need end
     end
     return nil
+end
+
+-- Session memo for per-link list walks (class + item). Avoids re-walking every
+-- announce-enabled list for each peer snap on the same loot link.
+local function link_entry_memo_key(class_name, item_name, item_id)
+    -- Always include the visible name when present. Id-only keys poisoned the
+    -- memo when ParseItemLink returned a bad id shared across different links.
+    item_id = tonumber(item_id) or 0
+    local nk = norm_item_key(item_name)
+    if nk ~= "" and item_id > 0 then
+        return tostring(class_name or "") .. "\31name:" .. nk .. "\31id:" .. tostring(math.floor(item_id))
+    end
+    if item_id > 0 then
+        return tostring(class_name or "") .. "\31id:" .. tostring(math.floor(item_id))
+    end
+    return tostring(class_name or "") .. "\31name:" .. nk
+end
+
+-- MQ keepLinks / self-link dumps contaminate the visible name with:
+--   \x12hex\x12 frames, leading item-link hex, trailing quote/angle (`">`).
+-- Paint must see a plain item name or every char returns no-row while the
+-- console still pretty-prints the link (looks like "Desolate Black Sapphire").
+-- Hex peel: greedy %x eats leading A-F of names ("Desolate" / "Divine").
+local function strip_leading_item_hex(name)
+    local s, e = name:find("^%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x+")
+    if not s then return name end
+    local hex = name:sub(s, e)
+    local after = name:sub(e + 1)
+    local max_peel = math.min(16, #hex - 24)
+    for peel = 0, max_peel do
+        local peeled = (peel == 0) and "" or hex:sub(#hex - peel + 1)
+        local candidate = trim(peeled .. after)
+        if candidate ~= "" and #candidate >= 3 and #candidate <= 96 and candidate:find("^%u") then
+            return candidate
+        end
+    end
+    after = trim(after)
+    if after ~= "" and after:find("^%u") then return after end
+    return name
+end
+
+local function clean_link_item_name(name)
+    name = trim(name or "")
+    if name == "" then return "" end
+    if name:find("\x12", 1, true) then
+        name = name:gsub("\x12[^\x12]*\x12", " ")
+        name = name:gsub("\x12", " ")
+        name = trim(name)
+        if name == "" then return "" end
+    end
+    name = strip_leading_item_hex(name)
+    for _ = 1, 4 do
+        local next = name
+        next = next:gsub("^['\"`“”‘’]+", "")
+        next = next:gsub("%s*[\"'`“”‘’]+%s*>?%s*$", "")
+        next = next:gsub("%s*>%s*$", "")
+        next = trim(next)
+        if next == name then break end
+        name = next
+    end
+    name = name:gsub("[\"'`“”‘’>]+$", "")
+    name = trim(name)
+    if name:match("^%x+$") and #name >= 16 then return "" end
+    return name
+end
+M.clean_link_item_name = clean_link_item_name
+
+-- BiS-shaped: for ONE linked item, walk announce-enabled lists for this
+-- class and collect matching entries. Name matches are preferred over id-only
+-- (corrupt ParseItemLink ids must not steal the first hit). No reverse-index
+-- build (hitch-free on chat). Requires the BiS catalog already loaded.
+local function collect_announce_entries_for_link(class_name, owner_name, item_name, item_id)
+    class_name = class_key(class_name or "")
+    owner_name = trim(owner_name or "")
+    item_name = trim(item_name or "")
+    item_id = tonumber(item_id) or 0
+    if not class_name or class_name == "" or (item_name == "" and item_id <= 0) then return nil end
+    if not M.catalog_loaded() then return nil end
+    if not bis.link_matches_entry then return nil end
+
+    local memo_key = link_entry_memo_key(class_name, item_name, item_id)
+    local memo = link_entry_memo[memo_key]
+    if memo ~= nil then
+        return memo or nil
+    end
+
+    local name_hits, id_hits, seen = {}, {}, {}
+    local function consider(list_id, list_name, entry)
+        if not entry then return end
+        local dedupe = tostring(list_id or "") .. "\31" .. tostring(entry.slot or entry.item or "")
+        if seen[dedupe] then return end
+        local by_name = false
+        local lname = norm_item_key(item_name)
+        if lname ~= "" then
+            for _, name in ipairs(entry.names or { entry.item }) do
+                if norm_item_key(name) == lname then by_name = true; break end
+            end
+        end
+        local by_id = false
+        if item_id > 0 then
+            for _, id in ipairs(entry.ids or {}) do
+                if tonumber(id) == item_id then by_id = true; break end
+            end
+        end
+        if not by_name and not by_id then
+            -- DoN teaching/pack aliases etc.
+            if not bis.link_matches_entry(entry, item_name, item_id) then return end
+            by_name = true
+        end
+        seen[dedupe] = true
+        local rec = {
+            list_id = list_id,
+            list_name = list_name,
+            entry = entry,
+            item_name = direct_candidate_name(entry, item_name),
+        }
+        if by_name then
+            name_hits[#name_hits + 1] = rec
+        else
+            id_hits[#id_hits + 1] = rec
+        end
+    end
+
+    for _, ref in ipairs(M.lists_for_announce()) do
+        local list_id = tostring(ref.id or "")
+        local list = M.list(list_id)
+        if list then
+            local list_name = M.list_label(list_id)
+            for _, cat in ipairs(list.categories or {}) do
+                for _, slot in ipairs(category_slots(list_id, cat, class_name, false)) do
+                    consider(list_id, list_name, M.resolve_entry(list_id, class_name, slot))
+                end
+            end
+        end
+    end
+
+    for _, ref in ipairs(user_lists_for_announce(class_name, owner_name)) do
+        local list = bis.get(ref.id)
+        if list then
+            local list_name = list.name or "BiS"
+            for _, entry in ipairs(list.entries or {}) do
+                consider(ref.id, list_name, bis.normalize_entry(entry))
+            end
+        end
+    end
+
+    if #name_hits == 0 and #id_hits == 0 then
+        -- Do not memoize negatives (warm races / bad ids must not stick).
+        return nil
+    end
+    local out = name_hits
+    for _, rec in ipairs(id_hits) do out[#out + 1] = rec end
+    link_entry_memo[memo_key] = out
+    return out
+end
+
+-- When peer class is still unknown, match shared template/visible rows only
+-- (fungal/augs/etc). Class-specific preanguish rows stay gated on a real class.
+local function collect_template_announce_entries_for_link(item_name, item_id)
+    item_name = clean_link_item_name(item_name)
+    item_id = tonumber(item_id) or 0
+    if item_name == "" and item_id <= 0 then return nil end
+    if not M.catalog_loaded() or not bis.link_matches_entry then return nil end
+    local memo_key = "template\31" .. link_entry_memo_key("", item_name, item_id)
+    local memo = link_entry_memo[memo_key]
+    if memo ~= nil then return memo or nil end
+
+    local out, seen = {}, {}
+    for _, ref in ipairs(M.lists_for_announce()) do
+        local list_id = tostring(ref.id or "")
+        local list = M.list(list_id)
+        if list then
+            local list_name = M.list_label(list_id)
+            local bucket = list.template or list.visible
+            if type(bucket) == "table" then
+                for slot, raw in pairs(bucket) do
+                    if type(raw) == "table" then
+                        local entry = bis.normalize_entry(raw)
+                        entry.slot = tostring(slot)
+                        expand_fungal_chain(list, bucket, entry)
+                        if list_id == "don" then
+                            expand_don_clicky_chain(list, bucket, entry)
+                            expand_don_shadow_chain(list, bucket, entry)
+                        elseif list_id == "bagitems" then
+                            expand_tattered_sack_chain(entry)
+                        end
+                        if bis.link_matches_entry(entry, item_name, item_id) then
+                            local dedupe = list_id .. "\31" .. tostring(slot)
+                            if not seen[dedupe] then
+                                seen[dedupe] = true
+                                out[#out + 1] = {
+                                    list_id = list_id,
+                                    list_name = list_name,
+                                    entry = entry,
+                                    item_name = direct_candidate_name(entry, item_name),
+                                }
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    if #out == 0 then
+        return nil
+    end
+    link_entry_memo[memo_key] = out
+    return out
+end
+
+-- BiS-shaped: walk class+template+visible slots; if linked name matches
+-- that slot, use evaluate_slot (bis_search paint for peers / live for self).
+local function paint_need_walk(snap, item_name, item_id, opts)
+    opts = type(opts) == 'table' and opts or {}
+    item_name = clean_link_item_name(item_name)
+    item_id = tonumber(item_id) or 0
+    if item_name == '' and item_id <= 0 then return nil, 'no-name' end
+    if not M.catalog_loaded() or not bis.link_matches_entry then return nil, 'no-catalog' end
+
+    local class_name = class_key(snap.class or '')
+    local matched = false
+    local link_norm = norm_item_key(item_name)
+
+    local function cell_alts(raw, entry)
+        local cell = trim((raw and (raw.item or raw.name)) or (entry and entry.item) or '')
+        local alts = {}
+        if cell == '' then return alts end
+        for alt in cell:gmatch('[^/]+') do
+            alt = trim(alt)
+            if alt ~= '' then alts[#alts + 1] = alt end
+        end
+        if #alts == 0 then alts[1] = cell end
+        return alts
+    end
+
+    local function names_hit(entry, paint_name, raw)
+        if entry and bis.link_matches_entry(entry, item_name, item_id) then return true end
+        paint_name = trim(paint_name or '')
+        if paint_name ~= '' and link_norm ~= '' and norm_item_key(paint_name) == link_norm then
+            return true
+        end
+        for _, alt in ipairs(cell_alts(raw, entry)) do
+            if link_norm ~= '' and norm_item_key(alt) == link_norm then return true end
+            if entry and bis.link_matches_entry({ item = alt, names = { alt }, ids = entry.ids or {} }, item_name, item_id) then
+                return true
+            end
+        end
+        return false
+    end
+
+    local function accept(entry, list_id, list_name, row, paint_name, raw)
+        if not names_hit(entry, paint_name, raw) then return nil end
+        matched = true
+        if not row or row.empty or row.status ~= 'missing' then return nil end
+        if opts.skip_live ~= true and is_local_snap(snap)
+            and bis.live_own_item(entry or { item = item_name, names = { item_name } }, item_name, nil) then
+            return nil
+        end
+        return {
+            list = { id = list_id, name = list_name },
+            entry = entry or { item = item_name, names = { item_name }, slot = '' },
+            item_name = direct_candidate_name(entry, item_name),
+        }
+    end
+
+    for _, ref in ipairs(M.lists_for_announce()) do
+        local list_id = tostring(ref.id or '')
+        local list = M.list(list_id)
+        if list then
+            local list_name = M.list_label(list_id)
+            local seen_slot = {}
+            local buckets = {}
+            if class_name and type(list.classes) == 'table' and type(list.classes[class_name]) == 'table' then
+                buckets[#buckets + 1] = list.classes[class_name]
+            end
+            if type(list.template) == 'table' then buckets[#buckets + 1] = list.template end
+            if type(list.visible) == 'table' then buckets[#buckets + 1] = list.visible end
+
+            for _, bucket in ipairs(buckets) do
+                for slot, raw in pairs(bucket) do
+                    slot = tostring(slot or '')
+                    if slot ~= '' and not seen_slot[slot] and type(raw) == 'table' then
+                        seen_slot[slot] = true
+                        -- Cheap name/id filter BEFORE evaluate_slot (grid paint is
+                        -- expensive; sapphire matched early, bloom/slimes walked
+                        -- every slot and felt like "no [TG]").
+                        -- Rough cell filter first (no expand): catches Fungus↔Slime
+                        -- and Bloom↔Fungal Bloom without walking every slot slowly.
+                        local cell = tostring((raw.item or raw.name or '') .. ' ' .. slot):lower()
+                        local rough = false
+                        if link_norm ~= '' then
+                            rough = cell:find(link_norm, 1, true) ~= nil
+                            if not rough then
+                                local slime_elem = link_norm:match("^(%S+) slime of suffering$")
+                                if slime_elem and cell:find(slime_elem, 1, true)
+                                    and cell:find("fungus of suffering", 1, true) then
+                                    rough = true
+                                end
+                                local bloom_rest = link_norm:match("^noxious bloom of (.+)$")
+                                if bloom_rest and cell:find("fungal bloom of " .. bloom_rest, 1, true) then
+                                    rough = true
+                                end
+                            end
+                        end
+                        if not rough and item_id <= 0 then
+                            -- still allow exact normalize hit below for id-less edge cases
+                        end
+                        local entry = bis.normalize_entry(raw)
+                        entry.slot = slot
+                        if not rough and item_id > 0 then
+                            for _, id in ipairs(entry.ids or {}) do
+                                if tonumber(id) == item_id then rough = true break end
+                            end
+                        end
+                        if rough or names_hit(entry, nil, raw) then
+                            expand_fungal_chain(list, bucket, entry)
+                            if list_id == 'don' then
+                                expand_don_clicky_chain(list, bucket, entry)
+                                expand_don_shadow_chain(list, bucket, entry)
+                            elseif list_id == 'bagitems' then
+                                expand_tattered_sack_chain(entry)
+                            end
+                            if names_hit(entry, nil, raw) then
+                                local row = M.evaluate_slot(list_id, snap, slot, nil)
+                                local paint_name = row and row.match and row.match.name or nil
+                                -- Keep chain-expanded `entry` for name match; only borrow status.
+                                if not row or row.empty then
+                                    row = bis.evaluate_entry(entry, snap, opts)
+                                end
+                                local need = accept(entry, list_id, list_name, row, paint_name, raw)
+                                if need then return need, 'need' end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if class_name then
+        for _, ref in ipairs(user_lists_for_announce(class_name, snap.name)) do
+            local list = bis.get(ref.id)
+            if list then
+                local list_name = list.name or 'BiS'
+                for _, entry in ipairs(list.entries or {}) do
+                    entry = bis.normalize_entry(entry)
+                    if names_hit(entry, nil, entry) then
+                        local row = bis.evaluate_entry(entry, snap, opts)
+                        local need = accept(entry, ref.id, list_name, row, nil, entry)
+                        if need then return need, 'need' end
+                    end
+                end
+            end
+        end
+    end
+
+    return nil, matched and 'owned' or 'no-row'
+end
+
+--- Linked need = BiS paint for this char (evaluate_slot / template / live).
+--- Returns need, why (why is "need" / "owned" / "no-row" / ...).
+function M.check_announce_need_for_link(snap, item_name, item_id, opts)
+    if not snap then return nil, "no-snap" end
+    local need, why = paint_need_walk(snap, item_name, item_id, opts)
+    if need then return need, "need" end
+    return nil, why or "no-row"
+end
+
+--- Status helper after a nil need: "owned" vs "no-row" (and class tag).
+function M.explain_announce_skip_for_link(snap, item_name, item_id, opts)
+    local need, why = M.check_announce_need_for_link(snap, item_name, item_id, opts)
+    if need then return "need" end
+    return why or "no-row"
 end
 
 function M.direct_item_candidates_in_text(snap, line, limit)

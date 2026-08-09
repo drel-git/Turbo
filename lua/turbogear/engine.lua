@@ -48,7 +48,7 @@ local MSG = {
     NEED_CONFIRM_REPLY = 'need_confirm_reply',
     GO_LOOT = 'go_loot',
     GO_LOOT_RESULT = 'go_loot_result',
-    -- LazBiS-shaped BiS ownership: catalog FindItem scan, not full inventory.
+    -- BiS-shaped ownership: catalog FindItem scan, not full inventory.
     BIS_SEARCH = 'bis_search',
     BIS_RESULT = 'bis_result',
 }
@@ -902,7 +902,7 @@ function Engine.request_all(force, opts)
     })
 end
 
---- Broadcast a LazBiS-style catalog FindItem search for list_id.
+--- Broadcast a BiS-style catalog FindItem search for list_id.
 function Engine.request_bis_search(list_id, opts)
     if not Engine.ok then return false end
     opts = type(opts) == "table" and opts or {}

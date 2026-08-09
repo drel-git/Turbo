@@ -1,11 +1,9 @@
 -- TurboGear/announcer.lua
--- BiS linked-needs (hybrid, 1.2.107+ / fail-open 1.2.110+): raid/group/say
--- item LINKS are evaluated locally on every box (LazBiS-style: typed names
--- alone do not announce). The driver answers from the full announce catalog
--- when ready, else from the disk-cached direct catalog while the full index
--- is still warming. Peers LOOT_NEED the announce beacon; the beacon holds
--- briefly and emits one grouped [TG] line. needs_index is optional
--- enrichment, not a gate for linked announces.
+-- BiS linked-needs (1.2.137+):
+-- Item LINKS only (no typed names). Driver: load the BiS catalog once, then
+-- per-link roster walk using the same ownership as the BiS grid (evaluate_slot /
+-- bis_search / live self) and emit one [TG] immediately.
+-- needs_index / dcat / reverse-catalog / peer-confirm are NOT on this path.
 
 local mq  = require('mq')
 local cfg = require('config')
@@ -27,6 +25,7 @@ local pending = {}
 local pending_items = {}
 local announce_outbox = {}
 local group_announces = {}
+local link_scan_queue = {}
 local targeted_checks = {}
 local targeted_seen = {}
 local text_batches = {}
@@ -75,6 +74,7 @@ local runtime = {
     last_group_scan_snaps = 0,
     last_group_scan_added = 0,
     last_group_scan_pending = 0,
+    last_group_scan_detail = "",
     last_chat_at = 0,
     last_chat_sample = "",
     last_chat_links = 0,
@@ -114,10 +114,15 @@ local function group_window_s()
     return math.max(0.05, (tonumber(CFG.announce_group_window_ms) or DEFAULT_GROUP_WINDOW_MS) / 1000)
 end
 
-local function dprint(...)
+local function dprint(fmt, ...)
     local Engine = require('engine').Engine
-    if Engine and Engine.debug then
-        diag.count("announce.debug_events")
+    if not (Engine and Engine.debug) then return end
+    diag.count("announce.debug_events")
+    local ok, msg = pcall(string.format, tostring(fmt or ""), ...)
+    if ok then
+        print("\at[TurboGear]\ax " .. msg)
+    else
+        print("\at[TurboGear]\ax " .. tostring(fmt))
     end
 end
 
@@ -383,7 +388,10 @@ local function refresh_settings_if_due()
 end
 
 local function announce_work_pending()
-    if #pending > 0 or #pending_items > 0 or #announce_outbox > 0 or #targeted_checks > 0 then return true end
+    if #pending > 0 or #pending_items > 0 or #announce_outbox > 0
+        or #targeted_checks > 0 or #link_scan_queue > 0 then
+        return true
+    end
     for _, _ in pairs(group_announces or {}) do return true end
     return false
 end
@@ -487,9 +495,104 @@ local function clean_text_candidate(s)
     s = tostring(s or "")
     s = s:gsub("\r", " "):gsub("\n", " ")
     s = s:gsub("^%s+", ""):gsub("%s+$", "")
-    s = s:gsub("^['\"`]+", ""):gsub("['\"`]+$", "")
+    -- Prefer shared cleaner (strips \x12 frames, leading hex, trailing `">`).
+    if catalog.clean_link_item_name then
+        return catalog.clean_link_item_name(s) or ""
+    end
+    s = s:gsub("\x12[^\x12]*\x12", " "):gsub("\x12", " ")
+    s = s:gsub("^%s+", ""):gsub("%s+$", "")
+    local after_hex = s:match("^%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x+(.*)$")
+    if after_hex ~= nil then
+        after_hex = after_hex:gsub("^%s+", ""):gsub("%s+$", "")
+        if after_hex ~= "" then s = after_hex end
+    end
+    s = s:gsub("^['\"`]+", "")
+    s = s:gsub("%s*[\"'`]+%s*>?%s*$", "")
+    s = s:gsub("%s*>%s*$", "")
     s = s:gsub("^%s+", ""):gsub("%s+$", "")
     return s
+end
+
+-- MQ self/group chat often exposes item links as a long hex dump immediately
+-- followed by the visible item name (no \x12 frames, ExtractLinks empty).
+-- Hex digits are 0-9A-F only, so names starting with A-F get swallowed by a
+-- greedy hex match ("Divine" -> "ivine"). Peel trailing hex letters back until
+-- the visible name looks like a normal capitalized item name.
+-- Multi-link lines jam several hex+name pairs together; stop the name at the
+-- next hex run so we can recover each item.
+local HEX_RUN = "%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x+"
+
+local function item_from_hex_at(text, start_at)
+    text = tostring(text or "")
+    start_at = math.max(1, tonumber(start_at) or 1)
+    local s, e = text:find(HEX_RUN, start_at)
+    if not s then return nil end
+    local hex = text:sub(s, e)
+    local after = text:sub(e + 1)
+    -- Cut before the next jammed hex dump (multi-link party line).
+    local next_hex = after:find(HEX_RUN)
+    if next_hex then after = after:sub(1, next_hex - 1) end
+    local function visible_name(prefix, suffix)
+        local raw = tostring(prefix or "") .. tostring(suffix or "")
+        raw = raw:match("^(.-)%s+%-%s+") or raw
+        return clean_text_candidate(raw)
+    end
+    local best_hex, best_name = nil, nil
+    local max_peel = math.min(16, #hex - 24)
+    for peel = 0, max_peel do
+        local h = (peel == 0) and hex or hex:sub(1, #hex - peel)
+        local peeled = (peel == 0) and "" or hex:sub(#hex - peel + 1)
+        local name = visible_name(peeled, after)
+        if name ~= "" and #name >= 3 and #name <= 96 and name:find("^%u") then
+            best_hex, best_name = h, name
+            break
+        end
+    end
+    if not best_name then
+        local name = visible_name("", after)
+        if name ~= "" and #name >= 3 and #name <= 96 then
+            best_hex, best_name = hex, name
+        end
+    end
+    if not best_name then
+        return nil, e + 1
+    end
+    local id, link = 0, nil
+    if mq.ParseItemLink and best_hex then
+        local raw = "\x12" .. best_hex .. "\x12"
+        local pok, item = pcall(function() return mq.ParseItemLink(raw) end)
+        if pok and type(item) == "table" then
+            local parsed_name, parsed_id = link_name(item)
+            if parsed_name and parsed_name ~= ""
+                and rules.normalize_item_name(parsed_name) == rules.normalize_item_name(best_name)
+            then
+                best_name, id, link = parsed_name, parsed_id or 0, raw
+            end
+        end
+    end
+    return { name = best_name, id = tonumber(id) or 0, link = link }, e + 1
+end
+
+-- Returns name, optional parsed id, optional raw link string (first hex item).
+local function item_from_hex_link_payload(text)
+    local hit = item_from_hex_at(text, 1)
+    if not hit then return nil end
+    return hit.name, hit.id, hit.link
+end
+
+local function items_from_hex_link_payloads(text)
+    local out = {}
+    local pos = 1
+    local guard = 0
+    while guard < 12 do
+        guard = guard + 1
+        local hit, next_pos = item_from_hex_at(text, pos)
+        if not next_pos then break end
+        if hit and hit.name then out[#out + 1] = hit end
+        pos = next_pos
+        if pos > #tostring(text or "") then break end
+    end
+    return out
 end
 
 -- Visible item name from a TurboLoot control payload that may wrap a clickable
@@ -512,8 +615,11 @@ local function control_line_item_name(payload)
     local plain = payload:gsub("\x12[^\x12]*\x12", " "):gsub("\x12", " ")
     local name = plain:match("^%s*(.-)%s*%(%s*ID%s*:%s*%d+%s*%)")
     name = clean_text_candidate(name)
-    if name == "" then return nil end
-    return name
+    if name ~= "" then return name end
+    -- Self-link dump: [ANNOUNCE] <hex><Item Name> (no corpse id suffix).
+    local hex_name = item_from_hex_link_payload(plain)
+    if hex_name and hex_name ~= "" then return hex_name end
+    return nil
 end
 
 local function parse_item_links(line)
@@ -532,13 +638,25 @@ local function parse_item_links(line)
             or tag_l:find("value", 1, true)
     end
     local function add_item(name, id, link)
-        name = clean_text_candidate(name)
         id = tonumber(id) or 0
+        link = tostring(link or "")
+        -- Prefer ParseItemLink's plain itemName over keepLinks junk in `name`.
+        if item_actions.looks_like_item_link(link) and mq.ParseItemLink then
+            local pok, item = pcall(function() return mq.ParseItemLink(link) end)
+            if pok and type(item) == "table" then
+                local n, i = link_name(item)
+                if n and n ~= "" then
+                    name = n
+                    if (tonumber(i) or 0) > 0 then id = tonumber(i) or id end
+                end
+            end
+        end
+        name = clean_text_candidate(name)
         if name == "" then return end
         local key = (id > 0 and ("id:" .. tostring(math.floor(id)))) or ("name:" .. rules.normalize_item_name(name))
         if seen[key] then return end
         seen[key] = true
-        out[#out + 1] = { name = name, id = id, link = tostring(link or "") }
+        out[#out + 1] = { name = name, id = id, link = link }
         if item_actions.looks_like_item_link(link) then
             -- Feed the observed-link cache so later announces can link this
             -- item without possessing it.
@@ -594,6 +712,15 @@ local function parse_item_links(line)
             local payload = tostring(line or ""):sub(payload_start)
             local name = control_line_item_name(payload)
             if name then add_item(name, 0, nil) end
+        end
+    end
+
+    -- Self outgoing links: MQ event text is often "<hex><Item Name>" with no
+    -- ExtractLinks hit. Recover every jammed hex+name pair on the line.
+    -- Do not scan arbitrary typed BiS names without this hex marker.
+    if #out == 0 then
+        for _, hit in ipairs(items_from_hex_link_payloads(line)) do
+            add_item(hit.name, hit.id, hit.link)
         end
     end
 
@@ -827,7 +954,7 @@ local function resolve_group_item_link(item_name, item_link, item_id)
     return nil
 end
 
-local function note_group_scan(mode, source, items, snaps, added)
+local function note_group_scan(mode, source, items, snaps, added, detail)
     runtime.last_group_scan_at = os.clock()
     runtime.last_group_scan_mode = tostring(mode or "")
     runtime.last_group_scan_source = tostring(source or "")
@@ -835,6 +962,9 @@ local function note_group_scan(mode, source, items, snaps, added)
     runtime.last_group_scan_snaps = tonumber(snaps) or 0
     runtime.last_group_scan_added = tonumber(added) or 0
     runtime.last_group_scan_pending = #targeted_checks
+    if detail ~= nil then
+        runtime.last_group_scan_detail = tostring(detail or "")
+    end
 end
 
 local function ensure_group_announce(item_name, item_link, item_id, source, corpse_id)
@@ -942,6 +1072,11 @@ local function group_scan_snapshots()
         else
             local snap = Store.get(key)
             if should_scan_peer_snapshot(key, snap) then
+                -- Discover stubs often land with class "" / "?"; BiS list walk
+                -- needs a real class. Fill from Group/Spawn before skipping.
+                if Store.enrich_class then
+                    pcall(Store.enrich_class, snap)
+                end
                 snaps[#snaps + 1] = { key = key, snap = snap, local_owner = false }
             end
         end
@@ -1004,14 +1139,28 @@ local function active_announce_roster_status(limit)
     }
 end
 
--- Full catalog when ready; otherwise memory-resident direct/dcat only.
--- Never sync-flushes the full announce catalog on a chat frame (hitch source).
+-- BiS path: hitch-free single-item list walk (+ optional hot index/dcat).
+-- Blank/? class still allowed (template BiS rows). Never sync-builds on chat.
+local function ensure_link_catalog()
+    if catalog.catalog_loaded and catalog.catalog_loaded() then return true end
+    pcall(function()
+        if catalog.warm_catalog then catalog.warm_catalog() end
+    end)
+    return catalog.catalog_loaded and catalog.catalog_loaded() == true
+end
+
 local function check_need_fail_open(snap, item_name, item_id, opts)
-    if not snap or not snap.class then return nil end
-    if catalog.announce_catalog_ready(snap.class, snap.name) then
+    if not snap then return nil end
+    if type(catalog.check_announce_need_for_link) == "function" then
+        return catalog.check_announce_need_for_link(snap, item_name, item_id, opts)
+    end
+    if snap.class and catalog.announce_catalog_ready(snap.class, snap.name) then
         return catalog.check_announce_need(snap, item_name, item_id)
     end
-    return catalog.check_announce_need_direct(snap, item_name, item_id, opts)
+    if snap.class then
+        return catalog.check_announce_need_direct(snap, item_name, item_id, opts)
+    end
+    return nil
 end
 
 local function direct_lookup_ready(snap)
@@ -1023,17 +1172,29 @@ end
 
 local function try_direct_need_for_snapshot(item, row, item_link, bucket, source)
     local snap = row and row.snap
-    if type(snap) ~= "table" or not snap.class or snap.class == "?" then return 0, true end
-    local item_name = tostring(item and item.name or "")
-    if item_name == "" then return 0, true end
-    local item_id = tonumber(item and item.id) or 0
-    local need = check_need_fail_open(snap, item_name, item_id, {
-        skip_live = not (row and row.local_owner),
-    })
-    if need then
-        return add_group_need(item_name, item_link, item_id, tostring(snap.name or row.key or "?"), source or "direct-cache") and 1 or 0, true
+    if type(snap) ~= "table" then return 0, true, "no-snap" end
+    if (not snap.class or snap.class == "?" or snap.class == "") and Store.enrich_class then
+        pcall(Store.enrich_class, snap)
     end
-    return 0, true
+    local item_name = tostring(item and item.name or "")
+    if item_name == "" then return 0, true, "no-name" end
+    local item_id = tonumber(item and item.id) or 0
+    local opts = { skip_live = not (row and row.local_owner) }
+    -- Missing class still runs template-only need checks (fungal/augs).
+    local need = check_need_fail_open(snap, item_name, item_id, opts)
+    local who = tostring(snap.name or row.key or "?")
+    local class_tag = tostring(snap.class or "?")
+    if class_tag == "" then class_tag = "?" end
+    if need then
+        local added = add_group_need(item_name, item_link, item_id, who, source or "bis-paint") and 1 or 0
+        return added, true, "need(" .. class_tag .. ")"
+    end
+    local reason = "owned"
+    if type(catalog.explain_announce_skip_for_link) == "function" then
+        local ok, why = pcall(catalog.explain_announce_skip_for_link, snap, item_name, item_id, opts)
+        if ok and why and why ~= "" and why ~= "need" then reason = tostring(why) end
+    end
+    return 0, true, reason .. "(" .. class_tag .. ")"
 end
 
 local function queue_target_check(item, row, item_link, bucket, source)
@@ -1062,24 +1223,33 @@ end
 
 local function queue_group_target_checks(item, item_link, bucket, source)
     local added, queued, snaps = 0, 0, 0
+    local details = {}
+    source = tostring(source or "bis-paint")
+    local catalog_ok = ensure_link_catalog()
     for _, row in ipairs(group_scan_snapshots()) do
         local key = tostring(row.key or "")
         if key ~= "" and type(row.snap) == "table" then
             snaps = snaps + 1
             local skey = target_seen_key(bucket and bucket.key or "", key)
+            local who = tostring((row.snap and row.snap.name) or key)
             if not targeted_seen[skey] then
-                local idx = catalog.direct_catalog_if_ready(row.snap.class, row.snap.name)
-                if idx then
-                    targeted_seen[skey] = true
-                    local hit = try_direct_need_for_snapshot(item, row, item_link, bucket, source)
+                targeted_seen[skey] = true
+                if catalog_ok then
+                    -- BiS paint for this link (evaluate_slot / bis_search / live).
+                    local hit, _, reason = try_direct_need_for_snapshot(item, row, item_link, bucket, source)
                     added = added + (tonumber(hit) or 0)
-                elseif queue_target_check(item, row, item_link, bucket, source) then
-                    queued = queued + 1
+                    details[#details + 1] = who .. "=" .. tostring(reason or "?")
+                else
+                    targeted_seen[skey] = nil
+                    if queue_target_check(item, row, item_link, bucket, source) then
+                        queued = queued + 1
+                        details[#details + 1] = who .. "=queued"
+                    end
                 end
             end
         end
     end
-    return added, queued, snaps
+    return added, queued, snaps, table.concat(details, " ")
 end
 
 local function text_batch_pending(batch_key)
@@ -1153,90 +1323,48 @@ local function add_text_candidate_need(hit, row, source, batch_key, corpse_id)
     return add_group_need(item_name, item_link, item_id, tostring(snap.name or row.key or "?"), source or "text-targeted") and 1 or 0
 end
 
-local function scan_group_needs_from_cache(links, source)
+-- Queue then flush (scan_group_needs_from_cache). Name-filtered BiS paint is
+-- the ownership source of truth — same as the grid.
+local function queue_group_link_scans(links, source)
     if type(links) ~= "table" or #links == 0 then return 0 end
-
-    local added = 0
-    local queued = 0
-    local snaps_seen = 0
-    local index_enabled = CFG.needs_index_enabled ~= false
-    local group_index_ready = index_enabled
-        and (needs_index.group_ready and needs_index.group_ready() or needs_index.ready())
-    local indexed = index_enabled and needs_index.char_count() or 0
-    local hybrid = link_hybrid_enabled()
-
-    -- Hybrid: local fail-open + Store direct scan + peer LOOT_NEED.
-    -- Do not sync-flush the full announce catalog here (frame hitch).
-    local snap = hybrid and snap_for_announce() or nil
-    if hybrid and snap and snap.class then
-        pcall(function()
-            catalog.ensure_announce_catalog(snap.class, { owner = snap.name })
-        end)
-    end
-
+    source = tostring(source or "chat")
+    local n = 0
     for _, item in ipairs(links) do
         local item_name = tostring(item and item.name or "")
+        -- Same cleanup paint uses (self-link keepLinks often appends `">`).
+        if catalog.clean_link_item_name then
+            item_name = catalog.clean_link_item_name(item_name) or item_name
+        else
+            item_name = item_name:gsub("^['\"`]+", ""):gsub("%s*[\"'`]+%s*>?%s*$", ""):gsub("%s*>%s*$", "")
+            item_name = item_name:match("^%s*(.-)%s*$") or item_name
+        end
         if item_name ~= "" then
             note_loot_seen(item_name, source)
-            local item_link = resolve_group_item_link(item_name, item.link, item.id)
-            local bucket = ensure_group_announce(item_name, item_link, item.id, source, item.corpse_id)
-
-            -- Announce under the LINKED item's own name (a real item), never
-            -- an index alias like "... - Tier II" (see needs_index display rules).
-            if hybrid and snap then
-                local need = check_need_fail_open(snap, item_name, item.id, { skip_live = false })
-                if need and add_group_need(item_name, item_link, item.id, me_name(), "local-live") then
-                    added = added + 1
-                end
-            end
-
-            if index_enabled then
-                for _, need in ipairs(needs_index.needers_for(item_name, item.id)) do
-                    if add_group_need(item_name, item_link, item.id, need.character or "?", "index") then
-                        added = added + 1
-                    end
-                end
-            end
-
-            -- Hybrid always walks in-scope Store snaps (direct/dcat) so one [TG]
-            -- can list every known needer without waiting on peer LOOT_NEED or a
-            -- warm needs_index. Legacy still uses this only while the index is cold.
-            if hybrid or not group_index_ready then
-                local d_added, d_queued, d_snaps = queue_group_target_checks(item, item_link, bucket, source)
-                added = added + (tonumber(d_added) or 0)
-                queued = queued + (tonumber(d_queued) or 0)
-                snaps_seen = math.max(snaps_seen, tonumber(d_snaps) or 0)
-            end
-
-            if hybrid and bucket then
-                local order_n = type(bucket.order) == "table" and #bucket.order or 0
-                local waiting = (tonumber(bucket.pending_targets) or 0) > 0
-                arm_peer_report_hold(bucket, { short = order_n > 0 and not waiting })
-            end
-
-            -- Surface Linked rows as soon as any needer is known (corpse id is
-            -- optional — Go buttons stay off until a corpse handoff arrives).
-            if bucket and type(bucket.order) == "table" and #bucket.order > 0 then
-                record_linked_item(bucket, "pending")
-            end
+            link_scan_queue[#link_scan_queue + 1] = {
+                name = item_name,
+                id = tonumber(item.id) or 0,
+                link = item.link,
+                corpse_id = item.corpse_id,
+                source = source,
+                at = os.clock(),
+            }
+            n = n + 1
         end
     end
-    if hybrid then
-        note_group_scan(queued > 0 and "links-hybrid+targeted" or "links-hybrid", source, #links, indexed, added)
-        if added > 0 then diag.count("announce.hybrid_group_needs") end
-        if queued > 0 then diag.count("announce.group_targeted_queued", queued) end
-    elseif queued > 0 then
-        note_group_scan("links-targeted", source, #links, snaps_seen, added)
-        diag.count("announce.group_targeted_queued", queued)
-    elseif group_index_ready then
-        note_group_scan("links-idx", source, #links, indexed, added)
-        if added > 0 then diag.count("announce.index_group_needs") end
-    else
-        note_group_scan("links-query", source, #links, indexed, added)
-        diag.count("announce.group_needs_query")
+    if n > 0 then
+        runtime.last_chat_note = string.format("queued bis-paint (%d)", n)
+        runtime.last_pending_at = os.clock()
+        runtime.last_pending_item = tostring(links[1] and links[1].name or "item")
+        runtime.last_pending_source = source
+        runtime.last_pending_reason = "bis-paint scan queued"
+        diag.count("announce.bis_paint_queued", n)
     end
-    return added
+    return n
 end
+
+local emit_bis_paint_group_announce, drain_link_scan_queue
+-- Assigned after emit/drain exist (avoids calling a nil upvalue from chat).
+local scan_group_needs_from_cache
 
 local function scan_group_text_needs_from_cache(line, source)
     line = tostring(line or "")
@@ -1317,16 +1445,181 @@ local function send_group_announce(bucket, opts)
     local msg = rules.format_message(display_payload(bucket.item_name, bucket.item_link), bucket.order)
     -- Record before mq.cmd so a same-frame multi-item flush cannot lose a
     -- Linked row if a later send path errors or the panel reads mid-drain.
+    -- Stamp cooldowns before mq.cmd too: actor LOOT_NEED can re-enter and must
+    -- not open a second plaintext [TG] for the same item.
     record_linked_item(bucket, "sent")
-    if item_actions.looks_like_item_link(bucket.item_link) then
-        mq.cmd(tostring(cmd or "/g") .. " " .. msg)
-    else
-        mq.cmdf("/squelch %s %s", cmd, msg)
-    end
     note_sent(bucket.item_name)
     note_recent_sent(dedupe.key)
     note_item_announced(bucket.item_name, bucket.item_id)
+    dprint("sending %s %s",
+        tostring(cmd or "/g"), tostring(msg):gsub("[\018]", ""):sub(1, 140))
+    if item_actions.looks_like_item_link(bucket.item_link) then
+        mq.cmd(tostring(cmd or "/g") .. " " .. msg)
+    else
+        mq.cmdf("%s %s", cmd, msg)
+    end
     return true
+end
+
+local function send_opts_for_entry(entry)
+    entry = type(entry) == "table" and entry or {}
+    -- announcetest only: bypass cooldowns so repeat tests work. Chat/actor
+    -- respect announce_item_cooldown_s (default 20s) so re-linking does not spam.
+    return {
+        manual = entry.manual == true or entry.source == "announcetest",
+    }
+end
+
+-- Paint roster into a sendable bucket (no /g yet). Multi-link chat paints
+-- every item first, then bursts sends so [TG] lines land together.
+local function paint_bis_paint_group_announce(entry)
+    if type(entry) ~= "table" then return nil, 0 end
+    local item_name = tostring(entry.name or "")
+    local item_id = tonumber(entry.id) or 0
+    local raw_link = tostring(entry.link or "")
+    -- Chat keepLinks often leaves \x12/hex/`">` in entry.name; Prefer a parsed
+    -- link name, then the shared cleaner, so paint matches BiS rows.
+    if item_actions.looks_like_item_link(raw_link) and mq.ParseItemLink then
+        local pok, item = pcall(function() return mq.ParseItemLink(raw_link) end)
+        if pok and type(item) == "table" then
+            local n, i = link_name(item)
+            if n and n ~= "" then
+                item_name = n
+                if (tonumber(i) or 0) > 0 then item_id = tonumber(i) or item_id end
+            end
+        end
+    end
+    if catalog.clean_link_item_name then
+        item_name = catalog.clean_link_item_name(item_name) or item_name
+    else
+        item_name = clean_text_candidate(item_name)
+    end
+    if item_name == "" then return nil, 0 end
+    local item_link = resolve_group_item_link(item_name, raw_link, item_id)
+    ensure_link_catalog()
+    runtime.last_chat_note = "scanning bis-paint: " .. item_name
+    dprint("linked-needs scan: %s", item_name)
+
+    local order, name_map, sources, details = {}, {}, {}, {}
+    local snaps = 0
+    for _, row in ipairs(group_scan_snapshots()) do
+        if type(row.snap) == "table" then
+            snaps = snaps + 1
+            local who = tostring(row.snap.name or row.key or "?")
+            local class_tag = tostring(row.snap.class or "?")
+            if class_tag == "" then class_tag = "?" end
+            local opts = { skip_live = not (row.local_owner == true) }
+            -- One paint walk per char (need + why). Do NOT call explain_* here —
+            -- that re-walked every list and left chat stuck at "queued bis-paint".
+            local ok, need, why = pcall(function()
+                return catalog.check_announce_need_for_link(row.snap, item_name, item_id, opts)
+            end)
+            if not ok then
+                details[#details + 1] = who .. "=error(" .. class_tag .. ")"
+            elseif need then
+                local key = who:lower()
+                if not name_map[key] then
+                    name_map[key] = who
+                    order[#order + 1] = who
+                    sources[key] = "bis-paint"
+                end
+                details[#details + 1] = who .. "=need(" .. class_tag .. ")"
+            else
+                details[#details + 1] = who .. "=" .. tostring(why or "owned") .. "(" .. class_tag .. ")"
+            end
+        end
+    end
+
+    local detail = item_name .. ": " .. table.concat(details, " ")
+    runtime.last_group_scan_detail = detail
+    note_group_scan("bis-paint", entry.source, 1, snaps, #order, detail)
+    if #order == 0 then
+        note_skip(item_name, "no needers")
+        diag.count("announce.empty_skip")
+        dprint("linked-needs: no needers for %s (%s)", item_name, detail)
+        return nil, 0
+    end
+
+    local bucket = {
+        key = grouped_item_key(item_name, item_id, item_link),
+        item_name = item_name,
+        item_link = tostring(item_link or ""),
+        item_id = item_id,
+        source = tostring(entry.source or "chat"),
+        names = name_map,
+        order = order,
+        sources = sources,
+    }
+    local cid = tonumber(entry.corpse_id)
+    if cid and cid > 0 then
+        bucket.corpse_id = math.floor(cid)
+        bucket.corpse_at = os.clock()
+    end
+    return bucket, #order
+end
+
+-- Single-item path (announcetest / leftover tick drain): paint then send.
+emit_bis_paint_group_announce = function(entry)
+    local ok, bucket, order_n = pcall(paint_bis_paint_group_announce, entry)
+    if not ok then
+        note_skip(tostring(entry and entry.name or "?"), "bis-paint error")
+        runtime.last_group_scan_detail = tostring(bucket or "error")
+        note_group_scan("bis-paint-error", entry and entry.source or "?", 1, 0, 0, runtime.last_group_scan_detail)
+        dprint("linked-needs error: %s", tostring(bucket))
+        diag.count("announce.bis_paint_error")
+        return 0
+    end
+    if not bucket then return 0 end
+    if send_group_announce(bucket, send_opts_for_entry(entry)) then
+        diag.count("announce.bis_paint_needs", order_n or 0)
+        return order_n or 0
+    end
+    dprint("linked-needs send failed: %s - %s",
+        tostring(bucket.item_name or "?"), tostring(runtime.last_skip_reason or "?"))
+    return 0
+end
+
+drain_link_scan_queue = function()
+    if #link_scan_queue == 0 then return end
+    local entry = table.remove(link_scan_queue, 1)
+    emit_bis_paint_group_announce(entry)
+end
+
+scan_group_needs_from_cache = function(links, source)
+    local n = queue_group_link_scans(links, source)
+    -- Paint every queued link first, then burst /g sends so multi-link lines
+    -- feel batched (old hybrid) instead of paint→send→paint→send stagger.
+    local ready = {}
+    while #link_scan_queue > 0 do
+        local entry = table.remove(link_scan_queue, 1)
+        local ok, bucket, order_n = pcall(paint_bis_paint_group_announce, entry)
+        if not ok then
+            note_skip(tostring(entry and entry.name or "?"), "bis-paint error")
+            runtime.last_group_scan_detail = tostring(bucket or "error")
+            note_group_scan("bis-paint-error", entry and entry.source or "?", 1, 0, 0, runtime.last_group_scan_detail)
+            dprint("linked-needs error: %s", tostring(bucket))
+            diag.count("announce.bis_paint_error")
+        elseif bucket then
+            ready[#ready + 1] = {
+                bucket = bucket,
+                entry = entry,
+                n = tonumber(order_n) or 0,
+            }
+        end
+    end
+    local pace_ms = math.max(0, tonumber(CFG.announce_outbox_delay_ms) or MULTI_ANNOUNCE_DELAY_MS)
+    for i, work in ipairs(ready) do
+        if i > 1 and pace_ms > 0 and mq.delay then
+            mq.delay(pace_ms)
+        end
+        if send_group_announce(work.bucket, send_opts_for_entry(work.entry)) then
+            diag.count("announce.bis_paint_needs", work.n)
+        else
+            dprint("linked-needs send failed: %s - %s",
+                tostring(work.bucket.item_name or "?"), tostring(runtime.last_skip_reason or "?"))
+        end
+    end
+    return n
 end
 
 function M.linked_items()
@@ -1749,13 +2042,16 @@ local function drain_group_announces()
         local pending_targets = bucket and (tonumber(bucket.pending_targets) or 0) or 0
         local batch_key = bucket and tostring(bucket.text_batch_key or "") or ""
         local pending_text = batch_key ~= "" and text_batch_pending(batch_key) > 0
+        local order_n = bucket and type(bucket.order) == "table" and #bucket.order or 0
+        -- Already have needers: do not hold the [TG] for cold targeted checks.
+        local waiting_targets = pending_targets > 0 and order_n == 0
         local target_wait_max = math.max(1.0, tonumber(CFG.announce_target_wait_max_s) or 8.0)
         local batch = pending_text and text_batches[batch_key] or nil
         local wait_started = tonumber((batch and batch.created) or (bucket and bucket.created)) or now
         local target_wait_expired = bucket
-            and (pending_targets > 0 or pending_text)
+            and (waiting_targets or pending_text)
             and (now - wait_started) >= target_wait_max
-        if bucket and (pending_targets > 0 or pending_text) and not target_wait_expired then
+        if bucket and (waiting_targets or pending_text) and not target_wait_expired then
             bucket.due = math.max(tonumber(bucket.due) or 0, now + group_window_s())
         elseif not bucket or (tonumber(bucket.due) or 0) <= now then
             due_keys[#due_keys + 1] = {
@@ -1771,19 +2067,17 @@ local function drain_group_announces()
         if bucket and not work.target_wait_expired and try_start_confirm_round(bucket, now) then
             -- held: confirm replies (or the confirm wait) will re-due it
         elseif bucket then
-            -- Hybrid: do not discard empty buckets until peer LOOT_NEED has had
-            -- time to arrive (patcher restart / cold peers). Avoids silent drops.
             local order_n = type(bucket.order) == "table" and #bucket.order or 0
-            if link_hybrid_enabled() and order_n == 0 and not work.target_wait_expired then
+            -- Empty after BiS paint: brief coalesce only, then skip.
+            if order_n == 0 and not work.target_wait_expired then
                 local created = tonumber(bucket.created) or now
-                local max_wait = math.max(peer_report_wait_s(), tonumber(CFG.announce_target_wait_max_s) or 8.0)
-                if (now - created) < max_wait then
-                    bucket.due = now + 0.35
+                if (now - created) < peer_report_short_s() then
+                    bucket.due = now + 0.1
                 else
                     group_announces[key] = nil
                     clear_targeted_seen(key)
-                    note_skip(bucket.item_name, "no needers after hybrid wait")
-                    diag.count("announce.hybrid_empty_timeout")
+                    note_skip(bucket.item_name, "no needers")
+                    diag.count("announce.empty_skip")
                 end
             else
                 group_announces[key] = nil
@@ -1799,8 +2093,6 @@ local function drain_group_announces()
                     note_skip(bucket.item_name, "targeted peer checks timed out")
                     diag.count("announce.target_checks_timed_out")
                 end
-                -- Record before chat send so the Linked panel always keeps the row
-                -- even if a later same-frame send is rate-limited / skipped.
                 if order_n > 0 then
                     record_linked_item(bucket, "pending")
                 end
@@ -2084,30 +2376,31 @@ local function catalog_ready_for(snap)
     return snap and snap.class and catalog.announce_catalog_ready(snap.class, snap.name)
 end
 
--- True when linked need checks can run (full catalog OR in-memory direct/dcat).
-local function lookup_ready_for(snap)
-    if catalog_ready_for(snap) then return true end
-    return direct_lookup_ready(snap)
+-- BiS: link walk works once the BiS catalog is loaded. Index/dcat optional.
+local function lookup_ready_for(_snap)
+    if ensure_link_catalog() then return true end
+    if catalog_ready_for(_snap) then return true end
+    return direct_lookup_ready(_snap)
 end
 
 local function ensure_catalog_for_chat(snap, flush)
+    if ensure_link_catalog() then
+        announce_ready = true
+        return true
+    end
     if not snap or not snap.class then return false end
     if catalog_ready_for(snap) then
         announce_ready = true
         return true
     end
     if flush then
-        -- Last resort only: bounded full flush (manual/debug paths).
         local ready = catalog.flush_announce_catalog(
             snap.class, snap.name, tonumber(CFG.announce_flush_budget_ms) or 800)
-        announce_ready = ready
-        return ready
+        announce_ready = ready or ensure_link_catalog()
+        return announce_ready
     end
     catalog.ensure_announce_catalog(snap.class, { owner = snap.name })
-    announce_ready = catalog_ready_for(snap)
-    if not announce_ready then
-        dprint("defer: catalog still building")
-    end
+    announce_ready = ensure_link_catalog() or catalog_ready_for(snap)
     return announce_ready
 end
 
@@ -2191,13 +2484,7 @@ local function report_links_to_holder(links, holder, source, allow_queue)
         runtime.last_chat_note = "peer report: no snap"
         return false
     end
-    if not lookup_ready_for(snap) then
-        if allow_queue then
-            queue_pending_items(links, source, "catalog warming", holder)
-        end
-        runtime.last_chat_note = "peer report queued (catalog)"
-        return false
-    end
+    ensure_link_catalog()
 
     local any = false
     for _, item in ipairs(links) do
@@ -2221,7 +2508,15 @@ local function try_process_item_links(links, source, allow_queue, line, opts)
     if not SharedSettings.bisAnnounceEnabled then return false end
     if type(links) ~= "table" or #links == 0 then return false end
     opts = type(opts) == "table" and opts or {}
+    source = tostring(source or "")
+    -- Loot replay catch-up must not emit [TG] (peer UI wake / ready replay).
+    if opts.replay or source == "replay" then
+        runtime.last_chat_note = "replay (no emit)"
+        diag.count("announce.replay_no_emit")
+        return false
+    end
 
+    -- Driver / group path: BiS paint for each linked item (no warm mute).
     if opts.group_local then
         local added = scan_group_needs_from_cache(links, source)
         return added > 0
@@ -2229,26 +2524,16 @@ local function try_process_item_links(links, source, allow_queue, line, opts)
 
     local snap = snap_for_announce()
     if not snap then return false end
-    local ready = lookup_ready_for(snap)
-    if not ready then
-        if source == "chat" or source == "replay" then
-            return try_process_direct_chat_links_while_warming(links, snap, allow_queue, source, opts)
-        end
-        if allow_queue then queue_pending_items(links, source, nil, opts.reply_to) end
-        return false
-    end
+    ensure_link_catalog()
 
     local announced = 0
     for _, item in ipairs(links) do
         note_loot_seen(item.name, source)
-        if opts.group_local then
-            ensure_group_announce(item.name, item.link, item.id, source, item.corpse_id)
-        end
         local need = check_need_fail_open(snap, item.name, item.id, { skip_live = false })
-        if announce_from_need(need, source, item.link, item.id, snap, ready, item.name, opts) then
+        if announce_from_need(need, source, item.link, item.id, snap, true, item.name, opts) then
             announced = announced + 1
         else
-            note_skip(item.name, explain_skip(snap, item.name, item.id, ready))
+            note_skip(item.name, explain_skip(snap, item.name, item.id, true))
         end
     end
     return announced > 0
@@ -2295,9 +2580,14 @@ local function try_process_chat(line, allow_queue, opts)
     local defer_chat, defer_reason, holder = should_defer_chat_announce()
     if #links > 0 then
         local source = opts.replay and "replay" or "chat"
+        -- Replay catch-up: never emit [TG] and never LOOT_NEED (bot UI wake).
+        if opts.replay then
+            runtime.last_chat_note = "replay (no emit)"
+            diag.count("announce.replay_no_emit")
+            return false
+        end
         if defer_chat then
-            -- Hybrid peers must still report needs even when muted for [TG]
-            -- (including no_ui_driver right after a patcher restart).
+            -- Live chat only: peers may still LOOT_NEED (driver ignores for emit).
             if link_hybrid_enabled() then
                 if defer_reason == "no_ui_driver" then
                     warn_no_ui_driver_once(defer_reason)
@@ -2314,7 +2604,7 @@ local function try_process_chat(line, allow_queue, opts)
         end
         local self_line = opts.self_event == true or is_self_loot_line(line)
         local group_local = self_line or ui_coordinator
-        if not group_local and not opts.replay and SharedSettings.announceUseActor ~= false
+        if not group_local and SharedSettings.announceUseActor ~= false
             and not link_hybrid_enabled()
         then
             runtime.last_chat_note = "actor expected"
@@ -2341,21 +2631,16 @@ local function try_process_chat(line, allow_queue, opts)
         return added
     end
 
-    -- No parsed item link. LazBiS bails unless ExtractLinks found an item;
-    -- we keep one escape hatch when a link payload is present but unparseable
-    -- (raw \x12 frames / hex dump). Typed BiS names alone never announce.
-    if is_player_link_chat_line(line) and has_unparseable_item_link_payload(line) then
-        local group_local = opts.self_event == true or is_self_loot_line(line)
-            or (ui_coordinator and is_player_link_chat_line(line))
-        if group_local then
-            local queued = queue_group_text_target_checks(line, opts.replay and "replay" or "text-targeted")
-            if queued > 0 then
-                runtime.last_chat_note = "linked text fallback"
-                return true
-            end
-        end
+    -- No parsed item link (and no TurboLoot control-tag item). Do not fall
+    -- back to scanning the line for BiS names: other-player keepLinks events
+    -- often carry \x12/hex junk that looks "unparseable" even when the visible
+    -- chat is plain typed text. Real links still come from parse_item_links
+    -- (ExtractLinks, raw frames, [ANNOUNCE]/[SKIP]).
+    if has_unparseable_item_link_payload(line) then
+        runtime.last_chat_note = "no item link (unparseable payload)"
+    else
+        runtime.last_chat_note = "no item link"
     end
-    runtime.last_chat_note = "no item link"
     return false
 end
 
@@ -2519,8 +2804,16 @@ function M.on_loot_seen(item_name, item_id, item_link, source, corpse_id)
         pcall(function() item_actions.remember_item_link(item_name, item_id, item_link) end)
     end
     remember_recent_replay("", links, tostring(source or "structured"))
+    local src = tostring(source or "structured")
     diag.time("announce.structured_loot", function()
-        try_process_item_links(links, tostring(source or "structured"), true, nil, {
+        -- Non-driver boxes must live-check and LOOT_NEED the beacon (same as
+        -- on_loot_link). Aggregating here with group_local stole peer reports.
+        local defer, _, holder = should_defer_chat_announce()
+        if link_hybrid_enabled() and (defer or state.bg == true) then
+            report_links_to_holder(links, holder, src, true)
+            return
+        end
+        try_process_item_links(links, src, true, nil, {
             group_local = true,
         })
     end)
@@ -2540,31 +2833,21 @@ function M.on_loot_need(msg)
     local from = trim(msg.from or msg.character or "")
     if from == "" or from:lower() == me_name():lower() then return end
     local item_name = trim(msg.item_name or msg.loot_item_name or "")
+    if catalog.clean_link_item_name then
+        item_name = catalog.clean_link_item_name(item_name) or item_name
+    end
     if item_name == "" then return end
-    local item_link = tostring(msg.item_link or "")
     local item_id = tonumber(msg.item_id) or 0
     if passive then
         forward_loot_need_to_local_ui(from, item_name, item_id)
         return
     end
     if not SharedSettings.bisAnnounceEnabled then return end
-    -- Only the announce driver aggregates; peer bgs must not eat fleet LOOT_NEED.
-    local defer_need = should_defer_chat_announce()
-    if defer_need or state.bg == true then return end
-    add_group_need(item_name, item_link, item_id, from, "actor-reply")
-    diag.count("announce.need_reports_received")
-    -- Stretch the hybrid coalesce window so late peer reports join one [TG].
-    if link_hybrid_enabled() then
-        local key = grouped_item_key(item_name, item_id, item_link)
-        local bucket = key and group_announces[key] or nil
-        if bucket then
-            local order_n = type(bucket.order) == "table" and #bucket.order or 0
-            arm_peer_report_hold(bucket, { short = order_n > 0 })
-            if order_n > 0 then
-                record_linked_item(bucket, "pending")
-            end
-        end
-    end
+    -- Peer LOOT_NEED must never open a group bucket or /g [TG]. That path made
+    -- plaintext Discord-only doubles when a bot UI woke and replayed links.
+    -- Live chat BiS-paint on the announce driver is the only emit path.
+    diag.count("announce.need_reports_ignored_no_emit")
+    runtime.last_chat_note = "loot need ignored (paint owns [TG])"
 end
 
 -- Peer side of the confirm round: another box is about to announce US as a
@@ -2771,27 +3054,25 @@ function M.warm(flush)
         announce_ready = false
         return false
     end
-    if flush then
-        -- Sync build: time-limited flush often leaves bg bots ready=false (15+ BiS lists).
-        catalog.ensure_announce_catalog(snap.class, { owner = snap.name, sync = true })
-        announce_ready = catalog_ready_for(snap)
-        needs_index_warm = not announce_ready
-        note_startup_progress(announce_ready, announce_ready and "warm_ready" or "warm_startup")
-        return announce_ready
-    end
-    catalog.ensure_announce_catalog(snap.class, { owner = snap.name })
-    -- Prefetch disk dcat into memory so the first loot link is a cheap lookup
-    -- (load cost lands here once, not on the chat frame).
+    -- BiS: loading the BiS catalog is enough to announce. Reverse index /
+    -- dcat / needs_index keep building in the background as optional speedups.
     pcall(function()
-        catalog.direct_catalog_prefetch(snap.class, snap.name, 250)
+        if catalog.warm_catalog then catalog.warm_catalog() end
     end)
-    announce_ready = catalog_ready_for(snap)
-    needs_index_warm = not announce_ready
-    -- Treat direct/dcat ready as "listener usable" for startup messaging when
-    -- the full catalog is still building — matches fail-open announce behavior.
-    local usable = announce_ready or direct_lookup_ready(snap)
-    note_startup_progress(usable, usable and "warm_ready" or "warm_startup")
-    return usable
+    announce_ready = ensure_link_catalog()
+    needs_index_warm = false
+    if flush and snap.class then
+        catalog.ensure_announce_catalog(snap.class, { owner = snap.name, sync = true })
+    else
+        pcall(function()
+            catalog.ensure_announce_catalog(snap.class, { owner = snap.name })
+        end)
+        pcall(function()
+            catalog.direct_catalog_prefetch(snap.class, snap.name, 250)
+        end)
+    end
+    note_startup_progress(announce_ready, announce_ready and "warm_ready" or "warm_startup")
+    return announce_ready
 end
 
 function M.count_announcing_lists()
@@ -2824,21 +3105,25 @@ function M.status()
         if s < 60 then return string.format("%ds ago", s) end
         return string.format("%dm ago", math.floor(s / 60))
     end
+    local link_ready = ensure_link_catalog()
     local full_ready = catalog_ready_for(snap)
     local direct_ready = direct_lookup_ready(snap)
-    local ready = full_ready or direct_ready
-    local index_label = passive and "passive viewer" or (ready and "ready" or (build.building and "building" or "warming"))
+    local ready = link_ready or full_ready or direct_ready
+    local index_label = "warming"
     if passive then
         index_label = "passive viewer"
+    elseif link_ready then
+        index_label = "ready (bis paint)"
     elseif full_ready and (build.entries or 0) > 0 then
         index_label = string.format("ready (%d items)", build.entries or 0)
-    elseif direct_ready and not full_ready then
+    elseif direct_ready then
         index_label = "ready (direct cache)"
     elseif build.building and (build.entries or 0) > 0 then
         index_label = string.format("building (%d items)", build.entries or 0)
     end
     local pending_group = 0
     for _, _ in pairs(group_announces or {}) do pending_group = pending_group + 1 end
+    local pending_link_scan = #link_scan_queue
     local roster_status = active_announce_roster_status(12)
     return {
         enabled = SharedSettings.bisAnnounceEnabled ~= false,
@@ -2847,11 +3132,13 @@ function M.status()
         index_label = index_label,
         passive = passive,
         registered = M.registered,
-        pending = #pending + #pending_items + #announce_outbox + pending_group + #targeted_checks,
+        pending = #pending + #pending_items + #announce_outbox + pending_group
+            + #targeted_checks + pending_link_scan,
         pending_chat = #pending + pending_item_chat,
         pending_actor = pending_actor,
         pending_outbox = #announce_outbox,
         pending_group = pending_group,
+        pending_link_scan = pending_link_scan,
         channel = cfg.bis_announce_command(),
         lists_on = lists_on,
         lists_total = lists_total,
@@ -2880,6 +3167,7 @@ function M.status()
         last_group_scan_snaps = runtime.last_group_scan_snaps or 0,
         last_group_scan_added = runtime.last_group_scan_added or 0,
         last_group_scan_pending = runtime.last_group_scan_pending or 0,
+        last_group_scan_detail = runtime.last_group_scan_detail or "",
         last_group_scan_age = age_str(runtime.last_group_scan_at),
         last_chat_sample = runtime.last_chat_sample or "",
         last_chat_links = runtime.last_chat_links or 0,
@@ -2948,167 +3236,52 @@ function M.tick()
             pending = {}
             pending_items = {}
             announce_outbox = {}
+            link_scan_queue = {}
             diag.count("announce.tick.disabled")
             return
         end
-        local work_pending = announce_work_pending()
-        local allow_peer_index = peer_index_allowed()
-        local index_enabled = CFG.needs_index_enabled ~= false
-        local index_needed = index_enabled and needs_index.needs_tick({ allow_peers = allow_peer_index }) or false
-        if announce_ready and not settings_reloaded and not needs_index_warm
-            and not work_pending and not index_needed then
-            diag.count("announce.tick.early_out")
-            return
-        end
-        diag.count("announce.tick.full_body")
-        if settings_reloaded then diag.count("announce.tick.full_reason.settings") end
-        if needs_index_warm then diag.count("announce.tick.full_reason.warm") end
-        if work_pending then diag.count("announce.tick.full_reason.pending") end
-        if index_needed then diag.count("announce.tick.full_reason.index") end
-        if not announce_ready then diag.count("announce.tick.full_reason.not_ready") end
-        local snap = gather_self_snapshot.cached()
-        if not snap then
-            snap = diag.time("announce.snapshot_lite", function()
-                return gather_self_snapshot.gather({ force = false, depth = "lite" })
-            end)
-        end
-        if not snap or not snap.class then
-            announce_ready = false
-            return
-        end
-        local was_ready = announce_ready and catalog_ready_for(snap)
 
-        if needs_index_warm then
-            needs_index_warm = false
-            catalog.ensure_announce_catalog(snap.class, { owner = snap.name })
-        end
-
-        -- Single per-frame work budget (P5): the background build steps below
-        -- (catalog warm + needs-index + item-index) draw down from ONE deadline
-        -- so their individually-small budgets can't sum into a visible frame
-        -- spike. Time-sensitive announce drains further down are NOT gated.
-        local frame_budget_ms
-        local oldest_queue_s = 0
-        if index_enabled then
-            local ok_age, age = pcall(function() return needs_index.oldest_queue_age_s() end)
-            if ok_age then oldest_queue_s = tonumber(age) or 0 end
-        end
-        local stale_s = tonumber(CFG.needs_index_stale_queue_s) or 60
-        local ramp_s = math.max(1, tonumber(CFG.needs_index_stale_ramp_s) or 60)
-        local index_stale = oldest_queue_s >= stale_s
-        -- Soft-ramp: lean -> stale budget over [stale_s, stale_s+ramp_s] instead
-        -- of jumping 6ms -> 30ms the moment the queue ages past stale_s.
-        local stale_t = 0
-        if index_stale then
-            stale_t = math.min(1, (oldest_queue_s - stale_s) / ramp_s)
-        end
-        local lean_frame = tonumber(CFG.frame_work_budget_lean_ms) or 6
-        local stale_frame = tonumber(CFG.frame_work_budget_stale_ms)
-            or tonumber(CFG.frame_work_budget_ms) or 30
-        if state.bg then
-            frame_budget_ms = tonumber(CFG.frame_work_budget_bg_ms) or 40
-        elseif index_stale then
-            frame_budget_ms = lean_frame + (stale_frame - lean_frame) * stale_t
-        elseif state.lean and state.lean() then
-            frame_budget_ms = lean_frame
-        else
-            frame_budget_ms = tonumber(CFG.frame_work_budget_ms) or 10
-        end
-        local frame_deadline = os.clock() + (frame_budget_ms / 1000)
-
-        -- Prefer getting direct/dcat into memory before (or instead of waiting
-        -- solely on) the full announce catalog — enables fail-open linked needs.
-        if type(catalog.direct_catalog_prefetch) == "function"
-            and not direct_lookup_ready(snap) and os.clock() < frame_deadline
-        then
-            local direct_budget = math.max(5, (frame_deadline - os.clock()) * 1000)
-            if state.bg then
-                direct_budget = math.min(direct_budget, tonumber(CFG.announce_catalog_budget_bg_ms) or 40)
-            elseif state.lean and state.lean() then
-                direct_budget = math.min(direct_budget, tonumber(CFG.announce_catalog_budget_lean_ms) or 5)
-            else
-                direct_budget = math.min(direct_budget, 80)
-            end
-            diag.time("announce.direct_prefetch", function()
-                catalog.direct_catalog_prefetch(snap.class, snap.name, direct_budget)
-            end)
-        end
-        if not catalog_ready_for(snap) and os.clock() < frame_deadline then
-            local budget, max_steps
-            if state.bg and not announce_ready then
-                budget = tonumber(CFG.announce_catalog_budget_bg_ms) or 40
-                max_steps = tonumber(CFG.announce_catalog_steps_bg) or 8
-            elseif state.lean and state.lean() then
-                budget = tonumber(CFG.announce_catalog_budget_lean_ms) or 5
-                max_steps = tonumber(CFG.announce_catalog_steps_lean) or 1
-            else
-                budget = tonumber(CFG.announce_catalog_budget_ms) or 45
-                max_steps = tonumber(CFG.announce_catalog_steps_ui) or 1
-            end
-            budget = math.min(budget, math.max(5, (frame_deadline - os.clock()) * 1000))
-            diag.time("announce.catalog_tick", function()
-                catalog.tick_announce_catalog(budget, max_steps)
-            end)
-        end
-        announce_ready = catalog_ready_for(snap)
-        local usable = announce_ready or direct_lookup_ready(snap)
-        -- Decoupled from announce_ready: the index does not depend on the
-        -- static catalog, and gating on it starved index warm-up whenever the
-        -- static build was slow (Rydell 17:05: 76 index ticks in 626 loops).
-        if index_enabled and index_needed then
-            local gear_settling = false
-            pcall(function()
-                local iw = require('inventory_watch')
-                gear_settling = iw and iw.inventory_settling and iw.inventory_settling() == true
-            end)
-            if gear_settling then
-                -- Keep last_store_content_version untouched so the rebuild runs
-                -- after settle. Announce paths still live-confirm ownership.
-                diag.count("needs_index.deferred_gear_settle")
-            else
-                local idx_budget
-                if state.bg then
-                    idx_budget = tonumber(CFG.needs_index_budget_bg_ms) or 25
-                elseif index_stale then
-                    local lean_idx = tonumber(CFG.needs_index_budget_lean_ms)
-                        or tonumber(CFG.needs_index_budget_ms) or 4
-                    local stale_idx = tonumber(CFG.needs_index_budget_stale_ms) or 20
-                    idx_budget = lean_idx + (stale_idx - lean_idx) * stale_t
-                elseif state.lean and state.lean() then
-                    idx_budget = tonumber(CFG.needs_index_budget_lean_ms) or tonumber(CFG.needs_index_budget_ms) or 4
-                else
-                    idx_budget = tonumber(CFG.needs_index_budget_ms) or 4
-                end
-                -- Draw down from the shared frame budget: subtract whatever the
-                -- catalog warm already spent, and skip this frame if the budget is
-                -- exhausted (the index build is resumable next tick).
-                local remaining_ms = (frame_deadline - os.clock()) * 1000
-                if remaining_ms < idx_budget then idx_budget = remaining_ms end
-                if idx_budget >= 1 then
-                    needs_index.tick(idx_budget, { allow_peers = allow_peer_index })
-                end
-            end
-        end
-        -- After budgeted work: console/replay I/O must not steal the frame slice.
-        if usable and not was_ready then
+        -- Ready = BiS catalog resident. No reverse-catalog / dcat / needs_index gate.
+        local was_ready = announce_ready
+        announce_ready = ensure_link_catalog() == true
+        if announce_ready and not was_ready then
             note_startup_progress(true, "ready")
         end
-        -- Fleet item-index ticks in init.lua every loop (not here). Leaving it
-        -- under announce early-out left Search/Stats empty once announce_ready.
+        needs_index_warm = false
+
+        -- Time-sensitive: finish any leftover link scans / buckets / outbox.
+        diag.time("announce.link_scan", function()
+            local deadline = os.clock() + 0.05
+            while #link_scan_queue > 0 and os.clock() < deadline do
+                drain_link_scan_queue()
+            end
+        end)
+        diag.time("announce.group_announces", function()
+            drain_group_announces()
+        end)
+        diag.time("announce.targeted_checks", function()
+            drain_targeted_checks()
+        end)
+        diag.time("announce.outbox_send", function()
+            drain_announce_outbox()
+        end)
         diag.time("announce.pending", function()
             drain_pending(CFG.announce_pending_budget_ms, CFG.announce_pending_items_per_tick)
         end)
-        diag.time("announce.outbox", function()
-            diag.time("announce.targeted_checks", function()
-                drain_targeted_checks()
-            end)
-            diag.time("announce.group_announces", function()
-                drain_group_announces()
-            end)
-            diag.time("announce.outbox_send", function()
-                drain_announce_outbox()
-            end)
-        end)
+
+        -- needs_index is Search/Stats enrichment only; never blocks [TG].
+        if not announce_work_pending() and CFG.needs_index_enabled ~= false then
+            local allow_peers = peer_index_allowed()
+            if needs_index.needs_tick({ allow_peers = allow_peers }) then
+                local budget = (state.lean and state.lean())
+                    and (tonumber(CFG.needs_index_budget_lean_ms) or 2)
+                    or (tonumber(CFG.needs_index_budget_ms) or 4)
+                pcall(function()
+                    needs_index.tick(budget, { allow_peers = allow_peers })
+                end)
+            end
+        end
+        if settings_reloaded then diag.count("announce.tick.settings_reload") end
     end)
 end
 
@@ -3129,20 +3302,40 @@ function M.loop_delay_ms()
     return state.show and 25 or 50
 end
 
+local function is_local_eval_safe(snap)
+    if type(snap) ~= "table" then return false end
+    local mine = tostring(me_name() or ""):lower()
+    return mine ~= "" and tostring(snap.name or ""):lower() == mine
+end
+
 local function diagnose_one(snap, ready, idx, item_name, item_id)
     item_name = tostring(item_name or "")
     item_id = tonumber(item_id) or 0
     if item_name == "" then return false end
     local t0 = os.clock()
-    local need = ready and catalog.check_announce_need(snap, item_name, item_id) or nil
+    local need = nil
+    if catalog.check_announce_need_for_link then
+        need = catalog.check_announce_need_for_link(snap, item_name, item_id, {
+            skip_live = not is_local_eval_safe(snap),
+        })
+    elseif ready then
+        need = catalog.check_announce_need(snap, item_name, item_id)
+    end
     local lookup_ms = (os.clock() - t0) * 1000
-    print(string.format("[TurboGear] %s | lookup %.1fms", item_name, lookup_ms))
+    print(string.format("[TurboGear] %s | class=%s | lookup %.1fms",
+        item_name, tostring(snap and snap.class or "?"), lookup_ms))
     if need then
         print(string.format("[TurboGear]   WOULD announce: [TG] - %s - %s",
-            need.item_name or item_name, me_name()))
+            need.item_name or item_name, tostring(snap and snap.name or me_name())))
         return true
     end
-    local reason = explain_skip(snap, item_name, item_id, ready)
+    local reason = "unknown"
+    if catalog.explain_announce_skip_for_link then
+        local ok, why = pcall(catalog.explain_announce_skip_for_link, snap, item_name, item_id, { skip_live = true })
+        if ok then reason = tostring(why or "?") end
+    else
+        reason = explain_skip(snap, item_name, item_id, ready)
+    end
     print(string.format("[TurboGear]   would NOT announce: %s", reason))
     return false
 end
@@ -3190,66 +3383,42 @@ function M.diagnose_group(item_name, item_id)
         return false, "Usage: /tgear announcetest group \"Item Name\" [itemId]"
     end
 
+    ensure_link_catalog()
     local mode = state.bg and "bg" or "ui"
-    local allow_peers = peer_index_allowed()
     local roster_status = active_announce_roster_status(24)
-    print(string.format("[TurboGear] group announcetest on %s | mode=%s | enabled=%s | channel=%s",
-        me_name(), mode, tostring(SharedSettings.bisAnnounceEnabled ~= false), cfg.bis_announce_command()))
+    print(string.format("[TurboGear] group announcetest on %s | mode=%s | enabled=%s | channel=%s | ver=%s",
+        me_name(), mode, tostring(SharedSettings.bisAnnounceEnabled ~= false),
+        cfg.bis_announce_command(), tostring(CFG.version or "?")))
     print(string.format("[TurboGear] announce roster: scope=%s | viewing=%s | chars=%d%s%s",
         tostring(roster_status.scope or "?"),
         tostring(roster_status.view or "?"),
         tonumber(roster_status.count) or 0,
         tostring(roster_status.names or "") ~= "" and (" | " .. tostring(roster_status.names or "")) or "",
         roster_status.truncated and ", ..." or ""))
-    if CFG.needs_index_enabled == false then
-        print("[TurboGear] needs index is disabled; real linked announces will use bounded direct checks instead")
-        return false
-    end
-    if not allow_peers then
-        print("[TurboGear] peer needs index is not building in this mode; open the TurboGear UI driver to test grouped announces")
-    end
+    print("[TurboGear] using BiS paint path (same as linked-needs announce) — will /g [TG] if NEED")
 
-    local deadline = os.clock() + 2.0
-    while needs_index.needs_tick({ allow_peers = allow_peers }) and os.clock() < deadline do
-        needs_index.tick(25, { allow_peers = allow_peers })
-        if needs_index.group_ready and needs_index.group_ready() then break end
-        mq.delay(10)
+    -- Same emit path as a real group link (proves /g [TG], not just NEED paint).
+    local n = emit_bis_paint_group_announce({
+        name = item_name,
+        id = item_id,
+        source = "announcetest",
+        manual = true,
+    })
+    if tostring(runtime.last_group_scan_detail or "") ~= "" then
+        print(string.format("[TurboGear]   scan detail: %s",
+            tostring(runtime.last_group_scan_detail):sub(1, 160)))
     end
-
-    local st = needs_index.status and needs_index.status() or {}
-    local group_ready = st.group_ready == true
-    print(string.format("[TurboGear] needs index: local=%s group=%s chars=%d items=%d queued=%d failures=%d",
-        tostring(st.local_ready or st.ready or false),
-        tostring(group_ready),
-        tonumber(st.chars) or 0,
-        tonumber(st.items) or 0,
-        tonumber(st.queued) or 0,
-        tonumber(st.failures) or 0))
-
-    local needers = needs_index.needers_for(item_name, item_id)
-    local names = {}
-    for _, need in ipairs(needers or {}) do
-        names[#names + 1] = tostring(need.character or "?")
-    end
-    if not group_ready then
-        print(string.format("[TurboGear] PARTIAL group test: needs index is still warming; built chars=%d queued=%d",
-            tonumber(st.chars) or 0,
-            tonumber(st.queued) or 0))
-        if #names > 0 then
-            print(string.format("[TurboGear] partial needers so far: %s", table.concat(names, " | ")))
-        else
-            print("[TurboGear] partial needers so far: none")
-        end
-        print("[TurboGear] Retry after /tgear status shows needs index group=true or queued=0.")
-        return false
-    end
-    if #names > 0 then
-        print(string.format("[TurboGear] WOULD group announce: [TG] - %s - %s",
-            item_name, table.concat(names, " | ")))
+    if n > 0 then
+        print(string.format("[TurboGear] SENT group announce for %s (%d needers)", item_name, n))
         return true
     end
-    print(string.format("[TurboGear] would NOT group announce: no visible announce-roster needers for %s",
-        item_name))
+    if tostring(runtime.last_skip_reason or "") == "no needers" then
+        print(string.format("[TurboGear] would NOT group announce: no BiS-paint needers for %s",
+            item_name))
+    else
+        print(string.format("[TurboGear] group announce not sent for %s - %s",
+            item_name, tostring(runtime.last_skip_reason or "unknown")))
+    end
     return false
 end
 
@@ -3315,6 +3484,7 @@ function M.set_passive(value)
         pending_items = {}
         announce_outbox = {}
         group_announces = {}
+        link_scan_queue = {}
         next_announce_send_at = 0
     else
         M.register()

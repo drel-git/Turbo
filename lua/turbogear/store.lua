@@ -103,35 +103,76 @@ end
 
 -- Viewer-side fill: peer rows often land as discover stubs (class="") while the
 -- toon is in group/zone. BiS needs a real class; pull it from Group/Spawn TLOs.
+local function class_from_tlo(obj)
+    if not obj then return nil end
+    local c = nil
+    pcall(function()
+        if obj.Class and obj.Class.Name then c = obj.Class.Name() end
+        if (not c or c == "" or c == "?") and obj.Class and obj.Class.ShortName then
+            c = obj.Class.ShortName()
+        end
+        if (not c or c == "" or c == "?") and obj.Class then c = obj.Class() end
+    end)
+    if cfg.canonical_class then return cfg.canonical_class(c) end
+    return known_class(c)
+end
+
+local function clean_pc_name(name)
+    return tostring(name or ""):gsub("^%s+", ""):gsub("%s+$", ""):lower()
+end
+
 local function class_from_world(name)
     name = tostring(name or ""):gsub("^%s+", ""):gsub("%s+$", "")
     if name == "" then return nil end
+    local want = clean_pc_name(name)
     local c = nil
+    -- Name lookup is flaky across MQ builds; also walk group by index.
     pcall(function()
         local m = mq.TLO.Group and mq.TLO.Group.Member and mq.TLO.Group.Member(name)
-        if m and m() then
-            if m.Class and m.Class.Name then c = m.Class.Name() end
-            if (not c or c == "" or c == "?") and m.Class then c = m.Class() end
-            if (not c or c == "" or c == "?") and m.Class and m.Class.ShortName then c = m.Class.ShortName() end
-        end
+        c = class_from_tlo(m and m() and m or nil)
     end)
-    if known_class(c) then return known_class(c) end
+    if c then return c end
+    do
+        local n = 0
+        pcall(function()
+            n = mq.TLO.Group and mq.TLO.Group.Members and tonumber(mq.TLO.Group.Members()) or 0
+        end)
+        for i = 0, math.max(0, n) do
+            local m = nil
+            pcall(function() m = mq.TLO.Group.Member(i) end)
+            if m then
+                local present = false
+                pcall(function() present = m() and true or false end)
+                if present then
+                    local mname = ""
+                    pcall(function() mname = tostring(m.CleanName and m.CleanName() or m.Name() or "") end)
+                    if clean_pc_name(mname) == want then
+                        c = class_from_tlo(m)
+                        if c then break end
+                    end
+                end
+            end
+        end
+    end
+    if c then return c end
     pcall(function()
         local s = mq.TLO.Spawn("pc =" .. name)
         if not (s and s()) then s = mq.TLO.Spawn(name) end
-        if s and s() then
-            if s.Class and s.Class.Name then c = s.Class.Name() end
-            if (not c or c == "" or c == "?") and s.Class then c = s.Class() end
-            if (not c or c == "" or c == "?") and s.Class and s.Class.ShortName then c = s.Class.ShortName() end
-        end
+        if s and s() then c = class_from_tlo(s) end
     end)
-    return known_class(c)
+    return c
 end
 
 function Store.enrich_class(snap)
     if type(snap) ~= "table" then return snap end
-    if known_class(snap.class) then
-        snap.class = known_class(snap.class)
+    local have = cfg.canonical_class and cfg.canonical_class(snap.class) or known_class(snap.class)
+    if have then
+        if snap.class ~= have then
+            snap.class = have
+            Store.version = (Store.version or 0) + 1
+        else
+            snap.class = have
+        end
         return snap
     end
     local c = class_from_world(snap.name)

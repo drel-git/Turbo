@@ -12,13 +12,19 @@ package.preload['mq'] = function()
         },
         ExtractLinks = function() return {} end,
         ParseItemLink = function(link)
-            if tostring(link or ""):find("RAWNOXIOUS", 1, true) then
+            local s = tostring(link or "")
+            if s:find("RAWNOXIOUS", 1, true) then
                 return { itemName = "Noxious Bloom of Corporeal Calamity", itemID = 777 }
+            end
+            -- Corrupt hex → wrong ParseItemLink id/name; visible name must win.
+            if s:find("006BE9", 1, true) then
+                return { itemName = "Crystal Silk Robe", itemID = 70714 }
             end
             return nil
         end,
         cmd = function() end,
         cmdf = function() end,
+        delay = function() end,
     }
 end
 
@@ -185,6 +191,63 @@ check(runtime.last_chat_note == "no item link", 'typed name notes no item link')
 local typed_say = try_chat("You say, 'Exalted Glowing Bath Token'", false)
 check(typed_say == false, 'typed BiS name in say does not announce')
 check(runtime.last_chat_note == "no item link", 'say typed name notes no item link')
+
+-- Peer plain text (and dirty keepLinks junk without a parseable item) must not
+-- fall back to whole-line BiS name scanning.
+text_needs_calls = 0
+local peer_plain = try_chat(
+    "Creatos tells the group, 'Infused Flux of Glamour'",
+    false,
+    { other_event = true })
+check(peer_plain == false, 'peer typed BiS name does not announce')
+check(text_needs_calls == 0, 'peer typed name does not run text_needs')
+check(runtime.last_chat_note == "no item link", 'peer typed name notes no item link')
+
+-- Hex dump + visible name is a real MQ self/peer link shape (ExtractLinks empty).
+local hex_link = parse(
+    "You tell your party, ' 006BE9000000000000000000000000000000000000000000000CECBB12FHideous Hex of Noxious Demise '")
+check(#hex_link == 1, 'hex self-link payload parses as one item')
+check(hex_link[1] and hex_link[1].name == "Hideous Hex of Noxious Demise",
+    'hex self-link recovers visible item name')
+check(hex_link[1] and (tonumber(hex_link[1].id) or 0) == 0,
+    'mismatched ParseItemLink id is discarded for hex self-links')
+
+local hex_quote = parse(
+    "You tell your party, '008CCD00000000000000000000000000000000000000000000000AC7F59C9Noxious Bloom of Ebbing Exertion\">")
+check(#hex_quote == 1, 'hex self-link with trailing quote-angle parses')
+check(hex_quote[1] and hex_quote[1].name == "Noxious Bloom of Ebbing Exertion",
+    'trailing "> stripped from hex self-link name')
+
+-- Contaminated name shapes that previously painted as no-row while MQ pretty-printed the link.
+local framed = parse("You tell your party, '\x12ABCDEF0123456789ABCDEF0123456789ABCDEF01Desolate Black Sapphire\x12'>")
+-- Frame-only lines depend on ParseItemLink; without mq stubs just ensure no crash / no junk name.
+if #framed > 0 then
+    check(framed[1].name == "Desolate Black Sapphire"
+        or not tostring(framed[1].name or ""):find("\x12", 1, true),
+        'framed self-link name has no raw \\x12 bytes')
+end
+
+local announce_hex = parse(
+    "You tell your party, '[ANNOUNCE] 010CEA00000000000000000000000000000000000000000000C4263BE8Divine Crystal Ring '")
+check(#announce_hex == 1, 'ANNOUNCE hex+name parses without (ID:)')
+check(announce_hex[1] and announce_hex[1].name == "Divine Crystal Ring",
+    'ANNOUNCE hex+name recovers item name')
+
+-- Multi-link hex dumps jammed into one party line.
+local multi = parse(
+    "You tell your party, '0098A500000000000000000000000000000000000000000000008F17CD86Corrosive Slime of Suffering  0098A4000000000000000000000000000000000000000000000BB963495Frigid Slime of Suffering '")
+check(#multi >= 2, 'multi hex self-links parse as multiple items')
+local multi_names = {}
+for _, it in ipairs(multi) do multi_names[it.name] = true end
+check(multi_names["Corrosive Slime of Suffering"] == true, 'multi hex recovers Corrosive Slime')
+check(multi_names["Frigid Slime of Suffering"] == true, 'multi hex recovers Frigid Slime')
+
+-- Typed BiS name with no hex / frames still ignored.
+local peer_dirty_plain = try_chat(
+    "Creatos tells the group, 'Infused Flux of Glamour'",
+    false,
+    { other_event = true })
+check(peer_dirty_plain == false, 'peer typed name without hex still ignored')
 
 -- Control-tag lines still count as parsed "links" (TurboLoot ANNOUNCE path).
 local announce_links = parse("Ghee tells the group, '[ANNOUNCE] Imbued Feather (ID: 209)'")

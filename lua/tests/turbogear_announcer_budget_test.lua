@@ -1,19 +1,14 @@
 -- Run from repo root:  luajit lua/tests/turbogear_announcer_budget_test.lua
--- Verifies P5: announcer.tick enforces a single per-frame work budget that the
--- needs-index build draws down from, and skips the build when the budget is
--- exhausted. Deps are stubbed; needs_index.tick captures the budget it receives.
+-- 1.2.131+: announce tick is BiS-thin. needs_index runs only when announce
+-- queues are idle, at its own small budget (never Search/Stats enrichment).
 package.path = 'lua/turbogear/?.lua;lua/turbogear/?/init.lua;' .. package.path
 
 local CFG = {
-    frame_work_budget_ms = 2,          -- deliberately < the 4ms needs-index budget
-    frame_work_budget_lean_ms = 6,
-    frame_work_budget_bg_ms = 40,
     needs_index_budget_ms = 4,
+    needs_index_budget_lean_ms = 2,
     needs_index_enabled = true,
     announce_pending_budget_ms = 4,
     announce_pending_items_per_tick = 1,
-    announce_catalog_budget_ms = 5,
-    announce_catalog_steps_ui = 1,
 }
 package.preload['config'] = function()
     return { CFG = CFG, Settings = {}, SharedSettings = { bisAnnounceEnabled = true },
@@ -26,14 +21,17 @@ package.preload['needs_index'] = function()
     return {
         char_count = function() return 0 end, ready = function() return false end,
         needers_for = function() return {} end, text_needs = function() return {} end,
-        needs_tick = function() return true end,             -- force index_needed
-        tick = function(budget) captured = budget end,       -- capture drawn-down budget
+        needs_tick = function() return true end,
+        tick = function(budget) captured = budget end,
         status = function() return {} end,
+        oldest_queue_age_s = function() return 0 end,
     }
 end
 package.preload['bis_catalog'] = function()
     return {
-        announce_catalog_ready = function() return true end, -- ready -> catalog warm skipped
+        catalog_loaded = function() return true end,
+        warm_catalog = function() return true end,
+        announce_catalog_ready = function() return true end,
         ensure_announce_catalog = function() end,
         tick_announce_catalog = function() end,
         direct_catalog_if_ready = function() return { by_name = {} } end,
@@ -41,6 +39,7 @@ package.preload['bis_catalog'] = function()
         direct_build_progress = function() return nil end,
         announce_list_specs = function() return {} end,
         catalog_build_state = function() return {} end,
+        clean_link_item_name = function(n) return n end,
     }
 end
 package.preload['snapshot'] = function()
@@ -78,7 +77,7 @@ package.preload['mq'] = function() return {
         EverQuest = { GameState = function() return "INGAME" end },
         Zone = { ShortName = function() return "z" end } },
     ExtractLinks = function() return {} end, ParseItemLink = function() return nil end,
-    cmd = function() end, cmdf = function() end } end
+    cmd = function() end, cmdf = function() end, delay = function() end } end
 
 local A = require('announcer')
 A.set_passive(false)
@@ -86,19 +85,17 @@ A.set_passive(false)
 local pass, fail = 0, 0
 local function check(c, m) if c then pass = pass + 1 else fail = fail + 1; print("  FAIL: " .. tostring(m)) end end
 
--- frame budget (2ms) is below the needs-index default (4ms): the budget passed
--- to needs_index.tick must be clamped down to the frame budget.
+-- Idle announce queues: needs_index enrichment gets its configured budget.
 captured = nil
 A.tick()
-check(type(captured) == "number", "needs_index.tick was called")
-check(captured and captured > 0 and captured <= 2.5, "budget clamped to ~frame budget (got " .. tostring(captured) .. ")")
-check(captured and captured < 4, "budget drawn down below the unclamped 4ms")
+check(type(captured) == "number", "needs_index.tick was called when idle")
+check(captured == 4, "idle needs_index budget is needs_index_budget_ms (got " .. tostring(captured) .. ")")
 
--- with the frame budget exhausted, the index build is skipped this tick
-CFG.frame_work_budget_ms = 0
+-- Disable enrichment: announce tick must still run without calling needs_index.
+CFG.needs_index_enabled = false
 captured = "SKIP"
 A.tick()
-check(captured == "SKIP", "needs_index build skipped when frame budget exhausted")
+check(captured == "SKIP", "needs_index skipped when disabled")
 
-print(string.format("announcer frame budget (P5): %d passed, %d failed", pass, fail))
+print(string.format("announcer thin tick (1.2.137): %d passed, %d failed", pass, fail))
 os.exit(fail == 0 and 0 or 1)

@@ -83,6 +83,18 @@ local function fungal_aliases(name)
         return aliases
     end
 
+    -- Loot links are often the Slime; BiS rows are Fungus tiers.
+    elem = n:match("^%s*(%S+)%s+Slime of Suffering%s*$")
+        or n:match("^%s*Base (%S+)%s+Slime of Suffering")
+    if elem then
+        aliases[#aliases+1] = elem .. " Slime of Suffering"
+        for i = 1, 4 do
+            local suffix = i == 4 and "Final" or ("Tier " .. ({ "I", "II", "III" })[i])
+            aliases[#aliases+1] = elem .. " Fungus of Suffering - " .. suffix
+        end
+        return aliases
+    end
+
     local bloom = n:match("^%s*Fungal Bloom of (.-)%s*%-")
         or n:match("^%s*Fungal Bloom of (.-)%s*$")
     if bloom and bloom ~= "" then
@@ -536,7 +548,7 @@ local function names_match_owned(a, b)
     return ca ~= "" and ca == cb
 end
 
--- LazBiS-style live ownership check (FindItem + FindItemBank).
+-- BiS-style live ownership check (FindItem + FindItemBank).
 -- BOUNDED by design: this confirm exists to catch an item looted SECONDS ago
 -- (snapshot lag) - and that item is by definition the linked/looted one, so
 -- checking the entry ids + the linked name + the canonical entry name is

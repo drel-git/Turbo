@@ -182,7 +182,7 @@ end
 
 -- True when a BiS/snap status means the character owns the entry (equipped,
 -- bags, bank, known spell, etc.). Used to drop stale needers so Linked and
--- BiS paint agree (LazBiS: one ownership source for grid + linked list).
+-- BiS paint agree (one ownership source for grid + linked list).
 function core.status_is_owned(status)
     return status ~= nil and status ~= "missing"
 end

@@ -1,5 +1,5 @@
 -- TurboGear/bis_search.lua
--- LazBiS-shaped peer BiS ownership: each box FindItems the active catalog list
+-- BiS-shaped peer ownership: each box FindItems the active catalog list
 -- (not a full bag walk) and returns a tiny slot map over actors. The UI host
 -- persists those maps so offline columns can warm without rich snapshots.
 
@@ -224,7 +224,7 @@ local function search_entry(entry)
     return { status = "missing", location = "", name = tostring(entry.item or ""), count = 0 }
 end
 
---- Run LazBiS-style FindItem scan for this box + list_id.
+--- Run BiS-style FindItem scan for this box + list_id.
 function M.search_local(list_id)
     list_id = trim(list_id)
     if list_id == "" then return nil end

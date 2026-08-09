@@ -125,18 +125,22 @@ check(R.parse_tg_line("[TG] - Solo Item") == "Solo Item", 'tg parse: payload wit
 
 -- confirmable_needers: cache-derived peer needers only (skip self + live sources)
 do
-    local order = { "Gears", "Hez", "Captaain", "Drel", "Vyth" }
+    local order = { "Gears", "Hez", "Captaain", "Drel", "Vyth", "Ana" }
     local sources = {
         gears = "local-live", hez = "index", captaain = "actor-reply",
-        drel = "targeted", vyth = "local-live",
+        drel = "targeted", vyth = "local-live", ana = "direct-cache",
     }
     local out = R.confirmable_needers(order, sources, "Gears")
     check(#out == 2 and out[1] == "Hez" and out[2] == "Drel",
-        'confirm: skips self, actor-reply, and local-live needers')
+        'confirm: skips self, actor-reply, local-live, and direct-cache needers')
     out = R.confirmable_needers(order, nil, "Gears")
-    check(#out == 4, 'confirm: nil sources treats all remote needers as cache-derived')
+    check(#out == 5, 'confirm: nil sources treats all remote needers as cache-derived')
     check(#R.confirmable_needers(nil, sources, "Gears") == 0, 'confirm: nil order safe')
     check(#R.confirmable_needers({ "Gears" }, {}, "gears") == 0, 'confirm: self match is case-insensitive')
+    check(#R.confirmable_needers({ "Ana" }, { ana = "store-snap" }, "Gears") == 0,
+        'confirm: store-snap needers skip confirm round')
+    check(#R.confirmable_needers({ "Ana" }, { ana = "bis-paint" }, "Gears") == 0,
+        'confirm: bis-paint needers skip confirm round')
 end
 
 -- remove_needer: drops one character from bucket needer tables
