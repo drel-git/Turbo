@@ -311,7 +311,7 @@ local scriptName = 'Turbo'
 -- Suite version, parsed from lua/turbogear/CHANGELOG (the same file TurboGear and
 -- TurboPatcher read), so every surface shows one number. The literal is only a
 -- fallback for broken installs; per-file @version tags remain maintenance metadata.
-local TURBO_VERSION = '1.2.142',
+local TURBO_VERSION = '1.2.143'
 do
     local f = io.open((mq.luaDir or 'lua') .. '/turbogear/CHANGELOG', 'r')
     if f then
