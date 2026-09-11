@@ -35,7 +35,7 @@ M.CFG = {
     script_name  = 'TurboGear',    -- display/settings/cache name
     lua_name     = 'turbogear',     -- folder/module name used by /lua run and /lua stop
     bg_lua_name  = 'turbogear_bg',  -- wrapper responder name; leaves /lua run turbogear free for UI
-    version      = '1.2.141',
+    version      = '1.2.142',
     mailbox      = 'turbogear',     -- shared actor mailbox name across all boxes
     proto        = 1,              -- snapshot protocol version (guards mismatched boxes)
     frame_round  = 5.0,
@@ -172,7 +172,7 @@ M.CFG = {
     needs_index_budget_stale_ms = 20, -- lean/UI boost when oldest queued rebuild exceeds stale age
     needs_index_stale_queue_s = 60,   -- oldestQueue age that starts the stale budget ramp
     needs_index_stale_ramp_s = 60,    -- seconds after stale_queue_s to reach full stale frame budget
-    lua_turbo_recommended = 1000, -- MQ2Lua instruction budget recommended for large TurboGear fleets
+    lua_turbo_recommended = 1000, -- optional MQ2Lua tuning target for delayed large-fleet linked-needs warmup
     needs_eval_ops_per_slice = 4,    -- match + commit keys per needs eval slice (clock is quantized)
     needs_list_steps_per_slice = 1,  -- one catalog list/slot step per tick_direct_build call
     -- Cooperative rich inventory: one make_item(full) per slice, then yield.
@@ -1218,7 +1218,7 @@ function M.lua_turbo_status()
         warning = value < rec,
         value = value,
         recommended = rec,
-        reason = value < rec and "below recommended" or "ok",
+        reason = value < rec and "optional tuning available" or "ok",
     }
 end
 

@@ -47,7 +47,6 @@ M._last_main_w = 900
 local last_main_tab = nil
 local last_view_key = nil
 local last_enter_view_key = nil
-local lua_turbo_banner_dismissed = false
 
 local function request_item_index(reason)
     pcall(function()
@@ -317,63 +316,6 @@ local function draw_global_search_bar()
     end
     ImGui.SameLine()
     if theme.sync_button("Sync Now##tg_global", sync_w, 0) then sync_full() end
-end
-
-local function draw_lua_turbo_banner()
-    if lua_turbo_banner_dismissed then return end
-    local st = cfg.lua_turbo_status and cfg.lua_turbo_status() or nil
-    if not (st and st.known and st.warning) then return end
-
-    local value = tonumber(st.value) or 0
-    local rec = tonumber(st.recommended) or 1000
-    local msg = string.format(
-        "Performance setup: MQ2Lua Turbo Num is %d. Recommended: %d for faster linked-needs warmup.",
-        value, rec)
-
-    if ImGui.BeginTable then
-        local flags = (ImGuiTableFlags.NoSavedSettings or 0) + (ImGuiTableFlags.NoPadOuterX or 0)
-        if ImGui.BeginTable("##tg_lua_turbo_banner", 3, flags) then
-            ImGui.TableSetupColumn("Message", ImGuiTableColumnFlags.WidthStretch, 1.0)
-            ImGui.TableSetupColumn("Set", ImGuiTableColumnFlags.WidthFixed, 112.0)
-            ImGui.TableSetupColumn("Later", ImGuiTableColumnFlags.WidthFixed, 64.0)
-            ImGui.TableNextRow()
-
-            ImGui.TableSetColumnIndex(0)
-            col_text(Theme.amber, msg)
-
-            ImGui.TableSetColumnIndex(1)
-            if theme.themed_button("Set to " .. tostring(rec) .. "##tg_lua_turbo_banner_set", Theme.purple, 104, 0) then
-                local applied = cfg.set_recommended_lua_turbo and cfg.set_recommended_lua_turbo()
-                state.sync_hint = "Lua Turbo Num set command sent: " .. tostring(applied or rec)
-                state.sync_hint_until = os.clock() + 4.0
-            end
-            if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
-                ImGui.SetTooltip("Runs /lua conf turboNum " .. tostring(rec) .. ". If the banner does not clear, reload MQ2Lua or relog.")
-            end
-
-            ImGui.TableSetColumnIndex(2)
-            if theme.themed_button("Later##tg_lua_turbo_banner_later", Theme.steel, 58, 0) then
-                lua_turbo_banner_dismissed = true
-            end
-            if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
-                ImGui.SetTooltip("Hide this reminder for this TurboGear session.")
-            end
-            ImGui.EndTable()
-        end
-        return
-    end
-
-    col_text(Theme.amber, msg)
-    ImGui.SameLine()
-    if theme.themed_button("Set to " .. tostring(rec) .. "##tg_lua_turbo_banner_set", Theme.purple) then
-        local applied = cfg.set_recommended_lua_turbo and cfg.set_recommended_lua_turbo()
-        state.sync_hint = "Lua Turbo Num set command sent: " .. tostring(applied or rec)
-        state.sync_hint_until = os.clock() + 4.0
-    end
-    ImGui.SameLine()
-    if theme.themed_button("Later##tg_lua_turbo_banner_later", Theme.steel) then
-        lua_turbo_banner_dismissed = true
-    end
 end
 
 -- Sortable search results: click Owner/Item/Qty/Location headers to sort.
@@ -1160,7 +1102,6 @@ local function draw_main_body()
         if item_actions.draw_pending_modal then item_actions.draw_pending_modal() end
         if item_actions.draw_in_flight then item_actions.draw_in_flight() end
         diag.time("ui.global_search.bar", draw_global_search_bar)
-        draw_lua_turbo_banner()
         ImGui.Separator()
 
         local searching = global_search_active()

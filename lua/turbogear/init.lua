@@ -188,7 +188,7 @@ local function status_lines(max_peers, colorize)
         local lua_turbo = cfg.lua_turbo_status and cfg.lua_turbo_status() or nil
         if lua_turbo and lua_turbo.known then
             if lua_turbo.warning then
-                lines[#lines + 1] = string.format("[TurboGear] MQ2Lua Turbo Num: %d WARNING recommended=%d fix=/lua conf turboNum %d",
+                lines[#lines + 1] = string.format("[TurboGear] MQ2Lua Turbo Num: %d (optional: try %d if linked-needs warmup is delayed; /lua conf turboNum %d)",
                     tonumber(lua_turbo.value) or 0, tonumber(lua_turbo.recommended) or 1000,
                     tonumber(lua_turbo.recommended) or 1000)
             else
@@ -1583,12 +1583,6 @@ do
         end)
         if not catalog_loaded then
             print("\at[TurboGear]\ax \ayNOTICE:\ax BiS catalog not loaded yet - linked [TG] starts once catalog is resident")
-        end
-        local lua_turbo = cfg.lua_turbo_status and cfg.lua_turbo_status() or nil
-        if lua_turbo and lua_turbo.warning then
-            print(string.format("\at[TurboGear]\ax \ayNOTICE:\ax MQ2Lua Turbo Num is %d; %d is recommended for faster linked-needs warmup. Open Setup or run \ag/lua conf turboNum %d\ax.",
-                tonumber(lua_turbo.value) or 0, tonumber(lua_turbo.recommended) or 1000,
-                tonumber(lua_turbo.recommended) or 1000))
         end
     end
 end

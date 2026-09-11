@@ -1,3 +1,7 @@
+1.2.142
+TurboGear v1.2.142 Hotfix
+- Fixed UI bug in TurboMobs for saved settings and changed wording regarding TurboNum.
+
 1.2.141
 TurboGear v1.2.141 Hotfix
 - Added regression coverage for Sebilis mold ownership matching.

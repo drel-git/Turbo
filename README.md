@@ -42,7 +42,7 @@ That one window drives the whole suite. Its Actions tab handles town chores, ite
 
 ### First run performance tip
 
-TurboGear works best with MQ2Lua **Turbo Num = 1000**. On startup, TurboGear checks your live setting and shows a **Set to 1000** button if MacroQuest is still at the lower default. This helps linked-needs announces and large-fleet inventory warmup respond quickly.
+TurboGear leaves MQ2Lua **Turbo Num** at your current MacroQuest setting. If linked-needs announces feel delayed during large-fleet warmup, the Setup tab can optionally try **Turbo Num = 1000**. Leave the MQ2Lua default alone if your setup is already smooth.
 
 ## What's Included
 

@@ -293,14 +293,14 @@ local function draw_announce_status()
     if lua_turbo and lua_turbo.known then
         if lua_turbo.warning then
             col_text(Theme.amber, string.format(
-                "MQ2Lua Turbo Num: %d (recommended %d for fast linked-needs warmup)",
+                "MQ2Lua Turbo Num: %d. If linked-needs warmup feels delayed, you can try %d.",
                 tonumber(lua_turbo.value) or 0, tonumber(lua_turbo.recommended) or 1000))
-            if themed_button("Set Lua Turbo Num to " .. tostring(lua_turbo.recommended) .. "##setup_lua_turbo", Theme.purple) then
+            if themed_button("Try Lua Turbo Num " .. tostring(lua_turbo.recommended) .. "##setup_lua_turbo", Theme.purple) then
                 local applied = cfg.set_recommended_lua_turbo and cfg.set_recommended_lua_turbo()
                 lua_turbo_status_msg = "Set command sent for Lua Turbo Num " .. tostring(applied or lua_turbo.recommended) .. ". Rechecking..."
             end
             if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
-                ImGui.SetTooltip("Runs /lua conf turboNum " .. tostring(lua_turbo.recommended) .. ". If the warning does not clear, reload MQ2Lua or relog.")
+                ImGui.SetTooltip("Optional tuning. Runs /lua conf turboNum " .. tostring(lua_turbo.recommended) .. ". Leave the MQ2Lua default alone if your setup is smooth.")
             end
         else
             col_text(Theme.online, string.format("MQ2Lua Turbo Num: %d OK", tonumber(lua_turbo.value) or 0))
