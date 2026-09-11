@@ -9,6 +9,7 @@ local Theme, col_text, toggle_button = theme.Theme, theme.col_text, theme.toggle
 local cfg = require('config')
 local Settings, SaveSettings = cfg.Settings, cfg.SaveSettings
 local item_index = require('item_index')
+local index_warm_policy = require('index_warm_policy')
 local ui_table = require('ui_table')
 local views = require('views')
 local item_actions = require('item_actions')
@@ -898,10 +899,6 @@ local function draw_focus_content()
     ImGui.Spacing()
 
     local entries = visible_entries()
-    if maybe_auto_refill_focus(entries) then
-        filtered_key = nil
-        entries = visible_entries()
-    end
     if Settings.focusSourceScope == "loadout" then
         local ok_loadout, loadout = pcall(require, 'loadout')
         local list_id = Settings.focusLoadoutList or ""
@@ -940,6 +937,9 @@ local function draw_focus_content()
 end
 
 function M.draw()
+    pcall(function()
+        index_warm_policy.request_item_index("focus", 3.0)
+    end)
     ensure_defaults()
     draw_controls()
 
@@ -964,6 +964,16 @@ end
 function M.set_search(text)
     search_text = tostring(text or "")
     filtered_key = nil
+end
+
+function M.on_tab_enter()
+    pcall(function()
+        index_warm_policy.request_item_index("focus", 3.0)
+    end)
+    local entries = visible_entries()
+    if maybe_auto_refill_focus(entries) then
+        filtered_key = nil
+    end
 end
 
 return M

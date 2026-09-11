@@ -184,13 +184,23 @@ local function status_from_fi(fi, bank)
     return "carried", "Bags"
 end
 
---- Bounded FindItem(+Bank) for one catalog entry. Same id/name budget as live_item_status.
+--- Bounded FindItem(+Bank) for one catalog entry.
+--- Order: the row's own name(s) first (the item this row literally asks for),
+--- then ids highest-first (progression chains list later/final upgrades at
+--- the top of the id range, e.g. Jonas final hand 33171), then the canonical
+--- name. Previously ids ran first and a 6-id Jonas row spent the whole
+--- 12-lookup budget before its own bone name was ever tried, so a peer
+--- holding a Tier 1 bone showed missing. Shared multi-ID names are skipped.
+local SEARCH_LOOKUP_BUDGET = 16
+local SEARCH_OWN_NAMES = 2
 local function search_entry(entry)
     entry = entry or {}
+    local id_only_name = require('ownership_index').name_is_id_only
     local tried = 0
     local function try(v, bank)
+        if type(v) == "string" and id_only_name(v) then return nil end
         tried = tried + 1
-        if tried > 12 then return nil end
+        if tried > SEARCH_LOOKUP_BUDGET then return nil end
         local fi = find_tlo(v, bank)
         if not fi then return nil end
         local status, loc = status_from_fi(fi, bank)
@@ -203,16 +213,27 @@ local function search_entry(entry)
             count = 1,
         }
     end
+    local names = entry.names or {}
+    local own = math.min(#names, SEARCH_OWN_NAMES)
+    for i = 1, own do
+        local hit = try(names[i], false) or try(names[i], true)
+        if hit then return hit end
+    end
+    local ids, seen = {}, {}
     for _, id in ipairs(entry.ids or {}) do
         local n = tonumber(id)
-        if n and n > 0 then
-            local hit = try(n, false) or try(n, true)
-            if hit then return hit end
+        if n and n > 0 and not seen[n] then
+            seen[n] = true
+            ids[#ids + 1] = n
         end
     end
-    local names = entry.names or {}
+    table.sort(ids, function(a, b) return a > b end)
+    for _, n in ipairs(ids) do
+        local hit = try(n, false) or try(n, true)
+        if hit then return hit end
+    end
     local nmax = math.min(#names, 6)
-    for i = 1, nmax do
+    for i = own + 1, nmax do
         local hit = try(names[i], false) or try(names[i], true)
         if hit then return hit end
     end
@@ -223,6 +244,14 @@ local function search_entry(entry)
     end
     return { status = "missing", location = "", name = tostring(entry.item or ""), count = 0 }
 end
+
+M._search_entry = search_entry -- test hook
+
+local SPELL_STATUS_LOCATION = {
+    known = "Spell book / discs",
+    ready = "Ready to learn",
+    pack_owned = "Pack owned",
+}
 
 --- Run BiS-style FindItem scan for this box + list_id.
 function M.search_local(list_id)
@@ -241,6 +270,37 @@ function M.search_local(list_id)
                 entry = bis.normalize_entry(entry)
                 slots[ref.slot] = search_entry(entry)
             end
+        end
+    end
+    -- DoN learned-ability rows (spell_index refs above) are answered by THIS
+    -- box's own spellbook: lean Book/CombatAbility + tome/pack by id. Peers
+    -- used to fall back to the snapshot spellbook (often absent) -> false red.
+    if list_id == "don" then
+        local ok_ds, DS = pcall(require, 'don_spells')
+        local ok_sk, SK = pcall(require, 'spell_known')
+        if ok_sk and SK and SK.reset_lookup_count then SK.reset_lookup_count() end
+        local rows = 0
+        if ok_ds and DS and DS.spell_slots_for_class and DS.try_live_match then
+            for _, slot in ipairs(DS.spell_slots_for_class(class_name)) do
+                local entry = catalog.resolve_entry(list_id, class_name, slot)
+                if entry then
+                    local handled, match, status = DS.try_live_match(entry, { fresh = true })
+                    if handled then
+                        rows = rows + 1
+                        status = tostring(status or "missing")
+                        slots[slot] = {
+                            status = status,
+                            location = SPELL_STATUS_LOCATION[status] or "",
+                            name = tostring(match or entry.item or slot),
+                            count = status ~= "missing" and 1 or 0,
+                        }
+                    end
+                end
+            end
+        end
+        diag.sample("bis_search.don_spell_rows", rows)
+        if ok_sk and SK and SK.lookup_count then
+            diag.sample("bis_search.don_spell_lookups", SK.lookup_count())
         end
     end
     return {
@@ -296,6 +356,28 @@ function M.slot_rec(snap_or_key, list_id, slot)
     local list = rec.lists and rec.lists[list_id]
     if type(list) ~= "table" or type(list.slots) ~= "table" then return nil end
     return list.slots[slot]
+end
+
+function M.slot_rec_meta(snap_or_key, list_id, slot)
+    if not loaded then M.load(true) end
+    list_id = trim(list_id)
+    slot = trim(slot)
+    if list_id == "" or slot == "" then return nil, nil end
+    local key = snap_or_key
+    if type(snap_or_key) == "table" then
+        key = char_key(snap_or_key.server, snap_or_key.name)
+    end
+    key = tostring(key or "")
+    local rec = cache[key]
+    if type(rec) ~= "table" then return nil, nil end
+    local list = rec.lists and rec.lists[list_id]
+    if type(list) ~= "table" or type(list.slots) ~= "table" then return nil, nil end
+    return list.slots[slot], {
+        key = key,
+        updated = tonumber(list.updated) or 0,
+        list_id = list_id,
+        slot = slot,
+    }
 end
 
 function M.stub_snap(key)
@@ -361,13 +443,24 @@ function M.mark_requested(list_id)
 end
 
 --- UI helper: ask local bg to broadcast a list search (quiet).
-function M.request_via_bg(list_id)
+function M.request_via_bg(list_id, force)
     list_id = trim(list_id)
-    if list_id == "" or not M.should_request(list_id) then return false end
+    diag.count("bis_search.request_via_bg.calls")
+    if list_id == "" then
+        diag.count("bis_search.request_via_bg.skipped")
+        return false
+    end
+    if force ~= true and not M.should_request(list_id) then
+        diag.count("bis_search.request_via_bg.cooldown")
+        return false
+    end
     M.mark_requested(list_id)
-    pcall(function()
-        mq.cmd(string.format('/squelch /tgearbg bissearch %s', list_id))
+    local ok = pcall(function()
+        diag.time("bis_search.request_via_bg.cmd", function()
+            mq.cmd(string.format('/squelch /tgearbg bissearch %s', list_id))
+        end)
     end)
+    if ok then diag.count("bis_search.request_via_bg.sent") end
     return true
 end
 

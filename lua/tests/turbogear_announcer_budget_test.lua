@@ -3,10 +3,12 @@
 -- queues are idle, at its own small budget (never Search/Stats enrichment).
 package.path = 'lua/turbogear/?.lua;lua/turbogear/?/init.lua;' .. package.path
 
+local state_stub = { bg = false, lean = function() return false end }
 local CFG = {
     needs_index_budget_ms = 4,
     needs_index_budget_lean_ms = 2,
     needs_index_enabled = true,
+    generated_authority_enabled = true,
     announce_pending_budget_ms = 4,
     announce_pending_items_per_tick = 1,
 }
@@ -14,7 +16,7 @@ package.preload['config'] = function()
     return { CFG = CFG, Settings = {}, SharedSettings = { bisAnnounceEnabled = true },
         LoadSharedSettings = function() end, bis_announce_command = function() return "/g" end }
 end
-package.preload['state'] = function() return { bg = false, lean = function() return false end } end
+package.preload['state'] = function() return state_stub end
 
 local captured
 package.preload['needs_index'] = function()
@@ -85,10 +87,17 @@ A.set_passive(false)
 local pass, fail = 0, 0
 local function check(c, m) if c then pass = pass + 1 else fail = fail + 1; print("  FAIL: " .. tostring(m)) end end
 
--- Idle announce queues: needs_index enrichment gets its configured budget.
+-- Generated [TG] authority: idle announce never ticks rich needs_index.
+captured = "SKIP"
+A.tick()
+A.tick()
+check(captured == "SKIP", "generated authority idle skips needs_index")
+
+-- Legacy authority (generated off): needs_index enrichment gets its budget.
+CFG.generated_authority_enabled = false
 captured = nil
 A.tick()
-check(type(captured) == "number", "needs_index.tick was called when idle")
+check(type(captured) == "number", "legacy needs_index.tick was called when idle")
 check(captured == 4, "idle needs_index budget is needs_index_budget_ms (got " .. tostring(captured) .. ")")
 
 -- Disable enrichment: announce tick must still run without calling needs_index.
@@ -97,5 +106,19 @@ captured = "SKIP"
 A.tick()
 check(captured == "SKIP", "needs_index skipped when disabled")
 
-print(string.format("announcer thin tick (1.2.138): %d passed, %d failed", pass, fail))
+-- Background enrichment prewarm is disabled by default; [TG] announce tick still runs.
+CFG.needs_index_enabled = true
+CFG.bg_index_prewarm = nil
+state_stub.bg = true
+captured = "SKIP"
+A.tick()
+check(captured == "SKIP", "background idle skips needs_index prewarm by default")
+
+-- Temporary internal rollback switch restores the old background warm behavior.
+CFG.bg_index_prewarm = true
+captured = nil
+A.tick()
+check(captured == 4, "temporary rollback enables background needs_index prewarm")
+
+print(string.format("announcer thin tick (core diet A): %d passed, %d failed", pass, fail))
 os.exit(fail == 0 and 0 or 1)

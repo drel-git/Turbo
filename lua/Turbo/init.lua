@@ -311,7 +311,7 @@ local scriptName = 'Turbo'
 -- Suite version, parsed from lua/turbogear/CHANGELOG (the same file TurboGear and
 -- TurboPatcher read), so every surface shows one number. The literal is only a
 -- fallback for broken installs; per-file @version tags remain maintenance metadata.
-local TURBO_VERSION = '1.2.1'
+local TURBO_VERSION = '1.2.139'
 do
     local f = io.open((mq.luaDir or 'lua') .. '/turbogear/CHANGELOG', 'r')
     if f then
@@ -1592,6 +1592,7 @@ saveSettings = function()
     end
     f:write('}\n')
     f:close()
+    if TG.stampUiGeomWritten then TG.stampUiGeomWritten() end
 end
 
 local function loadSettingsFromPath(path)
@@ -5147,7 +5148,6 @@ function TG.renderSharedControlBadge(tip, compact)
     if Ui.buttonVariant(label .. '##shared_control_badge', variant, w, TG.LAYOUT_MODE_BTN_H or 24) then
         if not isOwner then TG.takeSharedControl() end
     end
-    if TG.turboChromeDragAddLastItem then TG.turboChromeDragAddLastItem() end
     if tip then
         tip(isOwner
             and 'This box can edit shared loot setup and send team-wide commands.'
@@ -6186,6 +6186,12 @@ local function printTurboDoctor()
     local tag = '\at[TurboDoctor]\ax'
     local mqPath = mq.TLO.MacroQuest.Path() or ''
     local me = mq.TLO.Me.CleanName() or mq.TLO.Me.Name() or '?'
+    local luaTurboValue
+    pcall(function()
+        if mq.TLO.Lua and mq.TLO.Lua.Turbo then
+            luaTurboValue = tonumber(mq.TLO.Lua.Turbo())
+        end
+    end)
     collectGroupMembers()
     local profile = getActiveProfile()
 
@@ -6199,6 +6205,16 @@ local function printTurboDoctor()
 
     printf('%s \au===== Turbo Doctor: install scan =====\ax', tag)
     printf('%s \awChar: \ag%s\aw | Lua: \ag%s %s\ax', tag, me, TURBO_HUB_NAME, TURBO_VERSION)
+    if luaTurboValue then
+        if luaTurboValue < 1000 then
+            printf('%s \awMQ2Lua Turbo Num:\ax \ay%d WARNING\ax \aw- recommended 1000+ for TurboGear linked-needs. Fix: \ag/lua conf turboNum 1000\ax',
+                tag, math.floor(luaTurboValue))
+        else
+            printf('%s \awMQ2Lua Turbo Num:\ax \ag%d OK\ax', tag, math.floor(luaTurboValue))
+        end
+    else
+        printf('%s \awMQ2Lua Turbo Num:\ax \ayunavailable\ax', tag)
+    end
     printf('%s \awSelected profile: \ay%s\aw (%s)\ax', tag, profile,
         TG.perCharProfile and 'per-character' or 'shared')
     if activePath and activeExists then
@@ -7647,194 +7663,84 @@ end
 
 
 -- =========================================================
+-- UI geometry: ImGui owns live x/y. Observe after change, save after settle.
+-- Never pickle while the pointer is held.
 
-TG.turboChromeNewDragState = function()
-    return {
-        excludes = {},
-        band = nil,
-        grabbing = false,
-        lastX = nil,
-        lastY = nil,
+TG.UI_GEOM_DEBOUNCE_S = 0.8
+
+TG.uiPointerHeld = function()
+    return ImGui and ImGui.IsMouseDown and ImGui.IsMouseDown(0) == true
+end
+
+TG.stampUiGeomWritten = function()
+    local function copy_xy(src)
+        if type(src) ~= 'table' then return nil end
+        local x, y = tonumber(src.x), tonumber(src.y)
+        if not x or not y then return nil end
+        return { x = x, y = y }
+    end
+    local function copy_wh(src)
+        if type(src) ~= 'table' then return nil end
+        local w, h = tonumber(src.w), tonumber(src.h)
+        if not w or not h then return nil end
+        return { w = w, h = h }
+    end
+    TG._uiGeomWritten = {
+        mini = copy_xy(TG.miniWindowPos),
+        full = copy_xy(TG.fullWindowPos),
+        fullSize = copy_wh(TG.fullWindowSize),
+        gains = copy_xy(TG.gainsWindowPos),
+        review = copy_xy(TG.reviewWindowPos),
+        fleet = copy_xy(TG.fleetWalletWindowPos),
     }
 end
 
-TG.turboChromeDragStates = TG.turboChromeDragStates or {
-    main = TG.turboChromeNewDragState(),
-    review = TG.turboChromeNewDragState(),
-    gains = TG.turboChromeNewDragState(),
-}
-TG.turboChromeDragState = TG.turboChromeDragStates.main
-TG.turboChromeDragCurrentState = TG.turboChromeDragState
-TG.turboTitleDragEnabled = false
-
-TG.turboChromeGetDragState = function(state)
-    if type(state) == 'string' then
-        TG.turboChromeDragStates[state] = TG.turboChromeDragStates[state] or TG.turboChromeNewDragState()
-        return TG.turboChromeDragStates[state]
-    end
-    if type(state) == 'table' then return state end
-    return TG.turboChromeDragCurrentState or TG.turboChromeDragState
+TG.markUiGeomDirty = function()
+    TG._uiGeomDirty = true
+    TG._uiGeomDirtyAt = os.clock()
 end
 
-TG.turboVec2XY = function(v, y)
-    if type(v) == 'table' then
-        return tonumber(v.x or v.X or v[1]) or 0, tonumber(v.y or v.Y or v[2]) or 0
-    end
-    return tonumber(v) or 0, tonumber(y) or 0
-end
-
-TG.turboMousePos = function()
-    if not ImGui.GetMousePos then return nil, nil end
-    local x, y = ImGui.GetMousePos()
-    return TG.turboVec2XY(x, y)
-end
-
-TG.turboWindowRect = function()
-    if not (ImGui.GetWindowPos and ImGui.GetWindowSize) then return nil end
-    local x, y = TG.turboVec2XY(ImGui.GetWindowPos())
-    local w, h = TG.turboVec2XY(ImGui.GetWindowSize())
-    return { x1 = x, y1 = y, x2 = x + w, y2 = y + h }
-end
-
-TG.turboCursorScreenY = function()
-    if not ImGui.GetCursorScreenPos then return nil end
-    local _, y = TG.turboVec2XY(ImGui.GetCursorScreenPos())
-    return y
-end
-
-TG.turboItemRect = function()
-    if not (ImGui.GetItemRectMin and ImGui.GetItemRectMax) then return nil end
-    local minX, minY = ImGui.GetItemRectMin()
-    local maxX, maxY = ImGui.GetItemRectMax()
-    local x1, y1 = TG.turboVec2XY(minX, minY)
-    local x2, y2 = TG.turboVec2XY(maxX, maxY)
-    return { x1 = x1, y1 = y1, x2 = x2, y2 = y2 }
-end
-
-TG.turboPointInRect = function(x, y, r)
-    return r and x >= r.x1 and x <= r.x2 and y >= r.y1 and y <= r.y2
-end
-
-TG.turboChromeDragReset = function(state)
-    local st = TG.turboChromeGetDragState(state)
-    TG.turboChromeDragCurrentState = st
-    st.excludes = {}
-    st.band = nil
-    if ImGui.IsMouseDown and not ImGui.IsMouseDown(0) then
-        st.grabbing = false
-        st.lastX, st.lastY = nil, nil
-    end
-end
-
-TG.turboChromeDragAddLastItem = function(state)
-    local st = TG.turboChromeGetDragState(state)
-    local r = TG.turboItemRect()
-    if r then st.excludes[#st.excludes + 1] = r end
-end
-
-TG.turboChromeDragSetBandToCursor = function(minHeight, state)
-    local win = TG.turboWindowRect()
-    local cy = TG.turboCursorScreenY()
-    if not win or not cy then return end
-    minHeight = tonumber(minHeight) or 24
-    local st = TG.turboChromeGetDragState(state)
-    st.band = {
-        x1 = win.x1,
-        y1 = win.y1,
-        x2 = win.x2,
-        y2 = math.max(win.y1 + minHeight, cy),
-    }
-end
-
-TG.turboChromeBlocked = function(x, y, state)
-    local st = TG.turboChromeGetDragState(state)
-    for _, r in ipairs(st.excludes or {}) do
-        if TG.turboPointInRect(x, y, r) then return true end
-    end
-    return false
-end
-
-TG.turboChromeDragMove = function(x, y, state)
-    if not (ImGui.SetWindowPos and x and y) then return end
-    local st = TG.turboChromeGetDragState(state)
-    if st.lastX and st.lastY then
-        local dx = x - st.lastX
-        local dy = y - st.lastY
-        if dx ~= 0 or dy ~= 0 then
-            local wx, wy = TG.turboVec2XY(ImGui.GetWindowPos())
-            ImGui.SetWindowPos(wx + dx, wy + dy)
-        end
-    end
-    st.lastX, st.lastY = x, y
-end
-
-TG.turboChromeDragApplyActive = function(state)
-    local st = TG.turboChromeGetDragState(state)
-    if not st.grabbing then return end
-    if not (ImGui.IsMouseDown and ImGui.IsMouseDown(0)) then
-        st.grabbing = false
-        st.lastX, st.lastY = nil, nil
+TG.observeWindowPos = function(slot, x, y)
+    x, y = tonumber(x), tonumber(y)
+    if not x or not y then return end
+    TG[slot] = { x = x, y = y }
+    if TG.uiPointerHeld() then return end
+    local key = slot == 'miniWindowPos' and 'mini'
+        or slot == 'fullWindowPos' and 'full'
+        or slot == 'gainsWindowPos' and 'gains'
+        or slot == 'reviewWindowPos' and 'review'
+        or slot == 'fleetWalletWindowPos' and 'fleet'
+        or slot
+    local written = TG._uiGeomWritten and TG._uiGeomWritten[key]
+    if written and math.abs((written.x or 0) - x) < 0.5 and math.abs((written.y or 0) - y) < 0.5 then
         return
     end
-    local mx, my = TG.turboMousePos()
-    if not mx or not my then return end
-    if ImGui.ClearActiveID then ImGui.ClearActiveID() end
-    TG.turboChromeDragMove(mx, my, st)
-end
-
-TG.turboChromeDragActiveItem = function(state)
-    if not (ImGui.IsItemActive and ImGui.IsItemActive()) then return false end
-    if not (ImGui.IsMouseDown and ImGui.IsMouseDown(0)) then return false end
-    local mx, my = TG.turboMousePos()
-    if not mx or not my then return false end
-    local st = TG.turboChromeGetDragState(state)
-    if not st.grabbing then
-        st.grabbing = true
-        st.lastX, st.lastY = mx, my
-        if ImGui.ResetMouseDragDelta then ImGui.ResetMouseDragDelta(0) end
-    end
-    if ImGui.ClearActiveID then ImGui.ClearActiveID() end
-    TG.turboChromeDragMove(mx, my, st)
-    return true
-end
-
-TG.turboChromeDragHandle = function(tooltip, allowBlankWindow, state)
-    local st = TG.turboChromeGetDragState(state)
-    local mx, my = TG.turboMousePos()
-    if not mx or not my or not st.band then return end
-    local hovered = not ImGui.IsWindowHovered or ImGui.IsWindowHovered()
-    local inBand = TG.turboPointInRect(mx, my, st.band)
-    local blocked = TG.turboChromeBlocked(mx, my, st)
-    local down = ImGui.IsMouseDown and ImGui.IsMouseDown(0)
-    local blankWindow = false
-    if allowBlankWindow and ImGui.IsWindowHovered then
-        local anyItemHovered = ImGui.IsAnyItemHovered and ImGui.IsAnyItemHovered() or false
-        local anyItemActive = ImGui.IsAnyItemActive and ImGui.IsAnyItemActive() or false
-        blankWindow = ImGui.IsWindowHovered() and not anyItemHovered and not anyItemActive and not blocked
-    end
-
-    if ImGui.IsMouseClicked and ImGui.IsMouseClicked(0) then
-        if hovered and ((inBand and not blocked) or blankWindow) then
-            st.grabbing = true
-            st.lastX, st.lastY = mx, my
-            if ImGui.ResetMouseDragDelta then ImGui.ResetMouseDragDelta(0) end
-        elseif not st.grabbing then
-            st.lastX, st.lastY = nil, nil
-        end
-    end
-
-    if not down then
-        st.grabbing = false
-        st.lastX, st.lastY = nil, nil
+    -- Last observed live pos is separate from last written pos.
+    -- Reset debounce only when live geometry itself changes; continued
+    -- frames at the same x/y must not postpone the settle write.
+    TG._uiGeomObserved = TG._uiGeomObserved or {}
+    local prev = TG._uiGeomObserved[key]
+    if prev and math.abs((prev.x or 0) - x) < 0.5 and math.abs((prev.y or 0) - y) < 0.5 then
+        TG._uiGeomDirty = true
         return
     end
-
-    if st.grabbing then
-        if ImGui.ClearActiveID then ImGui.ClearActiveID() end
-    elseif hovered and (inBand and not blocked or blankWindow) and ImGui.SetTooltip then
-        ImGui.SetTooltip(tooltip or 'Drag empty header space to move Turbo.')
-    end
+    TG._uiGeomObserved[key] = { x = x, y = y }
+    TG.markUiGeomDirty()
 end
+
+TG.tickUiGeomSave = function()
+    if not TG._uiGeomDirty then return end
+    if TG.uiPointerHeld() then
+        TG._uiGeomDirtyAt = os.clock()
+        return
+    end
+    local wait = tonumber(TG.UI_GEOM_DEBOUNCE_S) or 0.8
+    if (os.clock() - (tonumber(TG._uiGeomDirtyAt) or 0)) < wait then return end
+    TG._uiGeomDirty = false
+    if TG.saveSettings then TG.saveSettings() end
+end
+
+if TG.stampUiGeomWritten then TG.stampUiGeomWritten() end
 
 -- =========================================================
 -- Tab rendering stubs (Session 3 will wire these in)
@@ -7877,7 +7783,6 @@ local function renderTopBar(g, viewState)
         end
     end
     if not canControl then ImGui.EndDisabled() end
-    if TG.turboChromeDragAddLastItem then TG.turboChromeDragAddLastItem() end
     tip((turboOn and viewState.runtime.lootReady == false)
         and (viewState.runtime.lootReadyReason or 'Turbo is enabled, but no valid looter route is ready.')
         or (canControl and 'Toggle auto-looting on or off. Turning it off also sends /endmacro to the active looters.'
@@ -7895,7 +7800,6 @@ local function renderTopBar(g, viewState)
         if TG.requireSharedControl('Combat loot toggle') then g.toggleCombatLoot() end
     end
     if not canControl then ImGui.EndDisabled() end
-    if TG.turboChromeDragAddLastItem then TG.turboChromeDragAddLastItem() end
     tip(canControl and 'When ON, loot even with aggressive mobs nearby'
         or ('Browse mode: controlled by ' .. TG.sharedControlOwnerName() .. '.'))
     ImGui.SameLine()
@@ -7949,7 +7853,6 @@ local function renderTopBar(g, viewState)
         if Ui.buttonVariant('?##top_quick_start', 'utilityButton', helpBtnW, LAYOUT_MODE_BTN_H) then
             TG.toggleQuickStartWindow()
         end
-        if TG.turboChromeDragAddLastItem then TG.turboChromeDragAddLastItem() end
         tip('Open or close Turbo Quick Start.')
         ImGui.SameLine()
     end
@@ -7960,7 +7863,6 @@ local function renderTopBar(g, viewState)
             if TG.requireSharedControl('STOP') then g.stopAllActions() end
         end
         if not canControl then ImGui.EndDisabled() end
-        if TG.turboChromeDragAddLastItem then TG.turboChromeDragAddLastItem() end
         tip(canControl
             and 'STOP: end all macros, stop navigation, and announce HALT. Turn off in Loot Manager Setup if you mis-click it.'
             or ('Browse mode: controlled by ' .. TG.sharedControlOwnerName() .. '.'))
@@ -7975,7 +7877,6 @@ local function renderTopBar(g, viewState)
                 if TG.lootNow then TG.lootNow() elseif g.lootNow then g.lootNow() end
             end
         end
-        if TG.turboChromeDragAddLastItem then TG.turboChromeDragAddLastItem() end
         if viewState.runtime.lootReady == false or not canControl then ImGui.EndDisabled() end
         tip((not canControl)
             and ('Browse mode: controlled by ' .. TG.sharedControlOwnerName() .. '.')
@@ -7991,7 +7892,6 @@ local function renderTopBar(g, viewState)
         g.minimizedGUI = true
         saveSettings()
     end
-    if TG.turboChromeDragAddLastItem then TG.turboChromeDragAddLastItem() end
     tip('Collapse back to the Mini bar.')
     ImGui.EndGroup()
 
@@ -8061,42 +7961,10 @@ TG.drawTurboFullTitle = function()
         ImGui.SameLine(0, 6)
     end
 
-    local dragMinX, dragMinY, dragMaxX = nil, nil, nil
-    if ImGui.InvisibleButton then
-        ImGui.InvisibleButton('##turbo_full_title_drag', math.max(20, barW - dragX), 38)
-        if ImGui.GetItemRectMin and ImGui.GetItemRectMax then
-            local rmin, rminY = ImGui.GetItemRectMin()
-            local rmax = ImGui.GetItemRectMax()
-            dragMinX = type(rmin) == 'table' and tonumber(rmin.x or rmin.X or rmin[1]) or tonumber(rmin) or nil
-            dragMinY = type(rmin) == 'table' and tonumber(rmin.y or rmin.Y or rmin[2]) or tonumber(rminY) or nil
-            dragMaxX = type(rmax) == 'table' and tonumber(rmax.x or rmax.X or rmax[1]) or tonumber(rmax) or nil
-        end
-        if TG.turboChromeDragActiveItem then TG.turboChromeDragActiveItem('main') end
-        if TG.turboTitleDragEnabled ~= false
-            and ImGui.IsItemActive and ImGui.IsItemActive()
-            and ImGui.IsMouseDragging and ImGui.GetMouseDragDelta and ImGui.SetWindowPos
-            and ImGui.IsMouseDragging(0, 0.0) then
-            local delta = ImGui.GetMouseDragDelta(0)
-            local dx = type(delta) == 'table' and tonumber(delta.x or delta.X or delta[1]) or tonumber(delta) or 0
-            local dy = type(delta) == 'table' and tonumber(delta.y or delta.Y or delta[2]) or 0
-            if dx ~= 0 or dy ~= 0 then
-                local px, py = ImGui.GetWindowPos()
-                ImGui.SetWindowPos((tonumber(px) or 0) + dx, (tonumber(py) or 0) + dy)
-                if ImGui.ResetMouseDragDelta then ImGui.ResetMouseDragDelta(0) end
-            end
-        end
-        if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then ImGui.SetTooltip('Drag to move Turbo.') end
-    end
-
     if ImGui.GetWindowDrawList and ImGui.GetColorU32 and screenX and screenY then
         local drawX = screenX + math.max(0, (barW - titleW) * 0.5)
         if drawX < screenX + dragX then drawX = screenX + dragX end
         local drawY = screenY + 4
-        ImGui.GetWindowDrawList():AddText(ImVec2(drawX, drawY), IM_COL32(255, 199, 82, 255), titleA)
-        ImGui.GetWindowDrawList():AddText(ImVec2(drawX + textWidth(titleA), drawY), IM_COL32(235, 240, 250, 255), titleB)
-    elseif ImGui.GetWindowDrawList and ImGui.GetColorU32 and dragMinX and dragMinY and dragMaxX then
-        local drawX = dragMinX + math.max(0, ((dragMaxX - dragMinX) - titleW) * 0.5)
-        local drawY = dragMinY + 4
         ImGui.GetWindowDrawList():AddText(ImVec2(drawX, drawY), IM_COL32(255, 199, 82, 255), titleA)
         ImGui.GetWindowDrawList():AddText(ImVec2(drawX + textWidth(titleA), drawY), IM_COL32(235, 240, 250, 255), titleB)
     elseif ImGui.SetCursorPos then
@@ -8142,37 +8010,20 @@ TG.drawTurboReviewTitle = function(g)
         local x, y = ImGui.GetCursorPos()
         x0, y0 = tonumber(x) or 0, tonumber(y) or 0
     end
-
-    local dragMinX, dragMinY, dragMaxX = nil, nil, nil
-    if ImGui.InvisibleButton then
-        ImGui.InvisibleButton('##turbo_review_title_drag', math.max(20, barW - btnW - 6), 38)
-        if ImGui.GetItemRectMin and ImGui.GetItemRectMax then
-            local rmin, rminY = ImGui.GetItemRectMin()
-            local rmax = ImGui.GetItemRectMax()
-            dragMinX = type(rmin) == 'table' and tonumber(rmin.x or rmin.X or rmin[1]) or tonumber(rmin) or nil
-            dragMinY = type(rmin) == 'table' and tonumber(rmin.y or rmin.Y or rmin[2]) or tonumber(rminY) or nil
-            dragMaxX = type(rmax) == 'table' and tonumber(rmax.x or rmax.X or rmax[1]) or tonumber(rmax) or nil
+    local titleSX, titleSY = x0, y0
+    if ImGui.GetCursorScreenPos then
+        local sx, sy = ImGui.GetCursorScreenPos()
+        if type(sx) == 'table' then
+            titleSX = tonumber(sx.x or sx.X or sx[1]) or x0
+            titleSY = tonumber(sx.y or sx.Y or sx[2]) or y0
+        else
+            titleSX, titleSY = tonumber(sx) or x0, tonumber(sy) or y0
         end
-        if TG.turboChromeDragActiveItem then TG.turboChromeDragActiveItem('review') end
-        if TG.turboTitleDragEnabled ~= false
-            and ImGui.IsItemActive and ImGui.IsItemActive()
-            and ImGui.IsMouseDragging and ImGui.GetMouseDragDelta and ImGui.SetWindowPos
-            and ImGui.IsMouseDragging(0, 0.0) then
-            local delta = ImGui.GetMouseDragDelta(0)
-            local dx = type(delta) == 'table' and tonumber(delta.x or delta.X or delta[1]) or tonumber(delta) or 0
-            local dy = type(delta) == 'table' and tonumber(delta.y or delta.Y or delta[2]) or 0
-            if dx ~= 0 or dy ~= 0 then
-                local px, py = ImGui.GetWindowPos()
-                ImGui.SetWindowPos((tonumber(px) or 0) + dx, (tonumber(py) or 0) + dy)
-                if ImGui.ResetMouseDragDelta then ImGui.ResetMouseDragDelta(0) end
-            end
-        end
-        if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then ImGui.SetTooltip('Drag to move Turbo Review.') end
     end
 
-    if ImGui.GetWindowDrawList and dragMinX and dragMinY and dragMaxX then
-        local drawX = dragMinX + math.max(0, ((dragMaxX - dragMinX) - titleW) * 0.5)
-        local drawY = dragMinY + 4
+    if ImGui.GetWindowDrawList then
+        local drawX = titleSX + math.max(0, ((barW - btnW - 6) - titleW) * 0.5)
+        local drawY = titleSY + 4
         ImGui.GetWindowDrawList():AddText(ImVec2(drawX, drawY), IM_COL32(255, 199, 82, 255), titleA)
         ImGui.GetWindowDrawList():AddText(ImVec2(drawX + textWidth(titleA), drawY), IM_COL32(235, 240, 250, 255), titleB)
     end
@@ -8187,7 +8038,6 @@ TG.drawTurboReviewTitle = function(g)
         g.skipReviewOpen = false
         if g.saveSettings then g.saveSettings() end
     end
-    if TG.turboChromeDragAddLastItem then TG.turboChromeDragAddLastItem() end
     if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then ImGui.SetTooltip('Close Turbo Review.') end
 
     if ImGui.SetCursorPos then ImGui.SetCursorPos(x0, y0 + 42) end
@@ -8230,7 +8080,6 @@ TG.drawTurboGainsTitle = function(g)
     if Ui.buttonVariant('...##turbo_gains_menu_btn', 'menuButton', btnW, btnH) then
         if ImGui.OpenPopup then ImGui.OpenPopup('turbo_gains_title_menu') end
     end
-    if TG.turboChromeDragAddLastItem then TG.turboChromeDragAddLastItem() end
     if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then ImGui.SetTooltip('TurboGains menu.') end
     if ImGui.BeginPopup and ImGui.BeginPopup('turbo_gains_title_menu') then
         if ImGui.Selectable('Hide##turbo_gains_hide') then
@@ -8243,35 +8092,21 @@ TG.drawTurboGainsTitle = function(g)
         ImGui.EndPopup()
     end
 
-    local dragMinX, dragMinY, dragMaxX = nil, nil, nil
-    if ImGui.InvisibleButton then
-        if ImGui.SetCursorPos then ImGui.SetCursorPos(x0 + btnW + 6, y0) else ImGui.SameLine(0, 6) end
-        ImGui.InvisibleButton('##turbo_gains_title_drag', math.max(20, barW - (btnW * 2) - 12), 38)
-        if ImGui.GetItemRectMin and ImGui.GetItemRectMax then
-            local rmin, rminY = ImGui.GetItemRectMin()
-            local rmax = ImGui.GetItemRectMax()
-            dragMinX = type(rmin) == 'table' and tonumber(rmin.x or rmin.X or rmin[1]) or tonumber(rmin) or nil
-            dragMinY = type(rmin) == 'table' and tonumber(rmin.y or rmin.Y or rmin[2]) or tonumber(rminY) or nil
-            dragMaxX = type(rmax) == 'table' and tonumber(rmax.x or rmax.X or rmax[1]) or tonumber(rmax) or nil
+    local dragMinX = x0 + btnW + 6
+    local dragMinY = y0
+    if ImGui.GetCursorScreenPos then
+        if ImGui.SetCursorPos then ImGui.SetCursorPos(x0 + btnW + 6, y0) end
+        local sx, sy = ImGui.GetCursorScreenPos()
+        if type(sx) == 'table' then
+            dragMinX = tonumber(sx.x or sx.X or sx[1]) or dragMinX
+            dragMinY = tonumber(sx.y or sx.Y or sx[2]) or dragMinY
+        else
+            dragMinX, dragMinY = tonumber(sx) or dragMinX, tonumber(sy) or dragMinY
         end
-        if TG.turboChromeDragActiveItem then TG.turboChromeDragActiveItem('gains') end
-        if TG.turboTitleDragEnabled ~= false
-            and ImGui.IsItemActive and ImGui.IsItemActive()
-            and ImGui.IsMouseDragging and ImGui.GetMouseDragDelta and ImGui.SetWindowPos
-            and ImGui.IsMouseDragging(0, 0.0) then
-            local delta = ImGui.GetMouseDragDelta(0)
-            local dx = type(delta) == 'table' and tonumber(delta.x or delta.X or delta[1]) or tonumber(delta) or 0
-            local dy = type(delta) == 'table' and tonumber(delta.y or delta.Y or delta[2]) or 0
-            if dx ~= 0 or dy ~= 0 then
-                local px, py = ImGui.GetWindowPos()
-                ImGui.SetWindowPos((tonumber(px) or 0) + dx, (tonumber(py) or 0) + dy)
-                if ImGui.ResetMouseDragDelta then ImGui.ResetMouseDragDelta(0) end
-            end
-        end
-        if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then ImGui.SetTooltip('Drag to move Turbo Gains.') end
     end
+    local dragMaxX = dragMinX + math.max(20, barW - (btnW * 2) - 12)
 
-    if ImGui.GetWindowDrawList and dragMinX and dragMinY and dragMaxX then
+    if ImGui.GetWindowDrawList then
         local drawX = dragMinX + math.max(0, ((dragMaxX - dragMinX) - titleW) * 0.5)
         local drawY = dragMinY + 4
         ImGui.GetWindowDrawList():AddText(ImVec2(drawX, drawY), IM_COL32(255, 199, 82, 255), titleA)
@@ -8293,7 +8128,6 @@ TG.drawTurboGainsTitle = function(g)
         g.gainsWindowOpenReason = ''
         if g.saveSettings then g.saveSettings() end
     end
-    if TG.turboChromeDragAddLastItem then TG.turboChromeDragAddLastItem() end
     if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then ImGui.SetTooltip('Close Turbo Gains.') end
 
     if ImGui.SetCursorPos then ImGui.SetCursorPos(x0, y0 + 42) end
@@ -10916,6 +10750,7 @@ local function turboRenderLeanMiniBar(g, hitch)
 end
 
 function TG.renderWindow()
+    if TG.tickUiGeomSave then TG.tickUiGeomSave() end
     local hitch = TG.hitchlog
     if hitch and hitch.capturing() then hitch.on_frame_begin() end
     (function()
@@ -11306,11 +11141,9 @@ function TG.renderWindow()
         end
         pcall(function()
             ImGui.SetNextWindowSizeConstraints(390, 480, 760, 1040)
-            local sizeCond = g.gainsWindowSlimSized and ImGuiCond.FirstUseEver or ImGuiCond.Always
-            ImGui.SetNextWindowSize(430, 760, sizeCond)
-            g.gainsWindowSlimSized = true
+            ImGui.SetNextWindowSize(430, 760, ImGuiCond.FirstUseEver)
             if g.gainsWindowPos and g.gainsWindowPos.x and g.gainsWindowPos.y then
-                ImGui.SetNextWindowPos(g.gainsWindowPos.x, g.gainsWindowPos.y, ImGuiCond.FirstUseEver)
+                ImGui.SetNextWindowPos(g.gainsWindowPos.x, g.gainsWindowPos.y, ImGuiCond.Appearing)
             end
         end)
         ImGui.PushStyleColor(ImGuiCol.WindowBg, IM_COL32(12, 15, 22, 250))
@@ -11324,13 +11157,10 @@ function TG.renderWindow()
         g.gainsWindowOpen = gainsOpen
         if gainsDraw == nil then gainsDraw = gainsOpen end
         if gainsDraw then
-            if TG.turboChromeDragApplyActive then TG.turboChromeDragApplyActive('gains') end
             local wx, wy = ImGui.GetWindowPos()
-            if wx and wy then g.gainsWindowPos = { x = wx, y = wy } end
-            if TG.turboChromeDragReset then TG.turboChromeDragReset('gains') end
+            if wx and wy and TG.observeWindowPos then TG.observeWindowPos('gainsWindowPos', wx, wy)
+            elseif wx and wy then g.gainsWindowPos = { x = wx, y = wy } end
             TG.drawTurboGainsTitle(g)
-            if TG.turboChromeDragSetBandToCursor then TG.turboChromeDragSetBandToCursor(52, 'gains') end
-            if TG.turboChromeDragHandle then TG.turboChromeDragHandle('Drag Turbo Gains header to move the window.', false, 'gains') end
             local okGains, errGains = pcall(function()
                 local okMV, MoneyView = pcall(require, 'Turbo.gains_view')
                 if okMV and MoneyView and MoneyView.renderTab then
@@ -11385,7 +11215,7 @@ function TG.renderWindow()
                 ImGui.SetNextWindowSizeConstraints(560, 760, 1120, 1040)
                 ImGui.SetNextWindowSize(820, 820, ImGuiCond.FirstUseEver)
                 if g.reviewWindowPos and g.reviewWindowPos.x and g.reviewWindowPos.y then
-                    ImGui.SetNextWindowPos(g.reviewWindowPos.x, g.reviewWindowPos.y, ImGuiCond.FirstUseEver)
+                    ImGui.SetNextWindowPos(g.reviewWindowPos.x, g.reviewWindowPos.y, ImGuiCond.Appearing)
                 end
             end)
             ImGui.PushStyleColor(ImGuiCol.WindowBg, IM_COL32(12, 15, 22, 252))
@@ -11399,13 +11229,10 @@ function TG.renderWindow()
             g.reviewWindowOpen = reviewOpen
         if reviewDraw == nil then reviewDraw = reviewOpen end
         if reviewDraw then
-            if TG.turboChromeDragApplyActive then TG.turboChromeDragApplyActive('review') end
             local wx, wy = ImGui.GetWindowPos()
-            if wx and wy then g.reviewWindowPos = { x = wx, y = wy } end
-            if TG.turboChromeDragReset then TG.turboChromeDragReset('review') end
+            if wx and wy and TG.observeWindowPos then TG.observeWindowPos('reviewWindowPos', wx, wy)
+            elseif wx and wy then g.reviewWindowPos = { x = wx, y = wy } end
             TG.drawTurboReviewTitle(g)
-            if TG.turboChromeDragSetBandToCursor then TG.turboChromeDragSetBandToCursor(52, 'review') end
-            if TG.turboChromeDragHandle then TG.turboChromeDragHandle('Drag Turbo Review header to move the window.', false, 'review') end
             if g.reviewWindowOpen then
             local okReview, errReview = pcall(function()
                     local function reviewMutedWrap(text)
@@ -11518,6 +11345,10 @@ function TG.renderWindow()
             ImGui.SetNextWindowPos(g.pendingExpandPos.x, g.pendingExpandPos.y, ImGuiCond.Always)
         end)
         g.pendingExpandPos = nil
+    elseif g.fullWindowPos and g.fullWindowPos.x and g.fullWindowPos.y then
+        pcall(function()
+            ImGui.SetNextWindowPos(g.fullWindowPos.x, g.fullWindowPos.y, ImGuiCond.Appearing)
+        end)
     end
 
     local windowTitle = string.format('Turbo v%s debug###Turbo_Full', TURBO_VERSION)
@@ -11525,10 +11356,10 @@ function TG.renderWindow()
     g.windowOpen, shouldDraw = ImGui.Begin(windowTitle, g.windowOpen, windowFlags)
     if shouldDraw == nil then shouldDraw = g.windowOpen end
     if shouldDraw then
-        if TG.turboChromeDragApplyActive then TG.turboChromeDragApplyActive('main') end
         pcall(function()
             local wx, wy = ImGui.GetWindowPos()
-            if wx and wy then g.fullWindowPos = { x = wx, y = wy } end
+            if wx and wy and TG.observeWindowPos then TG.observeWindowPos('fullWindowPos', wx, wy)
+            elseif wx and wy then g.fullWindowPos = { x = wx, y = wy } end
         end)
         if g.lastSlimGUIForResize == nil then
             g.lastSlimGUIForResize = g.slimGUI
@@ -11556,21 +11387,8 @@ function TG.renderWindow()
                 g.fullWindowSize = { w = targetW, h = fullDefaultH }
             end
         end
-        -- Full mode: pin height to the theme shell every frame so tab content /
-        -- update banner cannot permanently grow the window. Width may follow
-        -- the last shell width (clamped). Banner adds a temporary reserve only.
-        if not g.slimGUI then
-            local minW = Theme.layout.windowMinW or fullDefaultW or 480
-            local maxW = Theme.layout.windowMaxW or 760
-            local baseW = (g.fullWindowSize and g.fullWindowSize.w) or fullDefaultW
-            baseW = math.max(minW, math.min(maxW, tonumber(baseW) or fullDefaultW))
-            local bannerReserve = 0
-            if g._updateBannerHeightApplied then
-                bannerReserve = tonumber(g._updateBannerReservePx) or 36
-            end
-            pcall(function() ImGui.SetWindowSize(baseW, fullDefaultH + bannerReserve) end)
-            g.fullWindowSize = { w = baseW, h = fullDefaultH }
-        end
+        -- Full mode keeps theme constraints; ImGui owns live size. Do not pin
+        -- with SetWindowSize every frame (that fights native movement).
 
         ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, 4, 3)
         local colW2, colW3, colW4, colAvail, colSp = fullColumnWidths()  -- cached once per frame
@@ -11632,11 +11450,8 @@ function TG.renderWindow()
             g.lastActiveTab = g.activeTab
         end
         g.lastSetupExpandedForResize = setupExpanded
-        if TG.turboChromeDragReset then TG.turboChromeDragReset('main') end
         TG.drawTurboFullTitle()
         renderTopBar(g, viewState)
-        if TG.turboChromeDragSetBandToCursor then TG.turboChromeDragSetBandToCursor(nil, 'main') end
-        if TG.turboChromeDragHandle then TG.turboChromeDragHandle('Drag empty Turbo header space to move the window.', false, 'main') end
         pcall(function()
             local okUC, UC = pcall(require, 'Turbo.update_check')
             local drewBanner = false
@@ -12968,7 +12783,7 @@ function TG.renderWindow()
             ImGui.SetNextWindowSizeConstraints(560, 760, 1120, 1040)
             ImGui.SetNextWindowSize(820, 820, ImGuiCond.FirstUseEver)
             if g.reviewWindowPos and g.reviewWindowPos.x and g.reviewWindowPos.y then
-                ImGui.SetNextWindowPos(g.reviewWindowPos.x, g.reviewWindowPos.y, ImGuiCond.FirstUseEver)
+                ImGui.SetNextWindowPos(g.reviewWindowPos.x, g.reviewWindowPos.y, ImGuiCond.Appearing)
             end
         end)
         ImGui.PushStyleColor(ImGuiCol.WindowBg, IM_COL32(12, 15, 22, 252))
@@ -12982,13 +12797,10 @@ function TG.renderWindow()
         g.reviewWindowOpen = reviewOpen
         if reviewDraw == nil then reviewDraw = reviewOpen end
         if reviewDraw then
-            if TG.turboChromeDragApplyActive then TG.turboChromeDragApplyActive('review') end
             local wx, wy = ImGui.GetWindowPos()
-            if wx and wy then g.reviewWindowPos = { x = wx, y = wy } end
-            if TG.turboChromeDragReset then TG.turboChromeDragReset('review') end
+            if wx and wy and TG.observeWindowPos then TG.observeWindowPos('reviewWindowPos', wx, wy)
+            elseif wx and wy then g.reviewWindowPos = { x = wx, y = wy } end
             TG.drawTurboReviewTitle(g)
-            if TG.turboChromeDragSetBandToCursor then TG.turboChromeDragSetBandToCursor(52, 'review') end
-            if TG.turboChromeDragHandle then TG.turboChromeDragHandle('Drag Turbo Review header to move the window.', false, 'review') end
             if g.reviewWindowOpen then
             local okReview, errReview = pcall(function()
                 local function reviewMutedWrap(text)

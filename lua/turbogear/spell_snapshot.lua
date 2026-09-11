@@ -38,8 +38,8 @@ local function probe_book(spellName)
         end
     end
     local ok, mod = pcall(require, 'spell_known')
-    local known = ok and mod and mod.live and mod.live(spellName) == true
-    if known and okC and SC and SC.probe_name then SC.probe_name(spellName) end
+    local known = ok and mod and mod.live_lean and mod.live_lean(spellName) == true
+    if known and okC and SC and SC.note_known then SC.note_known(spellName) end
     return known == true
 end
 
@@ -54,8 +54,8 @@ local function probe_id(spell_id)
         end
     end
     local ok, mod = pcall(require, 'spell_known')
-    local known = ok and mod and mod.live_id and mod.live_id(spell_id) == true
-    if known and okC and SC and SC.probe_id then SC.probe_id(spell_id) end
+    local known = ok and mod and mod.live_lean_id and mod.live_lean_id(spell_id) == true
+    if known and okC and SC and SC.note_known then SC.note_known(nil, spell_id) end
     return known == true
 end
 

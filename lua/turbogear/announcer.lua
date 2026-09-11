@@ -1,7 +1,7 @@
 -- TurboGear/announcer.lua
 -- BiS linked-needs (1.2.138+):
--- [TG] only from live chat: item links, [ANNOUNCE], [SKIP]. Driver paints BiS
--- ownership (evaluate_slot / bis_search / live self) and emits once.
+-- [TG] only from live chat: item links, [ANNOUNCE], [SKIP]. Driver uses the
+-- generated compact BiS index plus live/peer-fresh ownership and emits once.
 -- lootseen / LOOT_LINK / LOOT_NEED / replay: Linked+Go-loot handoff only, no [TG].
 -- needs_index / dcat / reverse-catalog are NOT on the emit path.
 
@@ -15,8 +15,11 @@ local item_actions = require('item_actions')
 local diag = require('diagnostics')
 local Store = require('store').Store
 local needs_index = require('needs_index')
+local index_warm_policy = require('index_warm_policy')
 local rules = require('announce_rules')
 local roster_sets = require('roster_sets')
+local ownership_index = require('ownership_index')
+local local_needs = require('local_needs')
 
 local M = { registered = false }
 local registered_events = {}
@@ -26,6 +29,16 @@ local pending_items = {}
 local announce_outbox = {}
 local group_announces = {}
 local link_scan_queue = {}
+local link_sched = {
+    chat_queue = {},
+    peer_queue = {},
+    driver_job = nil,
+    legacy_validation_queue = {},
+    ownership_warm = { queue = {}, active = nil },
+    last_ownership_sig = "",
+    last_ownership_store_cheap = "",
+    last_ownership_local_key = "",
+}
 local targeted_checks = {}
 local targeted_seen = {}
 local text_batches = {}
@@ -42,6 +55,8 @@ local DEFAULT_OUTBOX_MAX = 64
 local DEFAULT_REPLAY_TTL_S = 90.0
 local DEFAULT_REPLAY_MAX = 24
 local DEFAULT_GROUP_WINDOW_MS = 75
+local INDEX_TICK_MEANINGFUL_MS = 0.5
+local LINK_QUEUE_MAX = 128
 
 local runtime = {
     last_loot_at = 0,
@@ -82,6 +97,7 @@ local runtime = {
     last_chat_note = "",
     target_checks_completed = 0,
     target_checks_pending = 0,
+    last_generated_scan = nil,
 }
 local recent_replay = {}
 local replay_received_seen = {}
@@ -93,6 +109,31 @@ local linked_items = {}
 local linked_item_seq = 0
 local LINKED_ITEMS_MAX = 20
 local LINKED_ITEMS_TTL_S = 600
+
+local function record_index_tick_diag(label, budget_ms, active_before, tick_fn, active_after_fn)
+    if type(tick_fn) ~= "function" then return nil end
+    diag.count(label .. ".calls")
+    local t0 = os.clock()
+    local result = tick_fn()
+    local elapsed_ms = (os.clock() - t0) * 1000
+    diag.sample(label .. ".elapsed_ms", elapsed_ms)
+    local active_after = false
+    if type(active_after_fn) == "function" then
+        local ok_active, value = pcall(active_after_fn)
+        active_after = ok_active and value == true
+    end
+    if active_before == true or active_after == true or result == true then
+        diag.count(label .. ".active")
+    end
+    if elapsed_ms >= INDEX_TICK_MEANINGFUL_MS then
+        diag.count(label .. ".meaningful_elapsed")
+    end
+    budget_ms = tonumber(budget_ms) or 0
+    if budget_ms > 0 and elapsed_ms >= (budget_ms * 0.75) then
+        diag.count(label .. ".budget_pressure")
+    end
+    return result
+end
 
 local function pending_max()
     return math.max(16, math.floor(tonumber(CFG.announce_pending_max) or DEFAULT_PENDING_MAX))
@@ -305,6 +346,18 @@ local function link_hybrid_enabled()
     return CFG.announce_link_hybrid ~= false
 end
 
+function M.validation_flags()
+    return {
+        announce_link_hybrid = CFG.announce_link_hybrid ~= false,
+        local_needs_shadow = CFG.local_needs_shadow == true,
+        local_needs_generated_shadow = CFG.local_needs_generated_shadow ~= false,
+        local_needs_runtime_shared_shadow = CFG.local_needs_runtime_shared_shadow == true,
+        local_needs_match_ref_deep_profile = CFG.local_needs_match_ref_deep_profile == true,
+        generated_authority = CFG.generated_authority_enabled ~= false,
+        legacy_validation = CFG.generated_authority_legacy_validation == true,
+    }
+end
+
 --- Fresh shared-settings read so peers see the beacon holder promptly.
 local function resolve_announce_holder()
     pcall(function()
@@ -380,20 +433,145 @@ local function refresh_settings_if_due()
     local now_ms = (mq.gettime and mq.gettime()) or (os.time() * 1000)
     if (now_ms - settings_refresh_ms) < SETTINGS_REFRESH_MS then return false end
     settings_refresh_ms = now_ms
+    local settings_changed = false
     diag.time("announce.settings_reload", function()
-        cfg.LoadSharedSettings()
+        settings_changed = select(1, cfg.LoadSharedSettings())
     end)
+    if settings_changed and catalog.sync_compact_announce_settings then
+        pcall(function() catalog.sync_compact_announce_settings("shared-settings-reload") end)
+    end
     prune_recent_sent()
     return true
 end
 
 local function announce_work_pending()
     if #pending > 0 or #pending_items > 0 or #announce_outbox > 0
-        or #targeted_checks > 0 or #link_scan_queue > 0 then
+        or #targeted_checks > 0 or #link_scan_queue > 0
+        or #link_sched.chat_queue > 0 or #link_sched.peer_queue > 0 or link_sched.driver_job ~= nil then
         return true
     end
     for _, _ in pairs(group_announces or {}) do return true end
     return false
+end
+
+function link_sched.bounded_push(queue, item, label)
+    queue[#queue + 1] = item
+    while #queue > LINK_QUEUE_MAX do
+        table.remove(queue, 1)
+        runtime.pending_dropped = (runtime.pending_dropped or 0) + 1
+        diag.count(label .. ".dropped")
+    end
+end
+
+function link_sched.sample_age(label, at)
+    at = tonumber(at) or os.clock()
+    local ms = math.max(0, (os.clock() - at) * 1000)
+    diag.sample(label, ms)
+    return ms
+end
+
+-- User-facing [TG] deadlines / generated-authority latency: real elapsed
+-- seconds from mq.gettime() (ms), not os.clock() CPU time.
+function link_sched.elapsed_s()
+    local override = link_sched._elapsed_s
+    if type(override) == "function" then
+        local ok, value = pcall(override)
+        if ok and tonumber(value) then return tonumber(value) end
+    end
+    if mq and mq.gettime then
+        local ok, value = pcall(mq.gettime)
+        if ok and tonumber(value) then return tonumber(value) / 1000 end
+    end
+    return os.time()
+end
+
+function link_sched.work_clock()
+    local override = link_sched._work_clock
+    if type(override) == "function" then
+        local ok, value = pcall(override)
+        if ok and tonumber(value) then return tonumber(value) end
+    end
+    if mq and mq.gettime then
+        local ok, value = pcall(mq.gettime)
+        if ok and tonumber(value) then return tonumber(value) / 1000 end
+    end
+    return os.clock()
+end
+
+function link_sched.stage_stamp(target, name, wall_s, cpu_s)
+    if type(target) ~= "table" then return nil end
+    target.stage_timing = type(target.stage_timing) == "table" and target.stage_timing or {}
+    local timing = target.stage_timing
+    timing.stages = type(timing.stages) == "table" and timing.stages or {}
+    local stamp = {
+        wall = tonumber(wall_s) or link_sched.elapsed_s(),
+        cpu = tonumber(cpu_s) or os.clock(),
+    }
+    timing.stages[tostring(name or "stage")] = stamp
+    timing.render_callback = false -- linked-needs work is drained by init.run_loop, never ImGui draw.
+    return stamp
+end
+
+function link_sched.copy_stage_timing(source)
+    source = type(source) == "table" and source or {}
+    local out = {
+        event_delivery_uncertainty_ms = tonumber(source.event_delivery_uncertainty_ms) or 0,
+        line_arrival_known = source.line_arrival_known == true,
+        render_callback = source.render_callback == true,
+        stages = {},
+    }
+    for name, stamp in pairs(type(source.stages) == "table" and source.stages or {}) do
+        out.stages[name] = {
+            wall = tonumber(stamp and stamp.wall),
+            cpu = tonumber(stamp and stamp.cpu),
+        }
+    end
+    return out
+end
+
+function link_sched.stage_delta_ms(timing, first, last, field)
+    local stages = type(timing) == "table" and timing.stages or {}
+    local a, b = stages and stages[first], stages and stages[last]
+    local av, bv = tonumber(a and a[field]), tonumber(b and b[field])
+    if not av or not bv then return nil end
+    return math.max(0, (bv - av) * 1000)
+end
+
+function link_sched.stage_latency_report(job)
+    local timing = type(job) == "table" and job.stage_timing or {}
+    local function pair(first, last)
+        return {
+            wall_ms = link_sched.stage_delta_ms(timing, first, last, "wall"),
+            cpu_ms = link_sched.stage_delta_ms(timing, first, last, "cpu"),
+        }
+    end
+    return {
+        event_delivery_uncertainty_ms = tonumber(timing and timing.event_delivery_uncertainty_ms) or 0,
+        line_arrival_known = timing and timing.line_arrival_known == true,
+        render_callback = timing and timing.render_callback == true,
+        chat_capture = pair("event_delivery", "chat_capture"),
+        chat_queue_enqueue = pair("chat_capture", "chat_queue_enqueue"),
+        chat_queue_wait = pair("chat_queue_enqueue", "chat_queue_drain"),
+        chat_queue_drain = pair("chat_queue_drain", "link_scan_enqueue"),
+        link_scan_queue_wait = pair("link_scan_enqueue", "driver_start"),
+        driver = pair("driver_start", "finish"),
+        finish_to_send = pair("finish", "mq_cmd_start"),
+        mq_cmd_send = pair("mq_cmd_start", "mq_cmd_end"),
+        total = pair("event_delivery", "mq_cmd_end"),
+        pending_warm = {
+            wall_ms = tonumber(job and job.pending_warm_wait_wall_ms) or 0,
+            cpu_ms = tonumber(job and job.pending_warm_wait_cpu_ms) or 0,
+        },
+        rows = type(job) == "table" and job.row_decisions or {},
+    }
+end
+
+function link_sched.sample_elapsed_ms(label, started_s)
+    local now = link_sched.elapsed_s()
+    started_s = tonumber(started_s) or now
+    local ms = math.max(0, (now - started_s) * 1000)
+    diag.sample(label, ms)
+    return ms
 end
 
 -- Line classification and skip rules live in announce_rules.lua (pure, tested).
@@ -538,16 +716,41 @@ local function item_from_hex_at(text, start_at)
         return clean_text_candidate(raw)
     end
     local best_hex, best_name = nil, nil
+    local fallback_hex, fallback_name = nil, nil
+    local parsed_id, parsed_link = 0, nil
     local max_peel = math.min(16, #hex - 24)
     for peel = 0, max_peel do
         local h = (peel == 0) and hex or hex:sub(1, #hex - peel)
         local peeled = (peel == 0) and "" or hex:sub(#hex - peel + 1)
         local name = visible_name(peeled, after)
         if name ~= "" and #name >= 3 and #name <= 96 and name:find("^%u") then
-            best_hex, best_name = h, name
-            break
+            fallback_hex, fallback_name = fallback_hex or h, fallback_name or name
+            -- A normal item word starts with one capital followed by lowercase
+            -- text. This rejects payload tails such as "CBeaded".
+            if name:find("^%u%l") then
+                -- Keep peeling: an all-hex first word ("Beaded") creates an
+                -- earlier plausible suffix ("Hoop") before its real boundary.
+                best_hex, best_name = h, name
+            end
+            -- Strongest identity: a payload split that ParseItemLink confirms
+            -- as the same visible item name.
+            if mq.ParseItemLink then
+                local raw = "\x12" .. h .. "\x12"
+                local pok, item = pcall(function() return mq.ParseItemLink(raw) end)
+                if pok and type(item) == "table" then
+                    local candidate_name, candidate_id = link_name(item)
+                    if candidate_name and candidate_name ~= ""
+                        and rules.normalize_item_name(candidate_name) == rules.normalize_item_name(name)
+                    then
+                        best_hex, best_name = h, candidate_name
+                        parsed_id, parsed_link = tonumber(candidate_id) or 0, raw
+                        break
+                    end
+                end
+            end
         end
     end
+    best_hex, best_name = best_hex or fallback_hex, best_name or fallback_name
     if not best_name then
         local name = visible_name("", after)
         if name ~= "" and #name >= 3 and #name <= 96 then
@@ -557,8 +760,8 @@ local function item_from_hex_at(text, start_at)
     if not best_name then
         return nil, e + 1
     end
-    local id, link = 0, nil
-    if mq.ParseItemLink and best_hex then
+    local id, link = parsed_id, parsed_link
+    if not link and mq.ParseItemLink and best_hex then
         local raw = "\x12" .. best_hex .. "\x12"
         local pok, item = pcall(function() return mq.ParseItemLink(raw) end)
         if pok and type(item) == "table" then
@@ -646,6 +849,9 @@ local function parse_item_links(line)
             end
         end
         name = clean_text_candidate(name)
+        if rules.strip_trailing_corpse_id then
+            name = rules.strip_trailing_corpse_id(name)
+        end
         if name == "" then return end
         local key = (id > 0 and ("id:" .. tostring(math.floor(id)))) or ("name:" .. rules.normalize_item_name(name))
         if seen[key] then return end
@@ -856,6 +1062,19 @@ local function linked_item_display_key(item_name)
     return "name:" .. name
 end
 
+link_sched.hist = {}
+
+function link_sched.hist.role()
+    if state.bg == true then return "bg-owner" end
+    return "viewer"
+end
+
+function link_sched.hist.needers_label(order)
+    local names = copy_order(order)
+    if #names == 0 then return "" end
+    return table.concat(names, " | ")
+end
+
 local function prune_linked_items(now)
     now = tonumber(now) or os.clock()
     local kept = {}
@@ -864,10 +1083,18 @@ local function prune_linked_items(now)
         local at = tonumber(row and row.at) or now
         if row then row.display_key = row.display_key or linked_item_display_key(row.item_name) end
         local dedupe = tostring((row and row.display_key ~= "" and row.display_key) or (row and row.key) or "")
-        if (now - at) <= LINKED_ITEMS_TTL_S and (dedupe == "" or not seen[dedupe]) then
+        local item = tostring(row and row.item_name or "")
+        if (now - at) > LINKED_ITEMS_TTL_S then
+            diag.count("linked.prune")
+            diag.event("linked.prune", string.format("reason=ttl item=%s", item:sub(1, 80)))
+        elseif #kept >= LINKED_ITEMS_MAX then
+            diag.count("linked.prune")
+            diag.event("linked.prune", string.format("reason=max item=%s", item:sub(1, 80)))
+        elseif dedupe ~= "" and seen[dedupe] then
+            -- duplicate display key already kept; drop silently (upsert owns this)
+        else
             if dedupe ~= "" then seen[dedupe] = true end
             kept[#kept + 1] = row
-            if #kept >= LINKED_ITEMS_MAX then break end
         end
     end
     linked_items = kept
@@ -879,110 +1106,169 @@ local function row_corpse_id(bucket)
     return nil
 end
 
-local function record_linked_item(bucket, status)
-    if type(bucket) ~= "table" or type(bucket.order) ~= "table" or #bucket.order == 0 then return end
-    local key = tostring(bucket.key or grouped_item_key(bucket.item_name, bucket.item_id, bucket.item_link))
-    local display_key = linked_item_display_key(bucket.item_name)
-    if key == "" or key == "name:" then return end
+function link_sched.hist.upsert(fields)
+    if type(fields) ~= "table" then return nil end
+    local item_name = trim(fields.item_name)
+    if catalog.clean_link_item_name then
+        item_name = catalog.clean_link_item_name(item_name) or item_name
+    end
+    if rules.strip_trailing_corpse_id then
+        item_name = rules.strip_trailing_corpse_id(item_name)
+    end
+    item_name = trim(item_name)
+    if item_name == "" then return nil end
+    local history_source = tostring(fields.history_source or fields.source or "")
+    local needers = copy_order(fields.needers)
+    local create_if_missing = fields.create_if_missing ~= false
+    if history_source == "loot_link" then
+        create_if_missing = fields.create_if_missing == true
+    elseif #needers == 0 then
+        return nil
+    end
+    local key = tostring(fields.key or grouped_item_key(item_name, fields.item_id, fields.item_link))
+    local display_key = linked_item_display_key(item_name)
+    if key == "" or key == "name:" then return nil end
     local now = os.clock()
     prune_linked_items(now)
+    local function finish(row)
+        diag.count("linked.record")
+        diag.event("linked.record", string.format(
+            "role=%s source=%s item=%s key=%s rows=%d",
+            link_sched.hist.role(), history_source, tostring(row.item_name or ""):sub(1, 80),
+            tostring(row.display_key or row.key or ""), #linked_items))
+        return row
+    end
     for i, row in ipairs(linked_items) do
         if row.key == key or (display_key ~= "" and row.display_key == display_key) then
             row.item_name = rules.prefer_announce_item_name
-                and rules.prefer_announce_item_name(row.item_name, bucket.item_name)
-                or tostring(bucket.item_name or row.item_name or "")
-            row.item_id = tonumber(bucket.item_id) or row.item_id or 0
-            row.item_link = tostring(bucket.item_link or row.item_link or "")
+                and rules.prefer_announce_item_name(row.item_name, item_name)
+                or item_name
+            local incoming_id = tonumber(fields.item_id) or 0
+            if incoming_id > 0 then row.item_id = incoming_id end
+            local incoming_link = tostring(fields.item_link or "")
+            if incoming_link ~= "" then row.item_link = incoming_link end
             row.key = key
             row.display_key = display_key
-            row.needers = copy_order(bucket.order)
-            row.source = tostring(bucket.source or row.source or "")
-            row.status = tostring(status or row.status or "")
+            if #needers > 0 then row.needers = needers end
+            if history_source ~= "" then row.source = history_source end
+            if fields.status and tostring(fields.status) ~= "" then
+                row.status = tostring(fields.status)
+            end
             row.at = now
-            local cid = tonumber(bucket.corpse_id)
+            local cid = tonumber(fields.corpse_id)
             if cid and cid > 0 then
                 row.corpse_id = math.floor(cid)
-                row.corpse_at = tonumber(bucket.corpse_at) or now
+                row.corpse_at = tonumber(fields.corpse_at) or now
             end
             table.remove(linked_items, i)
             table.insert(linked_items, 1, row)
-            return
+            return finish(row)
         end
     end
+    if not create_if_missing then return nil end
     linked_item_seq = linked_item_seq + 1
-    table.insert(linked_items, 1, {
+    local row = {
         id = linked_item_seq,
         key = key,
         display_key = display_key,
-        item_name = tostring(bucket.item_name or ""),
-        item_id = tonumber(bucket.item_id) or 0,
-        item_link = tostring(bucket.item_link or ""),
-        needers = copy_order(bucket.order),
-        source = tostring(bucket.source or ""),
-        status = tostring(status or ""),
+        item_name = item_name,
+        item_id = tonumber(fields.item_id) or 0,
+        item_link = tostring(fields.item_link or ""),
+        needers = needers,
+        source = history_source,
+        status = tostring(fields.status or ""),
         at = now,
-        corpse_id = row_corpse_id(bucket),
-        corpse_at = tonumber(bucket.corpse_at),
-    })
+        corpse_id = row_corpse_id(fields),
+        corpse_at = tonumber(fields.corpse_at),
+    }
+    table.insert(linked_items, 1, row)
     prune_linked_items(now)
+    return finish(row)
+end
+
+local function record_linked_item(bucket, status)
+    if type(bucket) ~= "table" or type(bucket.order) ~= "table" or #bucket.order == 0 then return end
+    link_sched.hist.upsert({
+        item_name = bucket.item_name,
+        item_id = bucket.item_id,
+        item_link = bucket.item_link,
+        needers = bucket.order,
+        key = bucket.key,
+        history_source = "local_send",
+        status = status,
+        corpse_id = bucket.corpse_id,
+        corpse_at = bucket.corpse_at,
+        create_if_missing = true,
+    })
+end
+
+function link_sched.hist.observe(line)
+    local parsed = rules.parse_tg_announce and rules.parse_tg_announce(line)
+    if type(parsed) ~= "table" then return end
+    local item_name = tostring(parsed.item_name or "")
+    local item_id = 0
+    local item_link = ""
+    local payload = tostring(parsed.payload or "")
+    if item_actions.looks_like_item_link(payload) then
+        item_link = payload
+        local ok, item = pcall(function()
+            return mq.ParseItemLink and mq.ParseItemLink(payload) or nil
+        end)
+        if ok and type(item) == "table" then
+            local n, i = link_name(item)
+            if n and n ~= "" then item_name = n end
+            item_id = tonumber(i) or 0
+        end
+    end
+    if catalog.clean_link_item_name then
+        item_name = catalog.clean_link_item_name(item_name) or item_name
+    end
+    item_name = trim(item_name)
+    if item_name == "" then return end
+    diag.count("linked.observe_tg")
+    diag.event("linked.observe_tg", string.format(
+        "role=%s item=%s needers=%s",
+        link_sched.hist.role(), item_name:sub(1, 80), link_sched.hist.needers_label(parsed.needers)))
+    link_sched.hist.upsert({
+        item_name = item_name,
+        item_id = item_id,
+        item_link = item_link,
+        needers = parsed.needers,
+        history_source = "observed_tg",
+        status = "observed",
+        create_if_missing = true,
+    })
 end
 
 -- Structured lootseen / LOOT_LINK: refresh Linked corpse ids (Go-loot) without
 -- opening a group bucket or /g [TG]. Chat links / [ANNOUNCE] / [SKIP] own emit.
 local function note_linked_loot_handoff(links, source)
     if type(links) ~= "table" then return end
-    local now = os.clock()
-    prune_linked_items(now)
     source = tostring(source or "structured")
     for _, item in ipairs(links) do
         local item_name = trim(item and item.name or "")
         if catalog.clean_link_item_name then
             item_name = catalog.clean_link_item_name(item_name) or item_name
         end
+        if rules.strip_trailing_corpse_id then
+            item_name = rules.strip_trailing_corpse_id(item_name)
+        end
         if item_name ~= "" then
             note_loot_seen(item_name, source)
-            local item_id = tonumber(item.id) or 0
-            local item_link = tostring(item.link or "")
             local cid = tonumber(item.corpse_id)
-            local key = grouped_item_key(item_name, item_id, item_link)
-            local display_key = linked_item_display_key(item_name)
-            local updated = false
-            for i, row in ipairs(linked_items) do
-                if row.key == key or (display_key ~= "" and row.display_key == display_key) then
-                    if item_link ~= "" then row.item_link = item_link end
-                    if item_id > 0 then row.item_id = item_id end
-                    row.source = source
-                    row.at = now
-                    if cid and cid > 0 then
-                        row.corpse_id = math.floor(cid)
-                        row.corpse_at = now
-                    end
-                    table.remove(linked_items, i)
-                    table.insert(linked_items, 1, row)
-                    updated = true
-                    break
-                end
-            end
-            if not updated and cid and cid > 0 and key ~= "" and key ~= "name:" then
-                linked_item_seq = linked_item_seq + 1
-                table.insert(linked_items, 1, {
-                    id = linked_item_seq,
-                    key = key,
-                    display_key = display_key,
-                    item_name = item_name,
-                    item_id = item_id,
-                    item_link = item_link,
-                    needers = {},
-                    source = source,
-                    status = "handoff",
-                    at = now,
-                    corpse_id = math.floor(cid),
-                    corpse_at = now,
-                })
-            end
+            link_sched.hist.upsert({
+                item_name = item_name,
+                item_id = tonumber(item.id) or 0,
+                item_link = tostring(item.link or ""),
+                needers = {},
+                history_source = "loot_link",
+                status = "handoff",
+                corpse_id = cid,
+                corpse_at = os.clock(),
+                create_if_missing = cid and cid > 0,
+            })
         end
     end
-    prune_linked_items(now)
 end
 
 local function display_payload(item_name, item_link)
@@ -1134,6 +1420,430 @@ local function group_scan_snapshots()
         end
     end
     return snaps
+end
+
+function link_sched.request_compact_rules_for_roster(reason)
+    if CFG.local_needs_shadow ~= true then return end
+    if not (catalog and catalog.request_compact_announce_rules) then return end
+    for _, row in ipairs(group_scan_snapshots()) do
+        if type(row) == "table" and type(row.snap) == "table" then
+            pcall(function()
+                catalog.request_compact_announce_rules(row.snap, reason or "roster")
+            end)
+        end
+    end
+end
+
+function link_sched.shared_shadow_driver_allowed()
+    if CFG.local_needs_shared_shadow_bg_override == true then return true end
+    return state.bg ~= true and passive ~= true
+end
+
+function link_sched.request_shared_compact_index_for_roster(reason)
+    if CFG.local_needs_shadow ~= true then return end
+    if CFG.local_needs_runtime_shared_shadow ~= true then return end
+    if not link_sched.shared_shadow_driver_allowed() then return end
+    if not (catalog and catalog.request_shared_compact_rule_index) then return end
+    for _, row in ipairs(group_scan_snapshots()) do
+        if type(row) == "table" and type(row.snap) == "table" then
+            pcall(function()
+                catalog.request_shared_compact_rule_index(row.snap.class, row.snap.name, reason or "roster")
+            end)
+        end
+    end
+end
+
+function link_sched.reset_ownership_warm()
+    link_sched.ownership_warm = {
+        queue = {},
+        active = nil,
+        priority_streak = 0,
+        last_tick_ms = 0,
+        max_tick_ms = 0,
+        max_unit_ms = 0,
+        last_tick_units = 0,
+        budget_yields = 0,
+        stale_restarts = 0,
+    }
+    link_sched.last_ownership_sig = ""
+    link_sched.last_ownership_store_cheap = ""
+    link_sched.last_ownership_local_key = ""
+end
+
+--- Must match enqueue_warm's stored next_work.key: semantic cache key only.
+--- Character identity lives on next_work.who, not in this string.
+function link_sched.ownership_warm_key(row, snap)
+    snap = snap or (type(row) == "table" and row.snap)
+    return ownership_index.snapshot_cache_key and ownership_index.snapshot_cache_key(snap) or ""
+end
+
+function link_sched.queue_ownership_warm(row, reason)
+    reason = tostring(reason or "roster")
+    local warm = link_sched.ownership_warm
+    local queued, why = ownership_index.enqueue_warm(warm, row, reason)
+    local who = ownership_index.warm_who and ownership_index.warm_who(row, row and row.snap) or tostring(row and row.key or "")
+    local elapsed_at = link_sched.elapsed_s()
+    if type(warm.active) == "table" and tostring(warm.active.who or "") == who
+        and warm.active.elapsed_at == nil then
+        warm.active.elapsed_at = elapsed_at
+    end
+    for _, q in ipairs(warm.queue or {}) do
+        if tostring(q and q.who or "") == who and (queued or q.elapsed_at == nil) then
+            q.elapsed_at = elapsed_at
+        end
+    end
+    if reason:find("emit", 1, true) then
+        if type(warm.active) == "table" and tostring(warm.active.who or "") == who then
+            warm.active.priority = true
+        end
+        for _, q in ipairs(warm.queue or {}) do
+            if tostring(q and q.who or "") == who then q.priority = true end
+        end
+        diag.count("ownership.blocking_priority_requested")
+    end
+    return queued, why
+end
+
+function link_sched.request_ownership_warm(reason)
+    if CFG.generated_authority_enabled == false then return end
+    reason = tostring(reason or "semantic")
+    if state.bg == true then
+        local snap = snap_for_announce()
+        if snap then
+            link_sched.queue_ownership_warm({ key = local_snap_key(), snap = snap, local_owner = true }, reason .. ":local")
+        end
+        return
+    end
+    for _, row in ipairs(group_scan_snapshots()) do
+        link_sched.queue_ownership_warm(row, reason .. ":roster")
+    end
+end
+
+--- Cheap roster semantic fingerprint. Does not enqueue and does not
+--- enrich_class; used to skip per-tick ownership offers when nothing changed.
+function link_sched.ownership_input_sig()
+    local parts = {}
+    local local_key = local_snap_key()
+    local keys = roster_sets.active_store_keys(cfg.Settings.bisRosterScope or "online", { for_announce = true })
+    for _, key in ipairs(keys or {}) do
+        local snap
+        if key == local_key then
+            snap = gather_self_snapshot.cached and gather_self_snapshot.cached() or nil
+        else
+            snap = Store.get and Store.get(key) or nil
+        end
+        parts[#parts + 1] = tostring(key) .. "=" .. tostring(ownership_index.snapshot_cache_key(snap) or "")
+    end
+    table.sort(parts)
+    return table.concat(parts, ";")
+end
+
+function link_sched.ownership_store_cheap()
+    local keys = roster_sets.active_store_keys(cfg.Settings.bisRosterScope or "online", { for_announce = true }) or {}
+    return table.concat({
+        tostring(Store.content_version or 0),
+        tostring(Store.version or 0),
+        tostring(#keys),
+        table.concat(keys, ","),
+    }, "|")
+end
+
+function link_sched.ownership_local_key()
+    local snap = gather_self_snapshot.cached and gather_self_snapshot.cached() or nil
+    return ownership_index.snapshot_cache_key(snap) or ""
+end
+
+function link_sched.ownership_offer_due()
+    if CFG.generated_authority_enabled == false then return false end
+    local store_cheap = link_sched.ownership_store_cheap()
+    local local_key = link_sched.ownership_local_key()
+    if store_cheap == tostring(link_sched.last_ownership_store_cheap or "")
+        and local_key == tostring(link_sched.last_ownership_local_key or "") then
+        return false
+    end
+    local sig = link_sched.ownership_input_sig()
+    if sig == tostring(link_sched.last_ownership_sig or "") then
+        link_sched.last_ownership_store_cheap = store_cheap
+        link_sched.last_ownership_local_key = local_key
+        return false
+    end
+    return true
+end
+
+function link_sched.ownership_warm_pending()
+    local warm = link_sched.ownership_warm
+    if type(warm) ~= "table" then return false end
+    if warm.active ~= nil then return true end
+    return #(warm.queue or {}) > 0
+end
+
+function link_sched.ownership_cache_status(limit)
+    limit = math.max(1, math.floor(tonumber(limit) or 8))
+    local now = os.clock()
+    local cached = link_sched._ownership_cache_status
+    if type(cached) == "table"
+        and (now - (tonumber(link_sched._ownership_cache_status_at) or 0)) < 0.5
+        and tonumber(cached.limit) == limit then
+        return cached
+    end
+    local out = {
+        limit = limit,
+        total = 0,
+        ready = 0,
+        cold = 0,
+        warming = 0,
+        queue = 0,
+        active = "",
+        active_phase = "",
+        active_units = 0,
+        active_age_ms = 0,
+        last_tick_units = 0,
+        last_tick_ms = 0,
+        max_tick_ms = 0,
+        max_unit_ms = 0,
+        budget_yields = 0,
+        stale_restarts = 0,
+        oldest_blocking_age_ms = 0,
+        ready_names = {},
+        ready_local_names = {},
+        ready_published_names = {},
+        cold_names = {},
+        warming_names = {},
+        rows = {},
+        fingerprint = ownership_index.fingerprint_cache_stats
+            and ownership_index.fingerprint_cache_stats() or {},
+    }
+    local warm = type(link_sched.ownership_warm) == "table" and link_sched.ownership_warm or {}
+    local queued = {}
+    for _, q in ipairs(warm.queue or {}) do
+        local who = tostring(q and (q.who or q.key) or "")
+        if who ~= "" then queued[who] = true end
+        if q and q.priority == true then
+            out.oldest_blocking_age_ms = math.max(out.oldest_blocking_age_ms,
+                math.max(0, (link_sched.elapsed_s() - (tonumber(q.elapsed_at) or link_sched.elapsed_s())) * 1000))
+        end
+    end
+    out.queue = #(warm.queue or {})
+    out.last_tick_units = tonumber(warm.last_tick_units) or 0
+    out.last_tick_ms = tonumber(warm.last_tick_ms) or 0
+    out.max_tick_ms = tonumber(warm.max_tick_ms) or 0
+    out.max_unit_ms = tonumber(warm.max_unit_ms) or 0
+    out.budget_yields = tonumber(warm.budget_yields) or 0
+    out.stale_restarts = tonumber(warm.stale_restarts) or 0
+    if type(warm.active) == "table" then
+        out.active = tostring(warm.active.snap and (warm.active.snap.name or warm.active.key) or warm.active.who or "")
+        out.active_age_ms = math.max(0,
+            (link_sched.elapsed_s() - (tonumber(warm.active.elapsed_at) or link_sched.elapsed_s())) * 1000)
+        if warm.active.priority == true then
+            out.oldest_blocking_age_ms = math.max(out.oldest_blocking_age_ms, out.active_age_ms)
+        end
+        local job = warm.active.snap and warm.active.snap._bis_index_warm_job
+        if type(job) == "table" then
+            out.active_phase = tostring(job.phase or "")
+            out.active_units = tonumber(job.units) or 0
+        end
+    end
+    for _, row in ipairs(group_scan_snapshots()) do
+        local snap = type(row) == "table" and row.snap or nil
+        if type(snap) == "table" then
+            out.total = out.total + 1
+            local who = tostring(snap.name or row.key or "?")
+            local parts = {}
+            -- Certification/status must be observational: do not build the
+            -- ownership fingerprint or warm a first-link path merely by
+            -- printing /tgear status.
+            if ownership_index.has_cached_fingerprint
+                and ownership_index.has_cached_fingerprint(snap) then
+                pcall(function()
+                    parts = ownership_index.snapshot_key_parts and ownership_index.snapshot_key_parts(snap) or {}
+                end)
+            end
+            local key = tostring(parts.key or snap._bis_index_key or "")
+            local cached = false
+            local cache_source = ""
+            if key ~= "" and ownership_index.peek_snapshot_index then
+                local idx, meta = ownership_index.peek_snapshot_index(snap)
+                cached = type(idx) == "table"
+                meta = type(meta) == "table" and meta or {}
+                cache_source = tostring(meta.source or (cached and "local" or ""))
+            else
+                cached = snap._bis_index ~= nil
+                    and tostring(snap._bis_index_key or "") == key
+                cache_source = cached and "local" or ""
+            end
+            local warm_job = type(snap._bis_index_warm_job) == "table"
+            local row_key = tostring(row.key or "")
+            local warm_who = ownership_index.warm_who and ownership_index.warm_who(row, snap) or row_key
+            local row_status = cached
+                and (cache_source == "published" and "ready-published" or "ready-local")
+                or (warm_job and "warming" or (queued[warm_who] and "queued" or "cold"))
+            if cached then
+                out.ready = out.ready + 1
+                if #out.ready_names < limit then out.ready_names[#out.ready_names + 1] = who end
+                if cache_source == "published" then
+                    if #out.ready_published_names < limit then out.ready_published_names[#out.ready_published_names + 1] = who end
+                else
+                    if #out.ready_local_names < limit then out.ready_local_names[#out.ready_local_names + 1] = who end
+                end
+            elseif warm_job or queued[warm_who] then
+                out.warming = out.warming + 1
+                if #out.warming_names < limit then out.warming_names[#out.warming_names + 1] = who end
+            else
+                out.cold = out.cold + 1
+                if #out.cold_names < limit then out.cold_names[#out.cold_names + 1] = who end
+            end
+            if #out.rows < limit then
+                out.rows[#out.rows + 1] = {
+                    key = row_key,
+                    warm_who = tostring(warm_who or ""),
+                    snap = who,
+                    class = tostring(snap.class or "?"),
+                    local_owner = row.local_owner == true,
+                    status = row_status,
+                    cache_source = cache_source,
+                    hash = tostring(parts.hash or ""):sub(1, 8),
+                    full_hash = tostring(parts.full_hash or ""):sub(1, 8),
+                    items = tostring(parts.items or ""),
+                    bank = tostring(parts.bank or ""),
+                    spells = tostring(parts.spells or ""):sub(1, 24),
+                }
+            end
+        end
+    end
+    out.ready_label = table.concat(out.ready_names, ", ")
+    out.ready_local_label = table.concat(out.ready_local_names, ", ")
+    out.ready_published_label = table.concat(out.ready_published_names, ", ")
+    out.cold_label = table.concat(out.cold_names, ", ")
+    out.warming_label = table.concat(out.warming_names, ", ")
+    link_sched._ownership_cache_status = out
+    link_sched._ownership_cache_status_at = now
+    return out
+end
+
+function link_sched.offer_ownership_warm(reason)
+    if CFG.generated_authority_enabled == false then return false end
+    local sig = link_sched.ownership_input_sig()
+    reason = tostring(reason or "semantic")
+    if sig == tostring(link_sched.last_ownership_sig or "") and reason ~= "ready" then
+        diag.count("ownership.offer.same_sig_skip")
+        return false
+    end
+    link_sched.last_ownership_sig = sig
+    link_sched.last_ownership_store_cheap = link_sched.ownership_store_cheap()
+    link_sched.last_ownership_local_key = link_sched.ownership_local_key()
+    link_sched.request_ownership_warm(reason)
+    return true
+end
+
+function link_sched.tick_ownership_warm(deadline)
+    local warm = link_sched.ownership_warm
+    local clock = link_sched.work_clock
+    local configured_budget_ms = math.max(0.01, tonumber(CFG.core_ownership_warm_budget_ms) or 2)
+    deadline = tonumber(deadline) or (clock() + (configured_budget_ms / 1000))
+    local function take_next_work()
+        local priority_i, background_i
+        for i, q in ipairs(warm.queue or {}) do
+            if q and q.priority == true then
+                priority_i = priority_i or i
+            else
+                background_i = background_i or i
+            end
+        end
+        local streak = tonumber(warm.priority_streak) or 0
+        local pick_i
+        if priority_i and (not background_i or streak < 2) then
+            pick_i = priority_i
+            warm.priority_streak = streak + 1
+            diag.count("ownership.blocking_priority_selected")
+        elseif background_i then
+            pick_i = background_i
+            warm.priority_streak = 0
+            if priority_i then diag.count("ownership.background_fairness_selected") end
+        end
+        return pick_i and table.remove(warm.queue, pick_i) or nil
+    end
+    if not warm.active then
+        while #warm.queue > 0 do
+            local next_work = take_next_work()
+            if next_work and type(next_work.snap) == "table" then
+                local current_key = ownership_index.snapshot_cache_key(next_work.snap)
+                if current_key ~= next_work.key then
+                    diag.count("core_ownership.warm_stale_before_start")
+                    diag.count("ownership.restart_new_semantic")
+                    warm.stale_restarts = (tonumber(warm.stale_restarts) or 0) + 1
+                elseif ownership_index.is_snapshot_index_cached and ownership_index.is_snapshot_index_cached(next_work.snap) then
+                    diag.count("core_ownership.cache_hit")
+                    diag.count("ownership.enqueue_same_semantic_skip")
+                else
+                    warm.active = next_work
+                    diag.count("core_ownership.warm_started")
+                    diag.count("core_ownership.cache_miss")
+                    diag.event("core_ownership.warm_started", string.format(
+                        "char=%s reason=%s",
+                        tostring(next_work.snap.name or next_work.key or "?"),
+                        tostring(next_work.reason or "")))
+                    break
+                end
+            end
+        end
+    end
+    if not warm.active then
+        diag.sample("core_ownership.queue_depth", #warm.queue)
+        return false
+    end
+    local done, meta
+    local tick_t0 = clock()
+    local remaining_ms = math.max(0.01, math.min(configured_budget_ms, (deadline - tick_t0) * 1000))
+    diag.time("core_ownership.warm_ms", function()
+        done, meta = ownership_index.tick_snapshot_warm(
+            warm.active.snap,
+            remaining_ms,
+            nil,
+            clock)
+    end)
+    meta = type(meta) == "table" and meta or {}
+    local tick_ms = tonumber(meta.call_ms) or tonumber(meta.tick_ms)
+        or math.max(0, (clock() - tick_t0) * 1000)
+    local tick_units = tonumber(meta.tick_units) or tonumber(meta.units) or 0
+    warm.last_tick_ms = tick_ms
+    warm.max_tick_ms = math.max(tonumber(warm.max_tick_ms) or 0, tick_ms)
+    warm.max_unit_ms = math.max(tonumber(warm.max_unit_ms) or 0, tonumber(meta.max_unit_ms) or 0)
+    warm.last_tick_units = tick_units
+    if meta.budget_yield == true then
+        warm.budget_yields = (tonumber(warm.budget_yields) or 0) + 1
+    end
+    diag.sample("core_ownership.warm_units", tick_units)
+    diag.sample("core_ownership.warm_tick_ms", tick_ms)
+    diag.sample("core_ownership.warm_max_tick_ms", tonumber(warm.max_tick_ms) or 0)
+    diag.sample("core_ownership.warm_max_unit_ms", tonumber(warm.max_unit_ms) or 0)
+    if meta.total_units then diag.sample("core_ownership.warm_total_units", tonumber(meta.total_units) or 0) end
+    if meta.elapsed_ms then diag.sample("core_ownership.warm_elapsed_ms", tonumber(meta.elapsed_ms) or 0) end
+    if done then
+        if meta.completed == true then
+            diag.count("core_ownership.warm_completed")
+            diag.event("core_ownership.warm_completed", string.format(
+                "char=%s units=%s elapsed=%.1fms",
+                tostring(warm.active.snap and warm.active.snap.name or warm.active.key or "?"),
+                tostring(meta.units or meta.total_units or ""),
+                tonumber(meta.elapsed_ms) or 0))
+        else
+            diag.count("core_ownership.cache_hit")
+        end
+        warm.active = nil
+    elseif meta.stale == true then
+        diag.count("core_ownership.warm_stale")
+        diag.count("ownership.restart_new_semantic")
+        warm.stale_restarts = (tonumber(warm.stale_restarts) or 0) + 1
+        warm.active = nil
+    elseif #warm.queue > 0 then
+        -- Keep private partial state on the snapshot, but rotate scheduler
+        -- ownership between rows. Two blocker slices are followed by one
+        -- background slice when both classes of work exist.
+        warm.queue[#warm.queue + 1] = warm.active
+        warm.active = nil
+    end
+    diag.sample("core_ownership.queue_depth", #warm.queue + (warm.active and 1 or 0))
+    return warm.active ~= nil or #warm.queue > 0
 end
 
 local function peer_index_allowed()
@@ -1377,8 +2087,9 @@ end
 
 -- Queue then flush (scan_group_needs_from_cache). Name-filtered BiS paint is
 -- the ownership source of truth — same as the grid.
-local function queue_group_link_scans(links, source)
+local function queue_group_link_scans(links, source, opts)
     if type(links) ~= "table" or #links == 0 then return 0 end
+    opts = type(opts) == "table" and opts or {}
     source = tostring(source or "chat")
     local n = 0
     for _, item in ipairs(links) do
@@ -1392,24 +2103,39 @@ local function queue_group_link_scans(links, source)
         end
         if item_name ~= "" then
             note_loot_seen(item_name, source)
-            link_scan_queue[#link_scan_queue + 1] = {
+            local stage_timing = link_sched.copy_stage_timing(
+                item.stage_timing or opts.stage_timing)
+            local link_to_enqueue_ms = link_sched.sample_elapsed_ms(
+                "generated_authority.link_to_enqueue_ms",
+                tonumber(opts.elapsed_at or item.elapsed_at) or link_sched.elapsed_s())
+            local queued = {
                 name = item_name,
                 id = tonumber(item.id) or 0,
                 link = item.link,
                 corpse_id = item.corpse_id,
                 source = source,
                 at = os.clock(),
+                chat_at = tonumber(opts.chat_at or item.chat_at) or os.clock(),
+                elapsed_at = tonumber(opts.elapsed_at or item.elapsed_at) or link_sched.elapsed_s(),
+                link_to_enqueue_ms = link_to_enqueue_ms,
+                stage = "driver_queued",
+                stage_timing = stage_timing,
             }
+            link_sched.bounded_push(link_scan_queue, queued, "announce.link_scan_queue")
+            link_sched.stage_stamp(queued, "link_scan_enqueue")
+            local queued_at = tonumber(opts.chat_at or item.chat_at) or os.clock()
+            link_sched.sample_age("announce.link_to_tg_enqueue_ms", queued_at)
             n = n + 1
         end
     end
     if n > 0 then
-        runtime.last_chat_note = string.format("queued bis-paint (%d)", n)
+        runtime.last_chat_note = string.format("queued generated authority (%d)", n)
         runtime.last_pending_at = os.clock()
         runtime.last_pending_item = tostring(links[1] and links[1].name or "item")
         runtime.last_pending_source = source
-        runtime.last_pending_reason = "bis-paint scan queued"
-        diag.count("announce.bis_paint_queued", n)
+        runtime.last_pending_reason = "generated authority queued"
+        diag.count("generated_authority.links_seen", n)
+        diag.sample("generated_authority.queue_depth", #link_scan_queue)
     end
     return n
 end
@@ -1417,6 +2143,645 @@ end
 local emit_bis_paint_group_announce, drain_link_scan_queue
 -- Assigned after emit/drain exist (avoids calling a nil upvalue from chat).
 local scan_group_needs_from_cache
+
+local function shadow_ownership_summary_text(summary)
+    summary = type(summary) == "table" and summary or {}
+    return string.format("ids=%d names=%d spells=%d spellIds=%d",
+        tonumber(summary.ids) or 0,
+        tonumber(summary.names) or 0,
+        tonumber(summary.spells) or 0,
+        tonumber(summary.spell_ids) or 0)
+end
+
+local function shadow_count_map(t)
+    local n = 0
+    for _, _ in pairs(type(t) == "table" and t or {}) do n = n + 1 end
+    return n
+end
+
+link_sched.generated_diag = link_sched.generated_diag or {}
+
+function link_sched.generated_diag.compact_names_text(entry, max_count)
+    entry = type(entry) == "table" and entry or {}
+    local out, seen = {}, {}
+    local function add(v)
+        v = tostring(v or "")
+        if v ~= "" and not seen[v] then
+            seen[v] = true
+            out[#out + 1] = v
+        end
+    end
+    add(entry.item or entry.name)
+    for _, v in ipairs(entry.names or {}) do add(v) end
+    max_count = tonumber(max_count) or 6
+    local clipped = #out > max_count
+    while #out > max_count do table.remove(out) end
+    local text = table.concat(out, "|")
+    if clipped then text = text .. "|..." end
+    return text
+end
+
+function link_sched.generated_diag.compact_ids_text(entry, max_count)
+    entry = type(entry) == "table" and entry or {}
+    local out, seen = {}, {}
+    for _, id in ipairs(entry.ids or {}) do
+        id = tonumber(id)
+        if id and id > 0 and not seen[id] then
+            seen[id] = true
+            out[#out + 1] = tostring(id)
+        end
+    end
+    max_count = tonumber(max_count) or 8
+    local clipped = #out > max_count
+    while #out > max_count do table.remove(out) end
+    local text = table.concat(out, "|")
+    if clipped then text = text .. "|..." end
+    return text
+end
+
+function link_sched.generated_diag.compact_spells_text(entry, max_count)
+    entry = type(entry) == "table" and entry or {}
+    local out, seen = {}, {}
+    local function add(v)
+        v = tostring(v or "")
+        if v ~= "" and not seen[v] then
+            seen[v] = true
+            out[#out + 1] = v
+        end
+    end
+    add(entry.spell)
+    for _, v in ipairs(entry.spells or {}) do add(v) end
+    for _, id in ipairs(entry.spell_ids or {}) do
+        id = tonumber(id)
+        if id and id > 0 then add("#" .. tostring(id)) end
+    end
+    max_count = tonumber(max_count) or 6
+    local clipped = #out > max_count
+    while #out > max_count do table.remove(out) end
+    local text = table.concat(out, "|")
+    if clipped then text = text .. "|..." end
+    return text
+end
+
+function link_sched.generated_diag.peer_freshness_provider(row, snap, diag_prefix)
+    row = type(row) == "table" and row or {}
+    snap = type(snap) == "table" and snap or row.snap
+    if row.local_owner == true or type(snap) ~= "table" then return nil end
+    local ok_bs, bis_search = pcall(require, 'bis_search')
+    if not ok_bs or not bis_search or type(bis_search.slot_rec) ~= "function" then return nil end
+    diag_prefix = tostring(diag_prefix or "generated_shadow")
+    return function(candidate)
+        candidate = type(candidate) == "table" and candidate or {}
+        local rec = bis_search.slot_rec(snap, candidate.list_id, candidate.slot)
+        if type(rec) == "table" and rec.status ~= nil then
+            diag.count(diag_prefix .. ".peer_freshness_record")
+            diag.count(diag_prefix .. ".peer_freshness_" .. tostring(rec.status):gsub("[^%w_]+", "_"))
+        else
+            diag.count(diag_prefix .. ".peer_freshness_missing_record")
+        end
+        return rec
+    end
+end
+
+function link_sched.generated_diag.snapshot_ownership_detail(candidate, ownership)
+    candidate = type(candidate) == "table" and candidate or {}
+    ownership = type(ownership) == "table" and ownership or {}
+    local satisfy = candidate.satisfy or candidate.entry or candidate
+    local match, status = ownership_index.entry_status(satisfy, ownership)
+    if type(match) == "table" then
+        return string.format("status=%s name=%s id=%s where=%s",
+            tostring(status or ""),
+            tostring(match.name or match.item or ""):sub(1, 60),
+            tostring(match.id or ""),
+            tostring(match.where or match.location or match.slotname or ""))
+    end
+    return string.format("status=%s match=%s", tostring(status or "missing"), tostring(match or ""))
+end
+
+function link_sched.generated_diag.bis_search_slot_detail(snap, candidate)
+    local ok_bs, bis_search = pcall(require, 'bis_search')
+    if not ok_bs or not bis_search or type(bis_search.slot_rec) ~= "function" then return "present=false status=no-module" end
+    local rec = bis_search.slot_rec(snap, candidate and candidate.list_id, candidate and candidate.slot)
+    if type(rec) ~= "table" then return "present=false" end
+    return string.format("present=true status=%s name=%s count=%s location=%s",
+        tostring(rec.status or ""),
+        tostring(rec.name or ""):sub(1, 60),
+        tostring(rec.count or ""),
+        tostring(rec.location or ""))
+end
+
+function link_sched.generated_diag.emit_peer_fresh_mismatch_detail(snap, item_name, item_id, authoritative, shadow, ownership)
+    local cand = type(shadow) == "table" and type(shadow.candidate) == "table" and shadow.candidate or {}
+    local satisfy = cand.satisfy or cand.entry or {}
+    local match = cand.match or cand.entry or {}
+    diag.event("generated_shadow.peer_fresh_mismatch", string.format(
+        "char=%s class=%s item=%s id=%s locator=%s list=%s slot=%s auth=%s/%s gen=%s/%s peerFresh=%s",
+        tostring(snap and snap.name or "?"),
+        tostring(snap and snap.class or ""),
+        tostring(item_name or ""):sub(1, 80),
+        tostring(item_id or 0),
+        tostring(cand.locator_id or ""),
+        tostring(cand.list_id or ""),
+        tostring(cand.slot or ""),
+        tostring(authoritative and authoritative.need == true and "need" or "skip"),
+        tostring(authoritative and authoritative.reason or ""),
+        tostring(shadow and shadow.need == true and "need" or "skip"),
+        tostring(shadow and shadow.reason or ""),
+        tostring(shadow and shadow.peer_fresh_used == true)))
+    diag.event("generated_shadow.peer_fresh_keys", string.format(
+        "matchNames=%s matchIds=%s satisfyNames=%s satisfyIds=%s spells=%s",
+        link_sched.generated_diag.compact_names_text(match, 5), link_sched.generated_diag.compact_ids_text(match, 6),
+        link_sched.generated_diag.compact_names_text(satisfy, 5), link_sched.generated_diag.compact_ids_text(satisfy, 6),
+        link_sched.generated_diag.compact_spells_text(satisfy, 5)))
+    diag.event("generated_shadow.peer_fresh_ownership", string.format(
+        "snapshot=%s bisSearch=%s",
+        link_sched.generated_diag.snapshot_ownership_detail(cand, ownership),
+        link_sched.generated_diag.bis_search_slot_detail(snap, cand)))
+end
+
+local function run_local_needs_shadow(row, item_name, item_id, opts, authoritative)
+    if CFG.local_needs_shadow ~= true then return end
+    if CFG.local_needs_legacy_compact_shadow ~= true then return end
+    if type(row) ~= "table" or type(row.snap) ~= "table" then return end
+    local snap = row.snap
+    local ok, err = pcall(function()
+        diag.time("local_needs.total", function()
+            local candidates, cand_reason, cand_meta = {}, "missing-helper", {}
+            if type(catalog.compact_announce_candidates_for_link) == "function" then
+                candidates, cand_reason, cand_meta = diag.time("local_needs.candidate_build", function()
+                    return catalog.compact_announce_candidates_for_link(snap, item_name, item_id)
+                end)
+            end
+            cand_meta = type(cand_meta) == "table" and cand_meta or {}
+            if cand_meta.cache == "hit" then
+                diag.count("local_needs.candidate_cache_hit")
+            elseif cand_meta.cache == "miss" then
+                diag.count("local_needs.candidate_cache_miss")
+            end
+            if cand_meta.fallback == true then diag.count("local_needs.candidate_lookup_fallback") end
+            diag.sample("local_needs.candidate_count", #(candidates or {}))
+            if cand_meta.prepared_count then
+                diag.sample("local_needs.prepared_rule_count", tonumber(cand_meta.prepared_count) or 0)
+            end
+            if cand_meta.not_ready == true then
+                diag.count("local_needs.shadow.skipped_not_ready")
+                return
+            end
+
+            local ownership, own_meta = diag.time("local_needs.ownership_build", function()
+                if type(ownership_index.cached_snapshot_index) == "function" then
+                    return ownership_index.cached_snapshot_index(snap)
+                end
+                return ownership_index.build_snapshot_index(snap), { cache = "miss" }
+            end)
+            own_meta = type(own_meta) == "table" and own_meta or {}
+            if own_meta.cache == "hit" then
+                diag.count("local_needs.ownership_cache_hit")
+            elseif own_meta.cache == "miss" then
+                diag.count("local_needs.ownership_cache_miss")
+            end
+            diag.sample("local_needs.ownership_by_id", shadow_count_map(ownership and ownership.by_id))
+            diag.sample("local_needs.ownership_by_name", shadow_count_map(ownership and ownership.by_name))
+            diag.sample("local_needs.ownership_spells", shadow_count_map(ownership and ownership.known_spells))
+            diag.sample("local_needs.ownership_spell_ids", shadow_count_map(ownership and ownership.known_spell_ids))
+
+            local live_provider = nil
+            if row.local_owner == true then
+                live_provider = function(entry, link)
+                    local ok_bis, bis = pcall(require, 'bis')
+                    if ok_bis and bis and bis.live_item_status then
+                        return bis.live_item_status(entry, link and link.name or "", link and link.id or nil)
+                    end
+                    return nil
+                end
+            end
+            local state_obj = local_needs.build_local_state({
+                identity = {
+                    name = snap.name,
+                    server = snap.server,
+                    class = snap.class,
+                    local_owner = row.local_owner == true,
+                },
+                freshness = {
+                    updated = snap.updated,
+                    inventoryUpdated = snap.inventoryUpdated,
+                    depth = snap.depth,
+                    inventoryIncomplete = snap.inventoryIncomplete == true,
+                    bankValid = snap.bankValid,
+                    bankLive = snap.bankLive,
+                    bankPreserved = snap.bankPreserved,
+                    bankUnknown = snap.bankValid == false and snap.bankLive ~= true,
+                },
+                ownership = ownership,
+                candidates = candidates or {},
+                live_provider = live_provider,
+                peer_freshness_provider = link_sched.generated_diag.peer_freshness_provider(row, snap),
+            })
+            local shadow = diag.time("local_needs.evaluate", function()
+                return local_needs.evaluate_link(state_obj, { name = item_name, id = item_id })
+            end)
+            authoritative = type(authoritative) == "table" and authoritative or {}
+            diag.count("local_needs.shadow.compared")
+            if (authoritative.need == true) == (shadow.need == true) then
+                diag.count("local_needs.shadow.match")
+                return
+            end
+            local category = local_needs.classify_mismatch(authoritative, shadow, state_obj, { name = item_name, id = item_id })
+                or "unknown/error"
+            diag.count("local_needs.shadow.mismatch")
+            diag.count("local_needs.shadow." .. category:gsub("[^%w_]+", "_"))
+            local cand = shadow.candidate or {}
+            local detail = string.format(
+                "char=%s item=%s id=%s norm=%s auth=%s/%s shadow=%s/%s cat=%s path=%s list=%s slot=%s candReason=%s own=%s",
+                tostring(snap.name or row.key or "?"),
+                tostring(item_name or ""):sub(1, 80),
+                tostring(item_id or 0),
+                tostring(ownership_index.norm_item_name(item_name)):sub(1, 80),
+                tostring(authoritative.need == true and "need" or "skip"),
+                tostring(authoritative.reason or ""),
+                tostring(shadow.need == true and "need" or "skip"),
+                tostring(shadow.reason or ""),
+                tostring(category),
+                tostring(cand.eval_path or cand.kind or ""),
+                tostring(cand.list_id or ""),
+                tostring(cand.slot or ""),
+                tostring(cand_reason or ""),
+                shadow_ownership_summary_text(shadow.ownership))
+            diag.event("local_needs.shadow_mismatch", detail:sub(1, 500))
+        end)
+    end)
+    if not ok then
+        diag.count("local_needs.shadow.error")
+        diag.event("local_needs.shadow_error", tostring(err or "?"):sub(1, 240))
+    end
+end
+
+function link_sched.run_shared_local_needs_shadow(row, item_name, item_id, opts, authoritative)
+    if CFG.local_needs_shadow ~= true then return end
+    if CFG.local_needs_runtime_shared_shadow ~= true then return end
+    if not link_sched.shared_shadow_driver_allowed() then return end
+    if type(row) ~= "table" or type(row.snap) ~= "table" then return end
+    if type(catalog.shared_compact_candidates_for_link) ~= "function" then return end
+    local snap = row.snap
+    local ok, err = pcall(function()
+        diag.time("local_needs.shared_total", function()
+            local candidates, cand_reason, cand_meta = diag.time("local_needs.shared_candidate_build", function()
+                return catalog.shared_compact_candidates_for_link(snap, item_name, item_id)
+            end)
+            cand_meta = type(cand_meta) == "table" and cand_meta or {}
+            if cand_meta.cache == "hit" then
+                diag.count("local_needs.shared_candidate_cache_hit")
+            elseif cand_meta.cache == "miss" then
+                diag.count("local_needs.shared_candidate_cache_miss")
+            end
+            diag.sample("local_needs.shared_candidate_count", #(candidates or {}))
+            if cand_meta.raw_count then
+                diag.sample("local_needs.shared_candidate_raw_count", tonumber(cand_meta.raw_count) or 0)
+            end
+            if cand_meta.not_ready == true then
+                diag.count("local_needs.shared_shadow.skipped_not_ready")
+                return
+            end
+
+            local ownership, own_meta = diag.time("local_needs.shared_ownership_build", function()
+                if type(ownership_index.cached_snapshot_index) == "function" then
+                    return ownership_index.cached_snapshot_index(snap)
+                end
+                return ownership_index.build_snapshot_index(snap), { cache = "miss" }
+            end)
+            own_meta = type(own_meta) == "table" and own_meta or {}
+            if own_meta.cache == "hit" then
+                diag.count("local_needs.shared_ownership_cache_hit")
+            elseif own_meta.cache == "miss" then
+                diag.count("local_needs.shared_ownership_cache_miss")
+            end
+
+            local live_provider = nil
+            if row.local_owner == true then
+                live_provider = function(entry, link)
+                    local ok_bis, bis = pcall(require, 'bis')
+                    if ok_bis and bis and bis.live_item_status then
+                        return bis.live_item_status(entry, link and link.name or "", link and link.id or nil)
+                    end
+                    return nil
+                end
+            end
+            local state_obj = local_needs.build_local_state({
+                identity = {
+                    name = snap.name,
+                    server = snap.server,
+                    class = snap.class,
+                    local_owner = row.local_owner == true,
+                },
+                freshness = {
+                    updated = snap.updated,
+                    inventoryUpdated = snap.inventoryUpdated,
+                    depth = snap.depth,
+                    inventoryIncomplete = snap.inventoryIncomplete == true,
+                    bankValid = snap.bankValid,
+                    bankLive = snap.bankLive,
+                    bankPreserved = snap.bankPreserved,
+                    bankUnknown = snap.bankValid == false and snap.bankLive ~= true,
+                },
+                ownership = ownership,
+                candidates = candidates or {},
+                live_provider = live_provider,
+                peer_freshness_provider = link_sched.generated_diag.peer_freshness_provider(row, snap),
+            })
+            local shadow = diag.time("local_needs.shared_evaluate", function()
+                return local_needs.evaluate_link(state_obj, { name = item_name, id = item_id })
+            end)
+            authoritative = type(authoritative) == "table" and authoritative or {}
+            diag.count("local_needs.shared_shadow.compared")
+            if (authoritative.need == true) == (shadow.need == true) then
+                diag.count("local_needs.shared_shadow.match")
+                return
+            end
+            local category = local_needs.classify_mismatch(authoritative, shadow, state_obj, { name = item_name, id = item_id })
+                or "unknown/error"
+            diag.count("local_needs.shared_shadow.mismatch")
+            diag.count("local_needs.shared_shadow." .. category:gsub("[^%w_]+", "_"))
+            local cand = shadow.candidate or {}
+            local detail = string.format(
+                "char=%s item=%s id=%s norm=%s auth=%s/%s shared=%s/%s cat=%s path=%s list=%s slot=%s candReason=%s raw=%s own=%s",
+                tostring(snap.name or row.key or "?"),
+                tostring(item_name or ""):sub(1, 80),
+                tostring(item_id or 0),
+                tostring(ownership_index.norm_item_name(item_name)):sub(1, 80),
+                tostring(authoritative.need == true and "need" or "skip"),
+                tostring(authoritative.reason or ""),
+                tostring(shadow.need == true and "need" or "skip"),
+                tostring(shadow.reason or ""),
+                tostring(category),
+                tostring(cand.eval_path or cand.kind or ""),
+                tostring(cand.list_id or ""),
+                tostring(cand.slot or ""),
+                tostring(cand_reason or ""),
+                tostring(cand_meta.raw_count or 0),
+                shadow_ownership_summary_text(shadow.ownership))
+            diag.event("local_needs.shared_shadow_mismatch", detail:sub(1, 500))
+        end)
+    end)
+    if not ok then
+        diag.count("local_needs.shared_shadow.error")
+        diag.event("local_needs.shared_shadow_error", tostring(err or "?"):sub(1, 240))
+    end
+end
+
+function link_sched.run_generated_local_needs_shadow(row, item_name, item_id, opts, authoritative)
+    if CFG.local_needs_shadow ~= true then
+        diag.count("generated_shadow.skipped_disabled")
+        return
+    end
+    if CFG.local_needs_generated_shadow == false then
+        diag.count("generated_shadow.skipped_generated_disabled")
+        return
+    end
+    if not link_sched.shared_shadow_driver_allowed() then
+        diag.count("generated_shadow.skipped_not_driver")
+        return
+    end
+    if type(row) ~= "table" or type(row.snap) ~= "table" then
+        diag.count("generated_shadow.skipped_no_snap")
+        return
+    end
+    if type(catalog.generated_builtin_compact_candidates_for_link) ~= "function" then
+        diag.count("generated_shadow.skipped_index_unavailable")
+        diag.event("generated_shadow.skipped_index_unavailable", "missing generated_builtin_compact_candidates_for_link")
+        return
+    end
+    local snap = row.snap
+    local ok, err = pcall(function()
+        diag.time("generated_shadow.total", function()
+            local candidates, cand_reason, cand_meta = diag.time("generated_shadow.candidate_build", function()
+                return catalog.generated_builtin_compact_candidates_for_link(snap, item_name, item_id)
+            end)
+            cand_meta = type(cand_meta) == "table" and cand_meta or {}
+            if cand_meta.cache == "hit" then
+                diag.count("generated_shadow.candidate_cache_hit")
+            elseif cand_meta.cache == "miss" then
+                diag.count("generated_shadow.candidate_cache_miss")
+            end
+            diag.sample("generated_shadow.candidate_count", #(candidates or {}))
+            if cand_meta.raw_count then
+                diag.sample("generated_shadow.raw_candidate_count", tonumber(cand_meta.raw_count) or 0)
+            end
+            if cand_meta.unavailable == true then
+                diag.count("generated_shadow.unavailable")
+                diag.count("generated_shadow.skipped_index_unavailable")
+                diag.event("generated_shadow.skipped_index_unavailable", tostring(cand_meta.reason or cand_reason or "unavailable"):sub(1, 240))
+                return
+            end
+            if #(candidates or {}) == 0 then
+                diag.count("generated_shadow.skipped_no_candidate")
+            end
+
+            local ownership, own_meta = diag.time("generated_shadow.ownership_build", function()
+                if type(ownership_index.cached_snapshot_index) == "function" then
+                    return ownership_index.cached_snapshot_index(snap)
+                end
+                return ownership_index.build_snapshot_index(snap), { cache = "miss" }
+            end)
+            own_meta = type(own_meta) == "table" and own_meta or {}
+            if own_meta.cache == "hit" then
+                diag.count("generated_shadow.ownership_cache_hit")
+            elseif own_meta.cache == "miss" then
+                diag.count("generated_shadow.ownership_cache_miss")
+            end
+
+            local live_provider = nil
+            if row.local_owner == true then
+                live_provider = function(entry, link)
+                    local ok_bis, bis = pcall(require, 'bis')
+                    if ok_bis and bis and bis.live_item_status then
+                        return bis.live_item_status(entry, link and link.name or "", link and link.id or nil)
+                    end
+                    return nil
+                end
+            end
+            local state_obj = local_needs.build_local_state({
+                identity = {
+                    name = snap.name,
+                    server = snap.server,
+                    class = snap.class,
+                    local_owner = row.local_owner == true,
+                },
+                freshness = {
+                    updated = snap.updated,
+                    inventoryUpdated = snap.inventoryUpdated,
+                    depth = snap.depth,
+                    inventoryIncomplete = snap.inventoryIncomplete == true,
+                    bankValid = snap.bankValid,
+                    bankLive = snap.bankLive,
+                    bankPreserved = snap.bankPreserved,
+                    bankUnknown = snap.bankValid == false and snap.bankLive ~= true,
+                },
+                ownership = ownership,
+                candidates = candidates or {},
+                live_provider = live_provider,
+                peer_freshness_provider = link_sched.generated_diag.peer_freshness_provider(row, snap),
+            })
+            local shadow = diag.time("generated_shadow.evaluate", function()
+                return local_needs.evaluate_link(state_obj, { name = item_name, id = item_id })
+            end)
+            authoritative = type(authoritative) == "table" and authoritative or {}
+            diag.count("generated_shadow.compared")
+            if (authoritative.need == true) == (shadow.need == true) then
+                diag.count("generated_shadow.match")
+                return
+            end
+            local category = local_needs.classify_mismatch(authoritative, shadow, state_obj, { name = item_name, id = item_id })
+                or "unknown/error"
+            diag.count("generated_shadow.mismatch")
+            diag.count("generated_shadow." .. category:gsub("[^%w_]+", "_"))
+            local cand = shadow.candidate or {}
+            if category == "peer-live/bis_search-freshness" then
+                link_sched.generated_diag.emit_peer_fresh_mismatch_detail(snap, item_name, item_id, authoritative, shadow, ownership)
+            end
+            do
+                local satisfy = cand.satisfy or cand.entry or {}
+                diag.event("generated_shadow.generated_keys", string.format(
+                    "locator=%s list=%s slot=%s satisfyNames=%s satisfyIds=%s spells=%s",
+                    tostring(cand.locator_id or ""), tostring(cand.list_id or ""), tostring(cand.slot or ""),
+                    link_sched.generated_diag.compact_names_text(satisfy, 6),
+                    link_sched.generated_diag.compact_ids_text(satisfy, 10),
+                    link_sched.generated_diag.compact_spells_text(satisfy, 6)):sub(1, 500))
+                if type(catalog.explain_authoritative_announce_decision) == "function" then
+                    local ok_exp, exp = pcall(catalog.explain_authoritative_announce_decision,
+                        snap, item_name, item_id, {
+                            skip_live = not (row.local_owner == true),
+                            list_id = cand.list_id,
+                            slot = cand.slot,
+                        })
+                    if ok_exp and type(exp) == "table" then
+                        diag.event("generated_shadow.auth_trace", string.format(
+                            "final=%s lines=%d", tostring(exp.final_reason or ""), #(exp.lines or {})))
+                        for _, line in ipairs(exp.lines or {}) do
+                            diag.event("generated_shadow.auth_trace", line)
+                        end
+                    else
+                        diag.event("generated_shadow.auth_trace_error", tostring(exp or "error"):sub(1, 240))
+                    end
+                end
+            end
+            local detail = string.format(
+                "char=%s class=%s item=%s id=%s auth=%s/%s gen=%s/%s cat=%s list=%s slot=%s locator=%s candReason=%s raw=%s",
+                tostring(snap.name or row.key or "?"),
+                tostring(snap.class or ""),
+                tostring(item_name or ""):sub(1, 80),
+                tostring(item_id or 0),
+                tostring(authoritative.need == true and "need" or "skip"),
+                tostring(authoritative.reason or ""),
+                tostring(shadow.need == true and "need" or "skip"),
+                tostring(shadow.reason or ""),
+                tostring(category),
+                tostring(cand.list_id or ""),
+                tostring(cand.slot or ""),
+                tostring(cand.locator_id or ""),
+                tostring(cand_reason or ""),
+                tostring(cand_meta.raw_count or 0))
+            diag.event("generated_shadow.mismatch", detail:sub(1, 500))
+        end)
+    end)
+    if not ok then
+        diag.count("generated_shadow.error")
+        diag.event("generated_shadow.error", tostring(err or "?"):sub(1, 240))
+    end
+end
+
+function link_sched.generated_diag.live_provider_for_row(row)
+    if type(row) ~= "table" or row.local_owner ~= true then return nil end
+    return function(entry, link)
+        local ok_bis, bis = pcall(require, 'bis')
+        if ok_bis and bis and bis.live_item_status then
+            return bis.live_item_status(entry, link and link.name or "", link and link.id or nil)
+        end
+        return nil
+    end
+end
+
+function link_sched.generated_diag.need_for_row(row, item_name, item_id, diag_prefix)
+    diag_prefix = tostring(diag_prefix or "generated_need")
+    if type(row) ~= "table" or type(row.snap) ~= "table" then return nil, "no-snap" end
+    if type(catalog.generated_builtin_compact_candidates_for_link) ~= "function" then return nil, "missing-helper" end
+    local snap = row.snap
+    local candidates, cand_reason, cand_meta = diag.time(diag_prefix .. ".candidate_build", function()
+        return catalog.generated_builtin_compact_candidates_for_link(snap, item_name, item_id)
+    end)
+    cand_meta = type(cand_meta) == "table" and cand_meta or {}
+    diag.sample(diag_prefix .. ".candidate_count", #(candidates or {}))
+    if cand_meta.raw_count then diag.sample(diag_prefix .. ".raw_candidate_count", tonumber(cand_meta.raw_count) or 0) end
+    if cand_meta.unavailable == true then
+        diag.count(diag_prefix .. ".unavailable")
+        return nil, cand_reason or "unavailable"
+    end
+    if not candidates or #candidates == 0 then
+        return nil, cand_reason or "no-row"
+    end
+    -- Compact ownership is Tier-A Core readiness for [TG]:
+    --   cache hit  -> evaluate immediately (warm path).
+    --   cache miss -> queue cooperative warm and return ownership-warming.
+    --                 Do not evaluate with an empty index (that false-positives).
+    --                 Do not call build_snapshot_index / cached_snapshot_index.
+    --   The driver defers that row until peek hits or core_ownership_emit_wait_s
+    --   expires (then that char is omitted, never announced as a guessed needer).
+    local ownership, own_meta = diag.time(diag_prefix .. ".ownership_peek", function()
+        if type(ownership_index.peek_snapshot_index) == "function" then
+            return ownership_index.peek_snapshot_index(snap)
+        end
+        local cached, key = ownership_index.is_snapshot_index_cached(snap)
+        if cached then return snap._bis_index, { cache = "hit", key = key } end
+        return nil, { cache = "miss", key = key or "" }
+    end)
+    own_meta = type(own_meta) == "table" and own_meta or {}
+    if own_meta.cache == "hit" then
+        diag.count("core_ownership.cache_hit")
+    else
+        diag.count("core_ownership.cache_miss")
+        diag.count("core_ownership.emit_deferred_miss")
+        pcall(function()
+            link_sched.queue_ownership_warm(row, "emit_miss")
+        end)
+        return nil, "ownership-warming"
+    end
+    local state_obj = local_needs.build_local_state({
+        identity = {
+            name = snap.name,
+            server = snap.server,
+            class = snap.class,
+            local_owner = row.local_owner == true,
+        },
+        freshness = {
+            updated = snap.updated,
+            inventoryUpdated = snap.inventoryUpdated,
+            depth = snap.depth,
+            inventoryIncomplete = snap.inventoryIncomplete == true,
+            bankValid = snap.bankValid,
+            bankLive = snap.bankLive,
+            bankPreserved = snap.bankPreserved,
+            bankUnknown = snap.bankValid == false and snap.bankLive ~= true,
+        },
+        ownership = ownership,
+        candidates = candidates or {},
+        live_provider = link_sched.generated_diag.live_provider_for_row(row),
+        peer_freshness_provider = link_sched.generated_diag.peer_freshness_provider(row, snap, diag_prefix),
+    })
+    local result = diag.time(diag_prefix .. ".evaluate", function()
+        return local_needs.evaluate_link(state_obj, { name = item_name, id = item_id })
+    end)
+    if type(result) ~= "table" then return nil, "bad-result" end
+    if result.need ~= true then return nil, result.reason or cand_reason or "no-need", result end
+    local cand = result.candidate or {}
+    return {
+        item_name = cand.item_name ~= "" and cand.item_name or item_name,
+        entry = cand.satisfy or cand.entry,
+        list = { id = cand.list_id, name = cand.list_name },
+        reason = result.reason,
+        character = snap.name,
+        generated = true,
+        result = result,
+    }, "need", result
+end
 
 local function scan_group_text_needs_from_cache(line, source)
     line = tostring(line or "")
@@ -1503,12 +2868,27 @@ local function send_group_announce(bucket, opts)
     note_sent(bucket.item_name)
     note_recent_sent(dedupe.key)
     note_item_announced(bucket.item_name, bucket.item_id)
+    diag.count("linked.announce_sent")
+    diag.event("linked.announce_sent", string.format(
+        "role=%s item=%s needers=%s",
+        link_sched.hist.role(), tostring(bucket.item_name or ""):sub(1, 80),
+        link_sched.hist.needers_label(bucket.order)))
     dprint("sending %s %s",
         tostring(cmd or "/g"), tostring(msg):gsub("[\018]", ""):sub(1, 140))
+    local stage_job = opts.stage_job
+    link_sched.stage_stamp(stage_job, "mq_cmd_start")
+    local cmd_wall_t0, cmd_cpu_t0 = link_sched.elapsed_s(), os.clock()
     if item_actions.looks_like_item_link(bucket.item_link) then
         mq.cmd(tostring(cmd or "/g") .. " " .. msg)
     else
         mq.cmdf("%s %s", cmd, msg)
+    end
+    link_sched.stage_stamp(stage_job, "mq_cmd_end")
+    if type(stage_job) == "table" then
+        stage_job.mq_cmd_wall_ms = math.max(0, (link_sched.elapsed_s() - cmd_wall_t0) * 1000)
+        stage_job.mq_cmd_cpu_ms = math.max(0, (os.clock() - cmd_cpu_t0) * 1000)
+        diag.sample("generated_authority.mq_cmd_wall_ms", stage_job.mq_cmd_wall_ms)
+        diag.sample("generated_authority.mq_cmd_cpu_ms", stage_job.mq_cmd_cpu_ms)
     end
     return true
 end
@@ -1546,6 +2926,9 @@ local function paint_bis_paint_group_announce(entry)
     else
         item_name = clean_text_candidate(item_name)
     end
+    if rules.strip_trailing_corpse_id then
+        item_name = rules.strip_trailing_corpse_id(item_name)
+    end
     if item_name == "" then return nil, 0 end
     local item_link = resolve_group_item_link(item_name, raw_link, item_id)
     ensure_link_catalog()
@@ -1569,6 +2952,9 @@ local function paint_bis_paint_group_announce(entry)
             if not ok then
                 details[#details + 1] = who .. "=error(" .. class_tag .. ")"
             elseif need then
+                run_local_needs_shadow(row, item_name, item_id, opts, { need = true, reason = "need" })
+                link_sched.run_shared_local_needs_shadow(row, item_name, item_id, opts, { need = true, reason = "need" })
+                link_sched.run_generated_local_needs_shadow(row, item_name, item_id, opts, { need = true, reason = "need" })
                 local key = who:lower()
                 if not name_map[key] then
                     name_map[key] = who
@@ -1577,6 +2963,9 @@ local function paint_bis_paint_group_announce(entry)
                 end
                 details[#details + 1] = who .. "=need(" .. class_tag .. ")"
             else
+                run_local_needs_shadow(row, item_name, item_id, opts, { need = false, reason = tostring(why or "owned") })
+                link_sched.run_shared_local_needs_shadow(row, item_name, item_id, opts, { need = false, reason = tostring(why or "owned") })
+                link_sched.run_generated_local_needs_shadow(row, item_name, item_id, opts, { need = false, reason = tostring(why or "owned") })
                 details[#details + 1] = who .. "=" .. tostring(why or "owned") .. "(" .. class_tag .. ")"
             end
         end
@@ -1631,47 +3020,791 @@ emit_bis_paint_group_announce = function(entry)
     return 0
 end
 
-drain_link_scan_queue = function()
-    if #link_scan_queue == 0 then return end
-    local entry = table.remove(link_scan_queue, 1)
-    emit_bis_paint_group_announce(entry)
+function link_sched.order_set(order)
+    local out = {}
+    for _, name in ipairs(type(order) == "table" and order or {}) do
+        name = trim(name)
+        if name ~= "" then out[name:lower()] = true end
+    end
+    return out
+end
+
+function link_sched.drain_legacy_validation(deadline)
+    if CFG.generated_authority_legacy_validation ~= true then return false end
+    local q = link_sched.legacy_validation_queue
+    if #q == 0 then return false end
+    deadline = tonumber(deadline) or (os.clock() + 0.005)
+    local did = false
+    while #q > 0 and os.clock() < deadline do
+        local work = table.remove(q, 1)
+        if work then
+            did = true
+            local legacy_bucket
+            local ok, err = pcall(function()
+                legacy_bucket = diag.time("legacy_validation.paint_ms", function()
+                    return paint_bis_paint_group_announce({
+                        name = work.name,
+                        id = work.id,
+                        link = work.link,
+                        source = "legacy-validation",
+                        chat_at = work.chat_at,
+                    })
+                end)
+            end)
+            if not ok then
+                diag.count("legacy_validation.error")
+                diag.event("legacy_validation.error", tostring(err or "?"):sub(1, 240))
+            else
+                local gen = link_sched.order_set(work.generated_order)
+                local old = link_sched.order_set(legacy_bucket and legacy_bucket.order)
+                local match = true
+                for name in pairs(gen) do if not old[name] then match = false break end end
+                if match then
+                    for name in pairs(old) do if not gen[name] then match = false break end end
+                end
+                diag.count(match and "legacy_validation.match" or "legacy_validation.mismatch")
+                if not match then
+                    diag.event("legacy_validation.mismatch", string.format(
+                        "item=%s generated=%s legacy=%s",
+                        tostring(work.name or ""):sub(1, 80),
+                        table.concat(copy_order(work.generated_order), ","),
+                        table.concat(copy_order(legacy_bucket and legacy_bucket.order), ",")))
+                end
+            end
+            link_sched.sample_age("legacy_validation.age_ms", work.at)
+        end
+    end
+    diag.sample("legacy_validation.queue_depth", #q)
+    return did
+end
+
+function link_sched.normalize_driver_link_entry(entry)
+    if type(entry) ~= "table" then return nil end
+    local item_name = tostring(entry.name or "")
+    local item_id = tonumber(entry.id) or 0
+    local raw_link = tostring(entry.link or "")
+    if item_actions.looks_like_item_link(raw_link) and mq.ParseItemLink then
+        local pok, item = pcall(function() return mq.ParseItemLink(raw_link) end)
+        if pok and type(item) == "table" then
+            local n, i = link_name(item)
+            if n and n ~= "" then
+                item_name = n
+                if (tonumber(i) or 0) > 0 then item_id = tonumber(i) or item_id end
+            end
+        end
+    end
+    if catalog.clean_link_item_name then
+        item_name = catalog.clean_link_item_name(item_name) or item_name
+    else
+        item_name = clean_text_candidate(item_name)
+    end
+    if rules.strip_trailing_corpse_id then
+        item_name = rules.strip_trailing_corpse_id(item_name)
+    end
+    if item_name == "" then return nil end
+    return {
+        entry = entry,
+        item_name = item_name,
+        item_id = item_id,
+        item_link = resolve_group_item_link(item_name, raw_link, item_id),
+        chat_at = tonumber(entry.chat_at) or tonumber(entry.at) or os.clock(),
+        elapsed_at = tonumber(entry.elapsed_at) or link_sched.elapsed_s(),
+        link_to_enqueue_ms = tonumber(entry.link_to_enqueue_ms),
+        source = tostring(entry.source or "chat"),
+        stage_timing = link_sched.copy_stage_timing(entry.stage_timing),
+    }
+end
+
+function link_sched.start_driver_link_job(entry)
+    local normed = link_sched.normalize_driver_link_entry(entry)
+    if not normed then return nil end
+    runtime.last_chat_note = "queued generated authority: " .. normed.item_name
+    link_sched.sample_age("announce.link_queue_age", normed.chat_at)
+    local job = {
+        entry = normed.entry,
+        item_name = normed.item_name,
+        item_id = normed.item_id,
+        item_link = normed.item_link,
+        chat_at = normed.chat_at,
+        source = normed.source,
+        rows = group_scan_snapshots(),
+        index = 1,
+        order = {},
+        name_map = {},
+        sources = {},
+        details = {},
+        scan_counts = {},
+        snaps = 0,
+        elapsed_at = tonumber(normed.elapsed_at) or link_sched.elapsed_s(),
+        authority_started = link_sched.elapsed_s(),
+        link_to_enqueue_ms = tonumber(normed.link_to_enqueue_ms),
+        decision_ms = 0,
+        decision_max_ms = 0,
+        pending_warm = {},
+        pending_warm_keys = {},
+        row_outcomes = {},
+        targeted_attempted = {},
+        cold_fallback_rows = 0,
+        targeted_resolved = 0,
+        targeted_unresolved = 0,
+        outcome = "PENDING",
+        stage_timing = normed.stage_timing,
+        row_decisions = {},
+        pending_warm_started = {},
+        pending_warm_wait_wall_ms = 0,
+        pending_warm_wait_cpu_ms = 0,
+        generated_resident_at_start = catalog.generated_builtin_index_ready
+            and catalog.generated_builtin_index_ready() == true,
+        current_stage = "DRIVER_READY",
+    }
+    if not job.generated_resident_at_start then
+        diag.count("generated_index.driver_started_not_resident")
+    end
+    link_sched.stage_stamp(job, "driver_start")
+    return job
+end
+
+function link_sched.ownership_emit_wait_s()
+    local wait = tonumber(CFG.core_ownership_emit_wait_s) or 2.0
+    if wait < 0.25 then wait = 0.25 end
+    if wait > 5 then wait = 5 end
+    return wait
+end
+
+function link_sched.apply_driver_need_result(job, row, need, why)
+    job.scan_counts = type(job.scan_counts) == "table" and job.scan_counts or {}
+    local function bump(k)
+        job.scan_counts[k] = (tonumber(job.scan_counts[k]) or 0) + 1
+    end
+    if type(job.pending_warm) ~= "table" then job.pending_warm = {} end
+    job.pending_warm_keys = type(job.pending_warm_keys) == "table" and job.pending_warm_keys or {}
+    job.row_outcomes = type(job.row_outcomes) == "table" and job.row_outcomes or {}
+    local who = tostring(row and row.snap and (row.snap.name or row.key) or "?")
+    local class_tag = tostring(row and row.snap and row.snap.class or "?")
+    if class_tag == "" then class_tag = "?" end
+    local row_key = tostring(row and (row.key or (row.snap and row.snap.name)) or who)
+    if row_key == "" then row_key = who end
+    local existing = job.row_outcomes[row_key]
+    job.pending_warm_started = type(job.pending_warm_started) == "table" and job.pending_warm_started or {}
+    if type(existing) == "table" and existing.final == true then
+        return existing.state == "NEED" and "need" or "skip"
+    end
+    local function set_final(state, reason)
+        local wait_started = job.pending_warm_started[row_key]
+        if type(wait_started) == "table" then
+            local wait_wall = math.max(0, (link_sched.elapsed_s()
+                - (tonumber(wait_started.wall) or link_sched.elapsed_s())) * 1000)
+            local wait_cpu = math.max(0, (os.clock()
+                - (tonumber(wait_started.cpu) or os.clock())) * 1000)
+            job.pending_warm_wait_wall_ms = (tonumber(job.pending_warm_wait_wall_ms) or 0) + wait_wall
+            job.pending_warm_wait_cpu_ms = (tonumber(job.pending_warm_wait_cpu_ms) or 0) + wait_cpu
+            job.pending_warm_started[row_key] = nil
+            diag.sample("generated_authority.pending_warm_wait_wall_ms", wait_wall)
+            diag.sample("generated_authority.pending_warm_wait_cpu_ms", wait_cpu)
+        end
+        job.row_outcomes[row_key] = {
+            character = who,
+            class = class_tag,
+            state = state,
+            reason = tostring(reason or ""),
+            final = true,
+        }
+        job.pending_warm_keys[row_key] = nil
+    end
+    if need then
+        bump(need._cold_fallback == true and "fallback_need" or "need")
+        local key = who:lower()
+        if not job.name_map[key] then
+            job.name_map[key] = who
+            job.order[#job.order + 1] = who
+            job.sources[key] = "generated-authority"
+        end
+        set_final("NEED", need._cold_fallback == true and "targeted" or "cached")
+        job.details[#job.details + 1] = who .. "=need(" .. class_tag .. ")"
+        return "need"
+    end
+    local reason = tostring(why or "no-need")
+    if reason == "ownership-warming" then
+        bump("warming")
+        if not job.pending_warm_keys[row_key] then
+            job.pending_warm_keys[row_key] = true
+            job.pending_warm[#job.pending_warm + 1] = row
+            job.details[#job.details + 1] = who .. "=warming(" .. class_tag .. ")"
+            if job.pending_warm_started[row_key] == nil then
+                job.pending_warm_started[row_key] = {
+                    wall = link_sched.elapsed_s(),
+                    cpu = os.clock(),
+                }
+            end
+        end
+        job.row_outcomes[row_key] = {
+            character = who, class = class_tag, state = "UNRESOLVED",
+            reason = reason, final = false,
+        }
+        return "warming"
+    end
+    if reason == "unavailable" or reason == "missing-helper" then
+        bump("unavailable")
+        diag.count("generated_authority.degraded")
+        diag.event("generated_authority.degraded", string.format(
+            "item=%s char=%s reason=%s",
+            tostring(job.item_name):sub(1, 80), tostring(who), reason))
+        set_final("UNRESOLVED", reason)
+        job.details[#job.details + 1] = who .. "=" .. reason .. "(" .. class_tag .. ")"
+        return "unresolved"
+    elseif reason == "no-row" then
+        bump("no_row")
+        diag.count("generated_authority.no_candidate")
+    elseif reason == "ownership-timeout" then
+        bump("timeout")
+        diag.count("generated_authority.ownership_timeout")
+        set_final("UNRESOLVED", reason)
+        job.details[#job.details + 1] = who .. "=timeout(" .. class_tag .. ")"
+        return "timeout"
+    elseif reason == "owned" or reason == "owned-live" or reason == "owned-peer-fresh"
+        or reason == "no-need" then
+        bump("owned")
+    else
+        bump("unresolved")
+        set_final("UNRESOLVED", reason)
+        diag.count("generated_authority.row_unresolved")
+        job.details[#job.details + 1] = who .. "=" .. reason .. "(" .. class_tag .. ")"
+        return "unresolved"
+    end
+    set_final(reason == "no-row" and "NO_RULE" or "OWNED", reason)
+    job.details[#job.details + 1] = who .. "=" .. reason .. "(" .. class_tag .. ")"
+    return "skip"
+end
+
+function link_sched.try_cold_row_fallback(job, row, deadline, opts)
+    if CFG.generated_authority_cold_fallback == false then return nil, "disabled" end
+    if type(job) ~= "table" or type(row) ~= "table" or type(row.snap) ~= "table" then return nil, "no-row" end
+    opts = type(opts) == "table" and opts or {}
+    local clock = link_sched.work_clock
+    local row_key = tostring(row.key or row.snap.name or "?")
+    job.targeted_attempted = type(job.targeted_attempted) == "table" and job.targeted_attempted or {}
+    if job.targeted_attempted[row_key] then return nil, "already-attempted" end
+    job.cold_fallback_rows = tonumber(job.cold_fallback_rows) or 0
+    local max_rows = tonumber(CFG.generated_authority_cold_fallback_max_rows)
+    if max_rows ~= nil then
+        max_rows = math.max(1, math.floor(max_rows))
+        if job.cold_fallback_rows >= max_rows then return nil, "max-rows" end
+    end
+    local budget_ms = math.max(0, tonumber(CFG.generated_authority_cold_fallback_budget_ms) or 2)
+    if budget_ms <= 0 then return nil, "budget-off" end
+    deadline = tonumber(deadline) or (clock() + (budget_ms / 1000))
+    if clock() >= deadline then
+        if opts.own_budget == true then
+            deadline = clock() + (budget_ms / 1000)
+            diag.count("generated_authority.cold_fallback_own_budget")
+        else
+            return nil, "budget"
+        end
+    end
+    if type(catalog.generated_builtin_targeted_decision) ~= "function" then return nil, "missing-helper" end
+
+    job.targeted_attempted[row_key] = true
+    job.cold_fallback_rows = job.cold_fallback_rows + 1
+    local t0 = clock()
+    local ok, need, why = pcall(function()
+        return catalog.generated_builtin_targeted_decision(row.snap, job.item_name, job.item_id, {
+            local_owner = row.local_owner == true,
+            freshness = {
+                inventoryUpdated = row.snap.inventoryUpdated,
+                inventoryIncomplete = row.snap.inventoryIncomplete,
+                bankValid = row.snap.bankValid,
+                bankLive = row.snap.bankLive,
+                bankPreserved = row.snap.bankPreserved,
+                bankUnknown = row.snap.bankValid == false and row.snap.bankLive ~= true,
+            },
+            live_provider = link_sched.generated_diag.live_provider_for_row(row),
+            peer_freshness_provider = link_sched.generated_diag.peer_freshness_provider(
+                row, row.snap, "generated_authority.targeted"),
+        })
+    end)
+    local unit_ms = math.max(0, (clock() - t0) * 1000)
+    job.targeted_max_unit_ms = math.max(tonumber(job.targeted_max_unit_ms) or 0, unit_ms)
+    diag.sample("generated_authority.cold_fallback_ms", unit_ms)
+    diag.sample("generated_authority.targeted_max_unit_ms", job.targeted_max_unit_ms)
+    diag.count("generated_authority.targeted_attempted")
+    if not ok then
+        diag.count("generated_authority.cold_fallback_error")
+        diag.count("generated_authority.targeted_unresolved")
+        job.targeted_unresolved = (tonumber(job.targeted_unresolved) or 0) + 1
+        diag.event("generated_authority.cold_fallback_error", tostring(need or "?"):sub(1, 240))
+        return nil, "fallback-error"
+    end
+    diag.count("generated_authority.cold_fallback_checked")
+    if need then
+        need._cold_fallback = true
+        diag.count("generated_authority.cold_fallback_need")
+        diag.count("generated_authority.targeted_resolved")
+        job.targeted_resolved = (tonumber(job.targeted_resolved) or 0) + 1
+        return need, "need"
+    end
+    why = tostring(why or "no-row")
+    if why == "owned" or why == "no-row" then
+        diag.count("generated_authority.targeted_resolved")
+        job.targeted_resolved = (tonumber(job.targeted_resolved) or 0) + 1
+        return nil, why
+    end
+    diag.count("generated_authority.targeted_unresolved")
+    job.targeted_unresolved = (tonumber(job.targeted_unresolved) or 0) + 1
+    return nil, why
+end
+
+function link_sched.queue_legacy_validation(job)
+    if CFG.generated_authority_legacy_validation ~= true then return end
+    if type(job) ~= "table" then return end
+    local q = link_sched.legacy_validation_queue
+    q[#q + 1] = {
+        name = job.item_name,
+        id = job.item_id,
+        link = job.item_link,
+        source = job.source,
+        chat_at = job.chat_at,
+        entry = job.entry,
+        generated_order = copy_order(job.order),
+        at = os.clock(),
+    }
+    while #q > 8 do
+        table.remove(q, 1)
+        diag.count("legacy_validation.dropped")
+    end
+end
+
+function link_sched.finish_driver_link_job(job)
+    link_sched.last_finished_job = job
+    job.current_stage = "FINISHING"
+    job.completed_at = link_sched.elapsed_s()
+    link_sched.stage_stamp(job, "finish", job.completed_at, os.clock())
+    job.age_ms = math.max(0, (job.completed_at - (tonumber(job.authority_started) or job.completed_at)) * 1000)
+    job.link_to_enqueue_ms = tonumber(job.link_to_enqueue_ms)
+        or math.max(0, ((tonumber(job.authority_started) or job.completed_at)
+            - (tonumber(job.elapsed_at) or tonumber(job.authority_started) or job.completed_at)) * 1000)
+    job.decision_ms = tonumber(job.decision_ms) or 0
+    job.decision_max_ms = tonumber(job.decision_max_ms) or 0
+    local unresolved = 0
+    for _, result in pairs(type(job.row_outcomes) == "table" and job.row_outcomes or {}) do
+        if type(result) == "table" and result.state == "UNRESOLVED" then
+            unresolved = unresolved + 1
+        end
+    end
+    job.unresolved_count = unresolved
+    if unresolved > 0 then
+        job.outcome = "ABORTED"
+    elseif #(job.order or {}) == 0 then
+        job.outcome = "NO_NEEDERS"
+    else
+        job.outcome = "COMPLETE"
+    end
+    job.current_stage = job.outcome
+    job.current_row_started_wall = nil
+    job.current_row_started_cpu = nil
+    runtime.last_generated_scan = {}
+    for k, v in pairs(type(job.scan_counts) == "table" and job.scan_counts or {}) do
+        runtime.last_generated_scan[k] = v
+    end
+    runtime.last_generated_scan.item = tostring(job.item_name or "")
+    runtime.last_generated_scan.snaps = tonumber(job.snaps) or 0
+    runtime.last_generated_scan.fallback_rows = tonumber(job.cold_fallback_rows) or 0
+    runtime.last_generated_scan.targeted_resolved = tonumber(job.targeted_resolved) or 0
+    runtime.last_generated_scan.targeted_unresolved = tonumber(job.targeted_unresolved) or 0
+    runtime.last_generated_scan.unresolved = unresolved
+    runtime.last_generated_scan.outcome = job.outcome
+    runtime.last_generated_scan.age_ms = job.age_ms
+    runtime.last_generated_scan.link_to_enqueue_ms = job.link_to_enqueue_ms
+    runtime.last_generated_scan.decision_ms = job.decision_ms
+    runtime.last_generated_scan.decision_max_ms = job.decision_max_ms
+    runtime.last_generated_scan.row_outcomes = job.row_outcomes
+    runtime.last_generated_scan.stage_latency = link_sched.stage_latency_report(job)
+    local detail = tostring(job.item_name or "") .. ": " .. table.concat(job.details or {}, " ")
+    runtime.last_group_scan_detail = detail
+    note_group_scan("generated-authority", job.source, 1, tonumber(job.snaps) or 0, #(job.order or {}), detail)
+    diag.sample("generated_authority.needers_count", #(job.order or {}))
+    diag.sample("generated_authority.queue_age_ms", link_sched.sample_age("announce.link_queue_age", job.chat_at))
+    diag.sample("generated_authority.job_age_ms", job.age_ms)
+    if job.outcome == "ABORTED" then
+        note_skip(job.item_name, "generated authority aborted")
+        diag.count("generated_authority.aborted")
+        diag.sample("generated_authority.unresolved_rows", unresolved)
+        diag.event("generated_authority.aborted", string.format(
+            "item=%s unresolved=%d needersHeld=%d age=%.1fms",
+            tostring(job.item_name or ""):sub(1, 80), unresolved, #(job.order or {}), job.age_ms))
+        dprint("linked-needs aborted; no partial output for %s (%s)", tostring(job.item_name), detail)
+        return 0
+    end
+    if job.outcome == "NO_NEEDERS" then
+        note_skip(job.item_name, "no needers")
+        diag.count("announce.empty_skip")
+        diag.count("generated_authority.no_needers")
+        diag.count("generated_authority.outcome_no_needers")
+        dprint("linked-needs: no needers for %s (%s)", tostring(job.item_name), detail)
+        link_sched.queue_legacy_validation(job)
+        return 0
+    end
+    diag.count("generated_authority.outcome_complete")
+    local bucket = {
+        key = grouped_item_key(job.item_name, job.item_id, job.item_link),
+        item_name = job.item_name,
+        item_link = tostring(job.item_link or ""),
+        item_id = tonumber(job.item_id) or 0,
+        source = tostring(job.source or "chat"),
+        names = job.name_map,
+        order = job.order,
+        sources = job.sources,
+    }
+    local cid = tonumber(job.entry and job.entry.corpse_id)
+    if cid and cid > 0 then
+        bucket.corpse_id = math.floor(cid)
+        bucket.corpse_at = os.clock()
+    end
+    local send_opts = send_opts_for_entry(job.entry)
+    send_opts.stage_job = job
+    if send_group_announce(bucket, send_opts) then
+        diag.count("generated_authority.needers", #job.order)
+        link_sched.sample_age("announce.link_to_tg_send_ms", job.chat_at)
+        job.link_to_send_ms = link_sched.sample_elapsed_ms(
+            "generated_authority.link_to_send_ms", job.elapsed_at or job.authority_started)
+        runtime.last_generated_scan.link_to_send_ms = job.link_to_send_ms
+        runtime.last_generated_scan.stage_latency = link_sched.stage_latency_report(job)
+        link_sched.queue_legacy_validation(job)
+        return #job.order
+    end
+    dprint("linked-needs send failed: %s - %s",
+        tostring(bucket.item_name or "?"), tostring(runtime.last_skip_reason or "?"))
+    return 0
+end
+
+function link_sched.record_row_decision(job, row, phase, wall_t0, cpu_t0, reason)
+    if type(job) ~= "table" then return end
+    job.row_decisions = type(job.row_decisions) == "table" and job.row_decisions or {}
+    local wall_ms = math.max(0, (link_sched.elapsed_s()
+        - (tonumber(wall_t0) or link_sched.elapsed_s())) * 1000)
+    local cpu_ms = math.max(0, (os.clock() - (tonumber(cpu_t0) or os.clock())) * 1000)
+    local row_key = tostring(row and (row.key or (row.snap and row.snap.name)) or "?")
+    local outcome = type(job.row_outcomes) == "table" and job.row_outcomes[row_key] or nil
+    job.row_decisions[#job.row_decisions + 1] = {
+        character = tostring(row and row.snap and (row.snap.name or row.key) or "?"),
+        phase = tostring(phase or "initial"),
+        reason = tostring(reason or (outcome and outcome.reason) or ""),
+        state = tostring(outcome and outcome.state or "UNRESOLVED"),
+        final = outcome and outcome.final == true or false,
+        wall_ms = wall_ms,
+        cpu_ms = cpu_ms,
+        instructions = nil, -- deterministic interpreter counts are recorded by the test harness.
+    }
+    diag.sample("generated_authority.row_wall_ms", wall_ms)
+    diag.sample("generated_authority.row_cpu_ms", cpu_ms)
+end
+
+function link_sched.ready_fast_path_allowed(job)
+    if CFG.generated_authority_ready_fast_path == false then return false, "disabled" end
+    if CFG.generated_authority_enabled == false then return false, "generated-disabled" end
+    if type(job) ~= "table" then return false, "no-job" end
+    if type(catalog.generated_builtin_index_ready) ~= "function"
+        or catalog.generated_builtin_index_ready() ~= true then
+        return false, "index-not-ready"
+    end
+    if type(catalog.generated_builtin_compact_candidates_for_link) ~= "function" then
+        return false, "missing-helper"
+    end
+    local rows = type(job.rows) == "table" and job.rows or {}
+    if #rows == 0 then return false, "no-rows" end
+    for _, row in ipairs(rows) do
+        if type(row) ~= "table" or type(row.snap) ~= "table" then
+            return false, "bad-row"
+        end
+        local cached = false
+        if type(ownership_index.is_snapshot_index_cached) == "function" then
+            cached = ownership_index.is_snapshot_index_cached(row.snap) == true
+        elseif ownership_index.snapshot_cache_key then
+            local key = ownership_index.snapshot_cache_key(row.snap)
+            cached = row.snap._bis_index_key == key and row.snap._bis_index ~= nil
+        end
+        if not cached then return false, "ownership-cold" end
+    end
+    return true, "ready"
+end
+
+function link_sched.run_ready_fast_path(job)
+    local allowed, why = link_sched.ready_fast_path_allowed(job)
+    if not allowed then return false, why end
+    local rows = type(job.rows) == "table" and job.rows or {}
+    local started_index = tonumber(job.index) or 1
+    if started_index < 1 then started_index = 1 end
+    diag.count("generated_authority.ready_fast_path")
+    for i = started_index, #rows do
+        local row = rows[i]
+        if type(row) == "table" and type(row.snap) == "table" then
+            job.index = i + 1
+            job.snaps = (tonumber(job.snaps) or 0) + 1
+            local who = tostring(row.snap.name or row.key or "?")
+            local decision_t0 = link_sched.elapsed_s()
+            local decision_cpu_t0 = os.clock()
+            job.current_stage = "ROW_IN_PROGRESS"
+            job.current_row_index = i
+            job.current_row_character = who
+            job.current_row_started_wall = decision_t0
+            job.current_row_started_cpu = decision_cpu_t0
+            local ok, need, row_why = pcall(function()
+                local generated_need, reason = link_sched.generated_diag.need_for_row(
+                    row, job.item_name, job.item_id, "generated_authority")
+                return generated_need, reason
+            end)
+            if not ok then
+                diag.count("generated_authority.error")
+                diag.event("generated_authority.error", tostring(need or "?"):sub(1, 240))
+                link_sched.apply_driver_need_result(job, row, nil, "error")
+                link_sched.record_row_decision(job, row, "ready_fast", decision_t0, decision_cpu_t0, "error")
+                return false, "row-error"
+            end
+            if row_why == "ownership-warming" then
+                -- The preflight cache check raced a snapshot replacement. Hand
+                -- back to the normal cooperative driver; do not emit a partial.
+                job.index = i
+                job.current_stage = "WAITING_WARM"
+                job.current_row_started_wall = nil
+                job.current_row_started_cpu = nil
+                diag.count("generated_authority.ready_fast_path_race")
+                return false, "ownership-warming"
+            end
+            link_sched.apply_driver_need_result(job, row, need, row_why)
+            link_sched.record_row_decision(job, row, "ready_fast", decision_t0, decision_cpu_t0, row_why)
+            local decision_ms = math.max(0, (link_sched.elapsed_s() - decision_t0) * 1000)
+            job.decision_ms = (tonumber(job.decision_ms) or 0) + decision_ms
+            job.decision_max_ms = math.max(tonumber(job.decision_max_ms) or 0, decision_ms)
+            diag.sample("generated_authority.decision_ms", decision_ms)
+            diag.sample("generated_authority.decision_max_ms", job.decision_max_ms)
+        end
+    end
+    job.current_stage = "FINISHING"
+    link_sched.finish_driver_link_job(job)
+    return true, "complete"
+end
+
+function link_sched.step_driver_link_job(deadline)
+    local clock = link_sched.work_clock
+    deadline = tonumber(deadline) or (clock() + ((tonumber(CFG.generated_authority_work_budget_ms) or 2) / 1000))
+    if not link_sched.driver_job and #link_scan_queue > 0 then
+        link_sched.driver_job = link_sched.start_driver_link_job(table.remove(link_scan_queue, 1))
+    end
+    local job = link_sched.driver_job
+    if not job then return false end
+    if CFG.generated_authority_enabled == false then
+        diag.count("generated_authority.degraded")
+        diag.event("generated_authority.degraded", "generated_authority_enabled=false")
+        link_sched.driver_job = nil
+        note_skip(job.item_name, "generated authority disabled")
+        return true
+    end
+    if (tonumber(job.index) or 1) == 1
+        and #(job.pending_warm or {}) == 0
+        and type(job.row_outcomes) == "table"
+        and next(job.row_outcomes) == nil then
+        local fast_done = link_sched.run_ready_fast_path(job)
+        if fast_done then
+            link_sched.driver_job = nil
+            return true
+        end
+    end
+    if type(job.pending_warm) ~= "table" then job.pending_warm = {} end
+    local did_work = false
+    while job.index <= #(job.rows or {}) do
+        local age_s = link_sched.elapsed_s() - (tonumber(job.authority_started) or link_sched.elapsed_s())
+        if age_s >= link_sched.ownership_emit_wait_s() then
+            -- The elapsed lifetime is a hard boundary, independent of the
+            -- cooperative work-slice clock. Do not start another canonical
+            -- candidate lookup after it has expired.
+            while job.index <= #(job.rows or {}) do
+                local expired_row = job.rows[job.index]
+                job.index = job.index + 1
+                if type(expired_row) == "table" and type(expired_row.snap) == "table" then
+                    did_work = true
+                    job.snaps = (tonumber(job.snaps) or 0) + 1
+                    local expired_wall, expired_cpu = link_sched.elapsed_s(), os.clock()
+                    link_sched.apply_driver_need_result(job, expired_row, nil, "ownership-timeout")
+                    link_sched.record_row_decision(
+                        job, expired_row, "deadline", expired_wall, expired_cpu, "ownership-timeout")
+                end
+            end
+            break
+        end
+        local row = job.rows[job.index]
+        local row_index = job.index
+        job.index = job.index + 1
+        if type(row) == "table" and type(row.snap) == "table" then
+            did_work = true
+            job.snaps = (tonumber(job.snaps) or 0) + 1
+            local who = tostring(row.snap.name or row.key or "?")
+            local decision_t0 = link_sched.elapsed_s()
+            local decision_cpu_t0 = os.clock()
+            job.current_stage = "ROW_IN_PROGRESS"
+            job.current_row_index = row_index
+            job.current_row_character = who
+            job.current_row_started_wall = decision_t0
+            job.current_row_started_cpu = decision_cpu_t0
+            local ok, need, why = pcall(function()
+                local generated_need, reason = link_sched.generated_diag.need_for_row(
+                    row, job.item_name, job.item_id, "generated_authority")
+                return generated_need, reason
+            end)
+            if not ok then
+                diag.count("generated_authority.error")
+                diag.event("generated_authority.error", tostring(need or "?"):sub(1, 240))
+                link_sched.apply_driver_need_result(job, row, nil, "error")
+            else
+                if why == "ownership-warming" then
+                    local fallback_need, fallback_why = link_sched.try_cold_row_fallback(
+                        job, row, deadline, { own_budget = true })
+                    if fallback_need then
+                        need, why = fallback_need, "need"
+                    elseif fallback_why == "owned" or fallback_why == "no-row" then
+                        why = fallback_why
+                    elseif fallback_why == "fallback-error" then
+                        why = fallback_why
+                    end
+                end
+                link_sched.apply_driver_need_result(job, row, need, why)
+            end
+            link_sched.record_row_decision(job, row, "initial", decision_t0, decision_cpu_t0, why)
+            local row_key = tostring(row.key or row.snap.name or "?")
+            local row_outcome = type(job.row_outcomes) == "table" and job.row_outcomes[row_key] or nil
+            job.current_stage = row_outcome and row_outcome.final == false
+                and "WAITING_WARM" or "DRIVER_READY"
+            job.current_row_started_wall = nil
+            job.current_row_started_cpu = nil
+            local decision_ms = math.max(0, (link_sched.elapsed_s() - decision_t0) * 1000)
+            job.decision_ms = (tonumber(job.decision_ms) or 0) + decision_ms
+            job.decision_max_ms = math.max(tonumber(job.decision_max_ms) or 0, decision_ms)
+            diag.sample("generated_authority.decision_ms", decision_ms)
+            diag.sample("generated_authority.decision_max_ms", job.decision_max_ms)
+            diag.event("announce.link_stage", string.format("generated_driver item=%s row=%s/%s who=%s age=%.0fms",
+                tostring(job.item_name):sub(1, 60), tostring(job.index - 1), tostring(#(job.rows or {})),
+                tostring(who), link_sched.sample_age("announce.link_queue_age", job.chat_at)))
+            diag.sample("generated_authority.queue_age_ms", link_sched.sample_age("announce.link_queue_age", job.chat_at))
+        end
+        if clock() >= deadline then return did_work end
+    end
+    if #(job.pending_warm) > 0 then
+        did_work = true
+        job.current_stage = "WAITING_WARM"
+        if link_sched.retry_pending_warm(job, deadline) then
+            return did_work
+        end
+    end
+    job.current_stage = "FINISHING"
+    link_sched.finish_driver_link_job(job)
+    link_sched.driver_job = nil
+    return true
+end
+
+function link_sched.retry_pending_warm(job, deadline)
+    local clock = link_sched.work_clock
+    job.pending_warm = type(job.pending_warm) == "table" and job.pending_warm or {}
+    if #(job.pending_warm) == 0 then return false end
+    local started = tonumber(job.authority_started) or link_sched.elapsed_s()
+    local expired = link_sched.elapsed_s() >= (started + link_sched.ownership_emit_wait_s())
+    local waiting = job.pending_warm
+    job.pending_warm = {}
+    job.pending_warm_keys = {}
+    for i = 1, #waiting do
+        local row = waiting[i]
+        local decision_t0 = link_sched.elapsed_s()
+        local decision_cpu_t0 = os.clock()
+        job.current_stage = "ROW_IN_PROGRESS"
+        job.current_row_index = i
+        for original_i, original_row in ipairs(job.rows or {}) do
+            if original_row == row then job.current_row_index = original_i break end
+        end
+        job.current_row_character = tostring(row and row.snap and (row.snap.name or row.key) or "?")
+        job.current_row_started_wall = decision_t0
+        job.current_row_started_cpu = decision_cpu_t0
+        if expired then
+            local row_key = tostring(row and (row.key or (row.snap and row.snap.name)) or "?")
+            local targeted = type(job.targeted_attempted) == "table" and job.targeted_attempted[row_key] == true
+            if not targeted then
+                local fallback_need, fallback_why = link_sched.try_cold_row_fallback(
+                    job, row, deadline, { own_budget = true })
+                if fallback_need then
+                    link_sched.apply_driver_need_result(job, row, fallback_need, "need")
+                elseif fallback_why == "owned" or fallback_why == "no-row" then
+                    link_sched.apply_driver_need_result(job, row, nil, fallback_why)
+                else
+                    link_sched.apply_driver_need_result(job, row, nil, "ownership-timeout")
+                end
+            else
+                link_sched.apply_driver_need_result(job, row, nil, "ownership-timeout")
+            end
+        else
+            local ok, need, why = pcall(function()
+                return link_sched.generated_diag.need_for_row(row, job.item_name, job.item_id, "generated_authority")
+            end)
+            if not ok then
+                link_sched.apply_driver_need_result(job, row, nil, "error")
+            else
+                if why == "ownership-warming" then
+                    local fallback_need, fallback_why = link_sched.try_cold_row_fallback(
+                        job, row, deadline, { own_budget = true })
+                    if fallback_need then
+                        need, why = fallback_need, "need"
+                    elseif fallback_why == "owned" or fallback_why == "no-row" then
+                        why = fallback_why
+                    elseif fallback_why == "fallback-error" then
+                        why = fallback_why
+                    end
+                end
+                link_sched.apply_driver_need_result(job, row, need, why)
+            end
+        end
+        link_sched.record_row_decision(
+            job, row, "pending_warm", decision_t0, decision_cpu_t0, nil)
+        local status_key = tostring(row and (row.key or (row.snap and row.snap.name)) or "?")
+        local status_outcome = type(job.row_outcomes) == "table" and job.row_outcomes[status_key] or nil
+        job.current_stage = status_outcome and status_outcome.final == false
+            and "WAITING_WARM" or "DRIVER_READY"
+        job.current_row_started_wall = nil
+        job.current_row_started_cpu = nil
+        local decision_ms = math.max(0, (link_sched.elapsed_s() - decision_t0) * 1000)
+        job.decision_ms = (tonumber(job.decision_ms) or 0) + decision_ms
+        job.decision_max_ms = math.max(tonumber(job.decision_max_ms) or 0, decision_ms)
+        diag.sample("generated_authority.decision_ms", decision_ms)
+        diag.sample("generated_authority.decision_max_ms", job.decision_max_ms)
+        if clock() >= deadline then
+            for j = i + 1, #waiting do
+                local pending_row = waiting[j]
+                local pending_key = tostring(pending_row and (pending_row.key or (pending_row.snap and pending_row.snap.name)) or j)
+                if not job.pending_warm_keys[pending_key] then
+                    job.pending_warm_keys[pending_key] = true
+                    job.pending_warm[#job.pending_warm + 1] = pending_row
+                end
+            end
+            break
+        end
+    end
+    if #(job.pending_warm) > 0 then job.current_stage = "WAITING_WARM" end
+    return #(job.pending_warm) > 0
+end
+
+drain_link_scan_queue = function(deadline)
+    local clock = link_sched.work_clock
+    deadline = tonumber(deadline) or (clock() + ((tonumber(CFG.generated_authority_work_budget_ms) or 2) / 1000))
+    if not link_sched.driver_job and #link_scan_queue > 0 then
+        local job = link_sched.start_driver_link_job(table.remove(link_scan_queue, 1))
+        if job then
+            local fast_done = link_sched.run_ready_fast_path(job)
+            if not fast_done then
+                link_sched.driver_job = job
+            end
+        end
+    end
+    while (link_sched.driver_job or #link_scan_queue > 0) and clock() < deadline do
+        link_sched.step_driver_link_job(deadline)
+    end
 end
 
 scan_group_needs_from_cache = function(links, source)
-    local n = queue_group_link_scans(links, source)
-    -- Paint every queued link first, then burst /g sends so multi-link lines
-    -- feel batched (old hybrid) instead of paint→send→paint→send stagger.
-    local ready = {}
-    while #link_scan_queue > 0 do
-        local entry = table.remove(link_scan_queue, 1)
-        local ok, bucket, order_n = pcall(paint_bis_paint_group_announce, entry)
-        if not ok then
-            note_skip(tostring(entry and entry.name or "?"), "bis-paint error")
-            runtime.last_group_scan_detail = tostring(bucket or "error")
-            note_group_scan("bis-paint-error", entry and entry.source or "?", 1, 0, 0, runtime.last_group_scan_detail)
-            dprint("linked-needs error: %s", tostring(bucket))
-            diag.count("announce.bis_paint_error")
-        elseif bucket then
-            ready[#ready + 1] = {
-                bucket = bucket,
-                entry = entry,
-                n = tonumber(order_n) or 0,
-            }
-        end
-    end
-    local pace_ms = math.max(0, tonumber(CFG.announce_outbox_delay_ms) or MULTI_ANNOUNCE_DELAY_MS)
-    for i, work in ipairs(ready) do
-        if i > 1 and pace_ms > 0 and mq.delay then
-            mq.delay(pace_ms)
-        end
-        if send_group_announce(work.bucket, send_opts_for_entry(work.entry)) then
-            diag.count("announce.bis_paint_needs", work.n)
-        else
-            dprint("linked-needs send failed: %s - %s",
-                tostring(work.bucket.item_name or "?"), tostring(runtime.last_skip_reason or "?"))
-        end
-    end
-    return n
+    return queue_group_link_scans(links, source)
 end
 
 function M.linked_items()
@@ -2229,6 +4362,67 @@ local function note_chat_links(links)
     runtime.last_chat_first_item = tostring(first and first.name or "")
 end
 
+function link_sched.copy_chat_links(links, chat_at, elapsed_at, stage_timing)
+    local out = {}
+    for _, item in ipairs(links or {}) do
+        out[#out + 1] = {
+            name = item.name,
+            id = tonumber(item.id) or 0,
+            link = item.link,
+            corpse_id = item.corpse_id,
+            chat_at = chat_at,
+            elapsed_at = elapsed_at,
+            stage_timing = stage_timing,
+        }
+    end
+    return out
+end
+
+function link_sched.enqueue_chat_links(links, line, opts)
+    if type(links) ~= "table" or #links == 0 then return false end
+    opts = type(opts) == "table" and opts or {}
+    local chat_at = os.clock()
+    local elapsed_at = link_sched.elapsed_s()
+    local timing = {
+        event_delivery_uncertainty_ms = tonumber(opts.event_delivery_uncertainty_ms) or 0,
+        line_arrival_known = opts.line_arrival_known == true,
+        render_callback = false,
+        stages = {
+            event_delivery = {
+                wall = tonumber(opts.event_delivery_wall) or elapsed_at,
+                cpu = tonumber(opts.event_delivery_cpu) or chat_at,
+            },
+        },
+    }
+    local entry = {
+        links = link_sched.copy_chat_links(links, chat_at, elapsed_at, timing),
+        line = tostring(line or ""),
+        opts = {
+            self_event = opts.self_event == true,
+            other_event = opts.other_event == true,
+            replay = opts.replay == true,
+            suppress_actor_broadcast = opts.suppress_actor_broadcast == true,
+        },
+        at = chat_at,
+        elapsed_at = elapsed_at,
+        stage = "chat_enqueued",
+        stage_timing = timing,
+    }
+    link_sched.stage_stamp(entry, "chat_capture", elapsed_at, chat_at)
+    link_sched.bounded_push(link_sched.chat_queue, entry, "announce.chat_link_queue")
+    link_sched.stage_stamp(entry, "chat_queue_enqueue")
+    diag.count("announce.chat_enqueue", #entry.links)
+    diag.event("announce.link_stage", string.format("chat_enqueue links=%d first=%s",
+        #entry.links, tostring(entry.links[1] and entry.links[1].name or ""):sub(1, 80)))
+    for _, item in ipairs(entry.links) do
+        diag.count("linked.link_seen")
+        diag.event("linked.link_seen", string.format(
+            "role=%s item=%s", link_sched.hist.role(), tostring(item.name or ""):sub(1, 80)))
+    end
+    runtime.last_chat_note = string.format("queued links (%d)", #entry.links)
+    return true
+end
+
 note_sent = function(item_name)
     runtime.last_sent_at = os.clock()
     runtime.last_sent_item = tostring(item_name or "")
@@ -2428,15 +4622,16 @@ local function catalog_ready_for(snap)
     return snap and snap.class and catalog.announce_catalog_ready(snap.class, snap.name)
 end
 
--- BiS: link walk works once the BiS catalog is loaded. Index/dcat optional.
+-- Generated authority is link-ready only after both canonical catalog and
+-- shipped generated index are resident. This check never loads either.
 local function lookup_ready_for(_snap)
-    if ensure_link_catalog() then return true end
-    if catalog_ready_for(_snap) then return true end
-    return direct_lookup_ready(_snap)
+    return catalog.catalog_loaded and catalog.catalog_loaded() == true
+        and catalog.generated_builtin_index_ready
+        and catalog.generated_builtin_index_ready() == true
 end
 
 local function ensure_catalog_for_chat(snap, flush)
-    if ensure_link_catalog() then
+    if lookup_ready_for(snap) then
         announce_ready = true
         return true
     end
@@ -2448,11 +4643,11 @@ local function ensure_catalog_for_chat(snap, flush)
     if flush then
         local ready = catalog.flush_announce_catalog(
             snap.class, snap.name, tonumber(CFG.announce_flush_budget_ms) or 800)
-        announce_ready = ready or ensure_link_catalog()
+        announce_ready = ready and lookup_ready_for(snap) or false
         return announce_ready
     end
     catalog.ensure_announce_catalog(snap.class, { owner = snap.name })
-    announce_ready = ensure_link_catalog() or catalog_ready_for(snap)
+    announce_ready = lookup_ready_for(snap)
     return announce_ready
 end
 
@@ -2515,6 +4710,37 @@ local function try_process_direct_chat_text_while_warming(line, snap, allow_queu
     return false
 end
 
+function link_sched.enqueue_peer_reports(links, holder, source, chat_at)
+    if type(links) ~= "table" or #links == 0 then return false end
+    holder = trim(holder or "")
+    if holder == "" then holder = "*" end
+    local n = 0
+    for _, item in ipairs(links) do
+        local item_name = tostring(item and item.name or "")
+        if item_name ~= "" then
+            link_sched.bounded_push(link_sched.peer_queue, {
+                item = {
+                    name = item_name,
+                    id = tonumber(item.id) or 0,
+                    link = item.link,
+                    corpse_id = item.corpse_id,
+                },
+                holder = holder,
+                source = tostring(source or "chat"),
+                at = os.clock(),
+                chat_at = tonumber(chat_at or item.chat_at) or os.clock(),
+                stage = "peer_report_queued",
+            }, "announce.peer_report_queue")
+            n = n + 1
+        end
+    end
+    if n > 0 then
+        diag.count("announce.peer_report_queued", n)
+        runtime.last_chat_note = "peer report queued"
+    end
+    return n > 0
+end
+
 --- Peer / non-holder UI: evaluate locally and LOOT_NEED the beacon (no [TG]).
 local function report_links_to_holder(links, holder, source, allow_queue)
     if type(links) ~= "table" or #links == 0 then return false end
@@ -2529,31 +4755,153 @@ local function report_links_to_holder(links, holder, source, allow_queue)
         runtime.last_chat_note = "peer report: self is holder"
         return false
     end
-    if holder == "" then holder = "*" end
+    return link_sched.enqueue_peer_reports(links, holder, source, os.clock())
+end
 
-    local snap = snap_for_announce()
-    if not snap then
-        runtime.last_chat_note = "peer report: no snap"
-        return false
-    end
-    ensure_link_catalog()
-
-    local any = false
-    for _, item in ipairs(links) do
-        local item_name = tostring(item and item.name or "")
-        if item_name ~= "" then
-            note_loot_seen(item_name, source)
-            local need = check_need_fail_open(snap, item_name, item.id, { skip_live = false })
-            if need and announce_from_need(need, source, item.link, item.id, snap, true, item_name, {
-                reply_to = holder,
-            }) then
-                any = true
+function link_sched.drain_peer_report_queue(deadline)
+    if #link_sched.peer_queue == 0 then return end
+    deadline = tonumber(deadline) or (os.clock() + 0.004)
+    while #link_sched.peer_queue > 0 and os.clock() < deadline do
+        local work = table.remove(link_sched.peer_queue, 1)
+        if work then
+            link_sched.sample_age("announce.link_queue_age", work.chat_at)
+            local snap = snap_for_announce()
+            if not snap then
+                runtime.last_chat_note = "peer report: no snap"
+                diag.count("announce.peer_report_no_snap")
+            else
+                ensure_link_catalog()
+                local item = work.item or {}
+                local item_name = tostring(item.name or "")
+                note_loot_seen(item_name, work.source)
+                local ok, need, why = pcall(function()
+                    return diag.time("announce.peer_report_eval", function()
+                        local row = { snap = snap, local_owner = true }
+                        local generated_need, reason = link_sched.generated_diag.need_for_row(row, item_name, item.id, "announce.peer_report_generated")
+                        if generated_need then return generated_need, reason end
+                        if reason == "ownership-warming" then return nil, reason end
+                        diag.count("announce.peer_report_generated_no_need")
+                        diag.event("announce.peer_report_generated_skip", string.format(
+                            "item=%s id=%s reason=%s",
+                            tostring(item_name):sub(1, 80), tostring(item.id or 0), tostring(reason or "")))
+                        return nil, reason
+                    end)
+                end)
+                if not ok then
+                    runtime.last_chat_note = "peer report error"
+                    diag.count("announce.peer_report_error")
+                    diag.event("announce.peer_report_error", tostring(need or "?"):sub(1, 240))
+                elseif need then
+                    local sent = diag.time("announce.peer_report_send", function()
+                        return announce_from_need(need, work.source, item.link, item.id, snap, true, item_name, {
+                            reply_to = work.holder,
+                        })
+                    end)
+                    if sent then
+                        diag.count("announce.peer_reports_attempted")
+                        link_sched.sample_age("announce.link_to_peer_report_ms", work.chat_at)
+                        runtime.last_chat_note = "peer report to " .. tostring(work.holder or "*")
+                    end
+                elseif why == "ownership-warming" then
+                    work.warm_started = work.warm_started or link_sched.elapsed_s()
+                    if link_sched.elapsed_s() < work.warm_started + link_sched.ownership_emit_wait_s() then
+                        link_sched.peer_queue[#link_sched.peer_queue + 1] = work
+                        diag.count("announce.peer_report_ownership_wait")
+                        runtime.last_chat_note = "peer report: waiting ownership"
+                    else
+                        diag.count("announce.peer_report_ownership_timeout")
+                        runtime.last_chat_note = "peer report: ownership timeout"
+                    end
+                else
+                    runtime.last_chat_note = "peer report: no need"
+                end
+                diag.event("announce.link_stage", string.format("peer item=%s holder=%s age=%.0fms",
+                    tostring(item_name):sub(1, 60), tostring(work.holder or "*"),
+                    link_sched.sample_age("announce.link_queue_age", work.chat_at)))
             end
         end
     end
-    runtime.last_chat_note = any and ("peer report to " .. holder) or "peer report: no need"
-    if any then diag.count("announce.peer_reports_attempted") end
-    return any
+end
+
+function link_sched.process_chat_link_work(work)
+    if type(work) ~= "table" or type(work.links) ~= "table" or #work.links == 0 then return false end
+    local opts = type(work.opts) == "table" and work.opts or {}
+    local source = opts.replay and "replay" or "chat"
+    link_sched.sample_age("announce.link_queue_age", work.at)
+    if opts.replay then
+        runtime.last_chat_note = "replay (no emit)"
+        diag.count("announce.replay_no_emit")
+        return false
+    end
+    if link_hybrid_enabled() then
+        pcall(function()
+            if cfg.LoadSharedSettings then cfg.LoadSharedSettings() end
+        end)
+    end
+    local defer_chat, defer_reason, holder = should_defer_chat_announce()
+    if defer_chat then
+        if link_hybrid_enabled() then
+            if defer_reason == "no_ui_driver" then
+                warn_no_ui_driver_once(defer_reason)
+            end
+            return link_sched.enqueue_peer_reports(work.links, holder, source, work.at)
+        end
+        if defer_reason == "no_ui_driver" then
+            warn_no_ui_driver_once(defer_reason)
+            runtime.last_chat_note = "no ui driver"
+            return false
+        end
+        runtime.last_chat_note = "driver coordinator"
+        return false
+    end
+
+    local self_line = opts.self_event == true or is_self_loot_line(work.line)
+    local ui_coordinator = state.bg ~= true
+    local group_local = self_line or ui_coordinator
+    if not group_local and SharedSettings.announceUseActor ~= false
+        and not link_hybrid_enabled()
+    then
+        runtime.last_chat_note = "actor expected"
+        return false
+    end
+    if link_hybrid_enabled() and not group_local then
+        return link_sched.enqueue_peer_reports(work.links, holder, source, work.at)
+    end
+
+    queue_group_link_scans(work.links, source, {
+        chat_at = work.at,
+        elapsed_at = work.elapsed_at,
+        stage_timing = work.stage_timing,
+    })
+    if CFG.generated_authority_ready_fast_path ~= false and drain_link_scan_queue then
+        local deadline = link_sched.work_clock()
+            + ((tonumber(CFG.generated_authority_work_budget_ms) or 2) / 1000)
+        drain_link_scan_queue(deadline)
+    end
+    runtime.last_chat_note = string.format("driver queued (%d)", #work.links)
+    if link_hybrid_enabled() and (group_local or ui_coordinator) and not opts.suppress_actor_broadcast then
+        pcall(function()
+            local Engine = require('engine').Engine
+            if Engine and Engine.ok and Engine.broadcast_loot_links then
+                Engine.broadcast_loot_links(work.links, me_name())
+            end
+        end)
+    end
+    return true
+end
+
+function link_sched.drain_chat_link_queue(deadline)
+    if #link_sched.chat_queue == 0 then return end
+    deadline = tonumber(deadline) or (os.clock() + 0.004)
+    while #link_sched.chat_queue > 0 and os.clock() < deadline do
+        local work = table.remove(link_sched.chat_queue, 1)
+        if work then
+            link_sched.stage_stamp(work, "chat_queue_drain")
+            diag.time("announce.chat_process", function()
+                link_sched.process_chat_link_work(work)
+            end)
+        end
+    end
 end
 
 local function try_process_item_links(links, source, allow_queue, line, opts)
@@ -2608,6 +4956,7 @@ local function try_process_chat(line, allow_queue, opts)
     -- Record [TG] lines for fleet-wide dedupe BEFORE the skip filter eats them.
     if line:find("%[TG%]", 1, false) then
         pcall(note_announce_seen, line)
+        pcall(link_sched.hist.observe, line)
     end
     if should_skip_line(line) then
         runtime.last_chat_note = "skip filter"
@@ -2622,74 +4971,21 @@ local function try_process_chat(line, allow_queue, opts)
         return false
     end
     dprint("chat: %s", line:sub(1, 120))
-    local ui_coordinator = state.bg ~= true
-
-    local links = parse_item_links(line)
+    local links = diag.time("announce.chat_parse", function()
+        return parse_item_links(line)
+    end)
     note_chat_links(links)
     if #links > 0 and not opts.replay and is_player_link_chat_line(line) then
         remember_recent_replay(line, links, "chat")
     end
-    -- Sticky per-group driver-first: only the beacon emits [TG]. Peers (and
-    -- non-holder UIs) still evaluate linked loot and LOOT_NEED the holder when
-    -- hybrid announce is on. Bg with no fresh UI beacon fail-closes.
-    if #links > 0 and link_hybrid_enabled() then
-        -- Peers need a fresh beacon name from shared settings.
-        pcall(function()
-            if cfg.LoadSharedSettings then cfg.LoadSharedSettings() end
-        end)
-    end
-    local defer_chat, defer_reason, holder = should_defer_chat_announce()
     if #links > 0 then
-        local source = opts.replay and "replay" or "chat"
-        -- Replay catch-up: never emit [TG] and never LOOT_NEED (bot UI wake).
-        if opts.replay then
-            runtime.last_chat_note = "replay (no emit)"
-            diag.count("announce.replay_no_emit")
-            return false
-        end
-        if defer_chat then
-            -- Live chat only: peers may still LOOT_NEED (driver ignores for emit).
-            if link_hybrid_enabled() then
-                if defer_reason == "no_ui_driver" then
-                    warn_no_ui_driver_once(defer_reason)
-                end
-                return report_links_to_holder(links, holder, source, allow_queue)
-            end
-            if defer_reason == "no_ui_driver" then
-                warn_no_ui_driver_once(defer_reason)
-                runtime.last_chat_note = "no ui driver"
-                return false
-            end
-            runtime.last_chat_note = "driver coordinator"
-            return false
-        end
-        local self_line = opts.self_event == true or is_self_loot_line(line)
-        local group_local = self_line or ui_coordinator
-        if not group_local and SharedSettings.announceUseActor ~= false
-            and not link_hybrid_enabled()
-        then
-            runtime.last_chat_note = "actor expected"
-            return false
-        end
-        -- Hybrid: non-coordinator boxes that did not defer still report-only
-        -- rather than emitting their own [TG] (belt-and-suspenders).
-        if link_hybrid_enabled() and not group_local then
-            return report_links_to_holder(links, holder, source, allow_queue)
-        end
-        local added = try_process_item_links(links, source, allow_queue, line, {
-            group_local = group_local or link_hybrid_enabled(),
-        })
-        -- Nudge peers over actors too (chat alone is enough when every bg is
-        -- live; this covers missed events after restarts without Sync Now).
-        if link_hybrid_enabled() and (group_local or ui_coordinator) then
-            pcall(function()
-                local Engine = require('engine').Engine
-                if Engine and Engine.ok and Engine.broadcast_loot_links then
-                    Engine.broadcast_loot_links(links, me_name())
-                end
+        if allow_queue ~= false then
+            return diag.time("announce.chat_enqueue", function()
+                return link_sched.enqueue_chat_links(links, line, opts)
             end)
         end
-        return added
+        diag.count("announce.chat_links_deferred")
+        return false
     end
 
     -- No parsed item link (and no TurboLoot control-tag item). Do not fall
@@ -2705,24 +5001,43 @@ local function try_process_chat(line, allow_queue, opts)
     return false
 end
 
+function link_sched.event_delivery_opts(extra)
+    extra = type(extra) == "table" and extra or {}
+    local loop_delay = 0
+    if type(M.loop_delay_ms) == "function" then
+        local ok, value = pcall(M.loop_delay_ms)
+        if ok then loop_delay = tonumber(value) or 0 end
+    end
+    extra.event_delivery_wall = link_sched.elapsed_s()
+    extra.event_delivery_cpu = os.clock()
+    -- MQ does not provide the original line-arrival timestamp to mq.event.
+    -- The callback can therefore be delayed by up to the active loop delay.
+    extra.event_delivery_uncertainty_ms = math.max(0, loop_delay)
+    extra.line_arrival_known = false
+    return extra
+end
+
 local function on_chat(line)
     if passive then return end
+    local opts = link_sched.event_delivery_opts()
     diag.time("announce.chat", function()
-        try_process_chat(line, true)
+        try_process_chat(line, true, opts)
     end)
 end
 
 local function on_chat_self(line)
     if passive then return end
+    local opts = link_sched.event_delivery_opts({ self_event = true })
     diag.time("announce.chat", function()
-        try_process_chat(line, true, { self_event = true })
+        try_process_chat(line, true, opts)
     end)
 end
 
 local function on_chat_other(line)
     if passive then return end
+    local opts = link_sched.event_delivery_opts({ other_event = true })
     diag.time("announce.chat", function()
-        try_process_chat(line, true, { other_event = true })
+        try_process_chat(line, true, opts)
     end)
 end
 
@@ -2770,6 +5085,8 @@ M._parse_item_links_for_test = parse_item_links
 M._has_unparseable_item_link_payload_for_test = has_unparseable_item_link_payload
 M._try_process_chat_for_test = try_process_chat
 M._runtime_for_test = runtime
+M._upsert_linked_item_for_test = link_sched.hist.upsert
+M._observe_tg_linked_item_for_test = link_sched.hist.observe
 
 -- Driver boxes run UI (announce-active) + bg (announce-passive). Actors land
 -- on the bg mailbox only; without a local relay, corpse-aware LOOT_LINK never
@@ -2881,6 +5198,9 @@ function M.on_loot_need(msg)
     if catalog.clean_link_item_name then
         item_name = catalog.clean_link_item_name(item_name) or item_name
     end
+    if rules.strip_trailing_corpse_id then
+        item_name = rules.strip_trailing_corpse_id(item_name)
+    end
     if item_name == "" then return end
     local item_id = tonumber(msg.item_id) or 0
     if passive then
@@ -2888,11 +5208,40 @@ function M.on_loot_need(msg)
         return
     end
     if not SharedSettings.bisAnnounceEnabled then return end
-    -- Peer LOOT_NEED must never open a group bucket or /g [TG]. That path made
-    -- plaintext Discord-only doubles when a bot UI woke and replayed links.
-    -- Live chat BiS-paint on the announce driver is the only emit path.
+    -- Positive reports may enrich only the currently open, identity-matching
+    -- canonical driver job during its short merge window. They never open a
+    -- group bucket and can therefore never become a second emitter.
+    local job = link_sched.driver_job
+    local job_age = type(job) == "table"
+        and math.max(0, link_sched.elapsed_s() - (tonumber(job.authority_started) or link_sched.elapsed_s()))
+        or math.huge
+    local same_name = type(job) == "table"
+        and ownership_index.norm_item_name(job.item_name) == ownership_index.norm_item_name(item_name)
+    local same_id = type(job) == "table" and item_id > 0 and (tonumber(job.item_id) or 0) == item_id
+    if type(job) == "table" and job_age <= peer_report_short_s() and (same_name or same_id) then
+        for _, row in ipairs(job.rows or {}) do
+            local row_name = trim(row and row.snap and row.snap.name or "")
+            if row_name ~= "" and row_name:lower() == from:lower() then
+                local row_key = tostring(row.key or row_name)
+                local prior = type(job.row_outcomes) == "table" and job.row_outcomes[row_key] or nil
+                if type(prior) ~= "table" or prior.final ~= true then
+                    link_sched.apply_driver_need_result(job, row, {
+                        item_name = job.item_name,
+                        entry = { item = job.item_name, id = job.item_id },
+                        list = { id = "peer-positive", name = "peer-positive" },
+                        _peer_enriched = true,
+                    }, "need")
+                    job.sources[from:lower()] = "actor-reply"
+                    diag.count("generated_authority.peer_positive_enriched")
+                    runtime.last_chat_note = "loot need merged into open driver"
+                    return
+                end
+                break
+            end
+        end
+    end
     diag.count("announce.need_reports_ignored_no_emit")
-    runtime.last_chat_note = "loot need ignored (paint owns [TG])"
+    runtime.last_chat_note = "loot need ignored (no matching open driver)"
 end
 
 -- Peer side of the confirm round: another box is about to announce US as a
@@ -3072,6 +5421,12 @@ function M.invalidate(reason)
     pending_items = {}
     announce_outbox = {}
     group_announces = {}
+    link_sched.chat_queue = {}
+    link_sched.peer_queue = {}
+    link_sched.legacy_validation_queue = {}
+    link_sched.reset_ownership_warm()
+    link_scan_queue = {}
+    link_sched.driver_job = nil
     next_announce_send_at = 0
     pcall(function() needs_index.invalidate(reason or "announce.invalidate") end)
 end
@@ -3099,12 +5454,21 @@ function M.warm(flush)
         announce_ready = false
         return false
     end
-    -- BiS: loading the BiS catalog is enough to announce. Reverse index /
-    -- dcat / needs_index keep building in the background as optional speedups.
+    local startup_wall_t0, startup_cpu_t0 = link_sched.elapsed_s(), os.clock()
     pcall(function()
-        if catalog.warm_catalog then catalog.warm_catalog() end
+        if catalog.warm_catalog then catalog.warm_catalog("startup") end
     end)
-    announce_ready = ensure_link_catalog()
+    local generated_ok = false
+    pcall(function()
+        if catalog.warm_generated_builtin_index then
+            generated_ok = select(1, catalog.warm_generated_builtin_index("startup")) ~= nil
+        end
+    end)
+    announce_ready = ensure_link_catalog() and generated_ok
+    runtime.startup_ready_wall_ms = math.max(0, (link_sched.elapsed_s() - startup_wall_t0) * 1000)
+    runtime.startup_ready_cpu_ms = math.max(0, (os.clock() - startup_cpu_t0) * 1000)
+    diag.sample("generated_index.startup_ready_wall_ms", runtime.startup_ready_wall_ms)
+    diag.sample("generated_index.startup_ready_cpu_ms", runtime.startup_ready_cpu_ms)
     needs_index_warm = false
     if flush and snap.class then
         catalog.ensure_announce_catalog(snap.class, { owner = snap.name, sync = true })
@@ -3121,6 +5485,7 @@ function M.warm(flush)
 end
 
 function M.count_announcing_lists()
+    if not (catalog.catalog_loaded and catalog.catalog_loaded()) then return 0, 0 end
     local n, total = 0, 0
     for _, spec in ipairs(catalog.announce_list_specs() or {}) do
         total = total + 1
@@ -3129,6 +5494,62 @@ function M.count_announcing_lists()
         end
     end
     return n, total
+end
+
+function link_sched.driver_job_status(job)
+    if type(job) ~= "table" then return nil end
+    local rows, warming, unresolved = {}, {}, {}
+    local decided = 0
+    for key, result in pairs(type(job.row_outcomes) == "table" and job.row_outcomes or {}) do
+        result = type(result) == "table" and result or {}
+        rows[#rows + 1] = string.format("%s=%s", tostring(result.character or key), tostring(result.state or "?"))
+        if result.final == true then
+            decided = decided + 1
+        else
+            warming[#warming + 1] = tostring(result.character or key)
+        end
+        if result.final == true and result.state == "UNRESOLVED" then
+            unresolved[#unresolved + 1] = tostring(result.character or key)
+        end
+    end
+    table.sort(rows)
+    table.sort(warming)
+    table.sort(unresolved)
+    local current_stage = tostring(job.current_stage
+        or (job.stage == "driver_queued" and "QUEUED") or "DRIVER_READY")
+    local row_age_ms = 0
+    if current_stage == "ROW_IN_PROGRESS" and tonumber(job.current_row_started_wall) then
+        row_age_ms = math.max(0,
+            (link_sched.elapsed_s() - tonumber(job.current_row_started_wall)) * 1000)
+    end
+    return {
+        item = tostring(job.item_name or ""),
+        id = tonumber(job.item_id) or 0,
+        outcome = tostring(job.outcome or "PENDING"),
+        eligible = #(job.rows or {}),
+        decided = decided,
+        row_outcomes = rows,
+        warming_rows = warming,
+        unresolved_rows = unresolved,
+        targeted_attempted = tonumber(job.cold_fallback_rows) or 0,
+        targeted_resolved = tonumber(job.targeted_resolved) or 0,
+        targeted_unresolved = tonumber(job.targeted_unresolved) or 0,
+        targeted_max_unit_ms = tonumber(job.targeted_max_unit_ms) or 0,
+        link_to_enqueue_ms = tonumber(job.link_to_enqueue_ms) or 0,
+        decision_ms = tonumber(job.decision_ms) or 0,
+        decision_max_ms = tonumber(job.decision_max_ms) or 0,
+        link_to_send_ms = tonumber(job.link_to_send_ms),
+        stage_latency = link_sched.stage_latency_report(job),
+        mq_cmd_wall_ms = tonumber(job.mq_cmd_wall_ms),
+        mq_cmd_cpu_ms = tonumber(job.mq_cmd_cpu_ms),
+        current_stage = current_stage,
+        current_row_index = tonumber(job.current_row_index) or 0,
+        current_row_character = tostring(job.current_row_character or ""),
+        current_row_age_ms = row_age_ms,
+        generated_resident_at_start = job.generated_resident_at_start == true,
+        age_ms = math.max(0, (link_sched.elapsed_s()
+            - (tonumber(job.authority_started) or link_sched.elapsed_s())) * 1000),
+    }
 end
 
 function M.status()
@@ -3150,15 +5571,20 @@ function M.status()
         if s < 60 then return string.format("%ds ago", s) end
         return string.format("%dm ago", math.floor(s / 60))
     end
-    local link_ready = ensure_link_catalog()
-    local full_ready = catalog_ready_for(snap)
-    local direct_ready = direct_lookup_ready(snap)
+    -- Status is observational for A2.6: it must not load the catalog, build a
+    -- direct index, or fingerprint ownership before a cold first-link test.
+    local catalog_is_loaded = catalog.catalog_loaded and catalog.catalog_loaded() == true
+    local generated_status = catalog.generated_builtin_index_status
+        and catalog.generated_builtin_index_status() or { ready = false, reason = "no-status" }
+    local link_ready = catalog_is_loaded and generated_status.ready == true
+    local full_ready = catalog_is_loaded and catalog_ready_for(snap) or false
+    local direct_ready = catalog_is_loaded and direct_lookup_ready(snap) or false
     local ready = link_ready or full_ready or direct_ready
     local index_label = "warming"
     if passive then
         index_label = "passive viewer"
     elseif link_ready then
-        index_label = "ready (bis paint)"
+        index_label = "ready (generated authority)"
     elseif full_ready and (build.entries or 0) > 0 then
         index_label = string.format("ready (%d items)", build.entries or 0)
     elseif direct_ready then
@@ -3169,6 +5595,10 @@ function M.status()
     local pending_group = 0
     for _, _ in pairs(group_announces or {}) do pending_group = pending_group + 1 end
     local pending_link_scan = #link_scan_queue
+    local pending_chat_links = #link_sched.chat_queue
+    local pending_peer_reports = #link_sched.peer_queue
+    local pending_driver_job = link_sched.driver_job and 1 or 0
+    local pending_legacy_validation = #link_sched.legacy_validation_queue
     local roster_status = active_announce_roster_status(12)
     return {
         enabled = SharedSettings.bisAnnounceEnabled ~= false,
@@ -3178,12 +5608,14 @@ function M.status()
         passive = passive,
         registered = M.registered,
         pending = #pending + #pending_items + #announce_outbox + pending_group
-            + #targeted_checks + pending_link_scan,
-        pending_chat = #pending + pending_item_chat,
-        pending_actor = pending_actor,
+            + #targeted_checks + pending_link_scan + pending_chat_links
+            + pending_peer_reports + pending_driver_job,
+        pending_chat = #pending + pending_item_chat + pending_chat_links,
+        pending_actor = pending_actor + pending_peer_reports,
         pending_outbox = #announce_outbox,
         pending_group = pending_group,
-        pending_link_scan = pending_link_scan,
+        pending_link_scan = pending_link_scan + pending_driver_job,
+        pending_legacy_validation = pending_legacy_validation,
         channel = cfg.bis_announce_command(),
         lists_on = lists_on,
         lists_total = lists_total,
@@ -3214,6 +5646,16 @@ function M.status()
         last_group_scan_pending = runtime.last_group_scan_pending or 0,
         last_group_scan_detail = runtime.last_group_scan_detail or "",
         last_group_scan_age = age_str(runtime.last_group_scan_at),
+        ownership_cache = link_sched.ownership_cache_status(8),
+        generated_current = link_sched.driver_job_status(
+            link_sched.driver_job or link_scan_queue[1]),
+        generated_scan = runtime.last_generated_scan,
+        generated_index = {
+            catalog = catalog.catalog_runtime_status and catalog.catalog_runtime_status() or {},
+            index = generated_status,
+            startup_ready_wall_ms = tonumber(runtime.startup_ready_wall_ms) or 0,
+            startup_ready_cpu_ms = tonumber(runtime.startup_ready_cpu_ms) or 0,
+        },
         last_chat_sample = runtime.last_chat_sample or "",
         last_chat_links = runtime.last_chat_links or 0,
         last_chat_first_item = runtime.last_chat_first_item or "",
@@ -3251,6 +5693,7 @@ function M.status()
             return { ready = false, chars = 0, items = 0, queued = 0, rebuilds = 0, age_s = -1 }
         end)(),
         coordinator = coordinator_status_label(),
+        validation_flags = M.validation_flags(),
         link_capture = (function()
             local seen = 0
             for _ in pairs(announce_seen) do seen = seen + 1 end
@@ -3282,49 +5725,130 @@ function M.tick()
             pending_items = {}
             announce_outbox = {}
             link_scan_queue = {}
+            link_sched.chat_queue = {}
+            link_sched.peer_queue = {}
+            link_sched.legacy_validation_queue = {}
+            link_sched.reset_ownership_warm()
+            link_sched.driver_job = nil
             diag.count("announce.tick.disabled")
             return
         end
 
-        -- Ready = BiS catalog resident. No reverse-catalog / dcat / needs_index gate.
+        -- Startup warm owns generated-index loading. Driver rows never do.
         local was_ready = announce_ready
-        announce_ready = ensure_link_catalog() == true
-        if announce_ready and not was_ready then
-            note_startup_progress(true, "ready")
+        if not announce_ready then
+            local generated_ok = false
+            pcall(function()
+                if catalog.warm_catalog then catalog.warm_catalog("startup") end
+                if catalog.warm_generated_builtin_index then
+                    generated_ok = select(1, catalog.warm_generated_builtin_index("startup")) ~= nil
+                end
+            end)
+            announce_ready = ensure_link_catalog() == true and generated_ok
+            if announce_ready and not was_ready then
+                note_startup_progress(true, "ready")
+            end
         end
         needs_index_warm = false
 
-        -- Time-sensitive: finish any leftover link scans / buckets / outbox.
-        diag.time("announce.link_scan", function()
-            local deadline = os.clock() + 0.05
-            while #link_scan_queue > 0 and os.clock() < deadline do
-                drain_link_scan_queue()
-            end
-        end)
-        diag.time("announce.group_announces", function()
-            drain_group_announces()
-        end)
-        diag.time("announce.targeted_checks", function()
-            drain_targeted_checks()
-        end)
-        diag.time("announce.outbox_send", function()
-            drain_announce_outbox()
-        end)
-        diag.time("announce.pending", function()
-            drain_pending(CFG.announce_pending_budget_ms, CFG.announce_pending_items_per_tick)
-        end)
+        local work = announce_work_pending()
+        local offer_due = announce_ready and link_sched.ownership_offer_due()
+        local warm_pending = link_sched.ownership_warm_pending()
+        local shadow = announce_ready and CFG.local_needs_shadow == true
+        local legacy = CFG.generated_authority_legacy_validation == true
+        local needs_rich = false
+        if not work and index_warm_policy.allow_needs_index_tick()
+            and CFG.needs_index_enabled ~= false then
+            needs_rich = needs_index.needs_tick({ allow_peers = peer_index_allowed() }) == true
+        end
 
-        -- needs_index is Search/Stats enrichment only; never blocks [TG].
-        if not announce_work_pending() and CFG.needs_index_enabled ~= false then
-            local allow_peers = peer_index_allowed()
-            if needs_index.needs_tick({ allow_peers = allow_peers }) then
-                local budget = (state.lean and state.lean())
-                    and (tonumber(CFG.needs_index_budget_lean_ms) or 2)
-                    or (tonumber(CFG.needs_index_budget_ms) or 4)
-                pcall(function()
-                    needs_index.tick(budget, { allow_peers = allow_peers })
+        if not work and not offer_due and not warm_pending and not shadow
+            and not legacy and not needs_rich then
+            diag.count("announce.tick.idle")
+            if settings_reloaded then diag.count("announce.tick.settings_reload") end
+            return
+        end
+
+        if shadow then
+            if CFG.local_needs_legacy_compact_shadow == true then
+                link_sched.request_compact_rules_for_roster(was_ready and "tick" or "ready")
+            end
+            link_sched.request_shared_compact_index_for_roster(was_ready and "tick" or "ready")
+            if CFG.local_needs_legacy_compact_shadow == true and catalog.tick_compact_announce_rules then
+                diag.time("local_needs.prepared_build_tick", function()
+                    pcall(function()
+                        catalog.tick_compact_announce_rules(CFG.local_needs_prepare_budget_ms or 4, CFG.local_needs_prepare_steps or 8)
+                    end)
                 end)
             end
+            if CFG.local_needs_runtime_shared_shadow == true
+                and link_sched.shared_shadow_driver_allowed() and catalog.tick_shared_compact_rule_index then
+                diag.time("local_needs.shared_index_build_tick", function()
+                    pcall(function()
+                        catalog.tick_shared_compact_rule_index(CFG.local_needs_shared_prepare_budget_ms or 4,
+                            CFG.local_needs_shared_prepare_steps or 8)
+                    end)
+                end)
+            end
+        end
+        if offer_due then
+            link_sched.offer_ownership_warm(was_ready and "semantic" or "ready")
+        end
+
+        if work then
+            diag.time("announce.chat_queue", function()
+                local deadline = os.clock() + 0.010
+                link_sched.drain_chat_link_queue(deadline)
+            end)
+            diag.time("announce.peer_report_queue", function()
+                local deadline = os.clock() + 0.010
+                link_sched.drain_peer_report_queue(deadline)
+            end)
+            diag.time("announce.link_scan", function()
+                local deadline = link_sched.work_clock()
+                    + ((tonumber(CFG.generated_authority_work_budget_ms) or 2) / 1000)
+                drain_link_scan_queue(deadline)
+            end)
+            diag.time("announce.group_announces", function()
+                drain_group_announces()
+            end)
+            diag.time("announce.targeted_checks", function()
+                drain_targeted_checks()
+            end)
+            diag.time("announce.outbox_send", function()
+                drain_announce_outbox()
+            end)
+            diag.time("announce.pending", function()
+                drain_pending(CFG.announce_pending_budget_ms, CFG.announce_pending_items_per_tick)
+            end)
+        end
+        if legacy and not announce_work_pending() then
+            diag.time("legacy_validation.queue", function()
+                link_sched.drain_legacy_validation(os.clock() + 0.005)
+            end)
+        end
+        if announce_ready and (link_sched.ownership_warm_pending() or not announce_work_pending()) then
+            diag.time("core_ownership.tick", function()
+                link_sched.tick_ownership_warm(link_sched.work_clock()
+                    + ((tonumber(CFG.core_ownership_warm_budget_ms) or 2) / 1000))
+            end)
+        end
+
+        -- Rich needs_index is off while generated [TG] authority is active.
+        if needs_rich then
+            local allow_peers = peer_index_allowed()
+            local budget = (state.lean and state.lean())
+                and (tonumber(CFG.needs_index_budget_lean_ms) or 2)
+                or (tonumber(CFG.needs_index_budget_ms) or 4)
+            local opts = { allow_peers = allow_peers }
+            local label = state.bg and "index.needs.announcer_bg" or "index.needs.announcer_ui"
+            pcall(function()
+                record_index_tick_diag(label, budget, true, function()
+                    return needs_index.tick(budget, opts)
+                end, function()
+                    return needs_index.needs_tick(opts) == true
+                end)
+            end)
         end
         if settings_reloaded then diag.count("announce.tick.settings_reload") end
     end)
@@ -3440,15 +5964,31 @@ function M.diagnose_group(item_name, item_id)
         tonumber(roster_status.count) or 0,
         tostring(roster_status.names or "") ~= "" and (" | " .. tostring(roster_status.names or "")) or "",
         roster_status.truncated and ", ..." or ""))
-    print("[TurboGear] using BiS paint path (same as linked-needs announce) — will /g [TG] if NEED")
+    print("[TurboGear] using generated authority path (same as linked-needs announce) - will /g [TG] if NEED")
 
-    -- Same emit path as a real group link (proves /g [TG], not just NEED paint).
-    local n = emit_bis_paint_group_announce({
+    if link_sched.driver_job ~= nil then
+        print("[TurboGear] generated authority is already processing a linked item; retry in a moment")
+        return false
+    end
+    local job = link_sched.start_driver_link_job({
         name = item_name,
         id = item_id,
         source = "announcetest",
         manual = true,
     })
+    if not job then
+        print("[TurboGear] group announce not sent: unable to normalize item")
+        return false
+    end
+    link_sched.driver_job = job
+    local deadline = link_sched.work_clock()
+        + ((tonumber(CFG.generated_authority_work_budget_ms) or 2) / 1000)
+    link_sched.step_driver_link_job(deadline)
+    if link_sched.driver_job ~= nil then
+        print("[TurboGear] generated authority queued cooperatively; result will send when complete")
+        return true
+    end
+    local n = tonumber(runtime.last_group_scan_added) or 0
     if tostring(runtime.last_group_scan_detail or "") ~= "" then
         print(string.format("[TurboGear]   scan detail: %s",
             tostring(runtime.last_group_scan_detail):sub(1, 160)))
@@ -3458,7 +5998,7 @@ function M.diagnose_group(item_name, item_id)
         return true
     end
     if tostring(runtime.last_skip_reason or "") == "no needers" then
-        print(string.format("[TurboGear] would NOT group announce: no BiS-paint needers for %s",
+        print(string.format("[TurboGear] would NOT group announce: no generated-authority needers for %s",
             item_name))
     else
         print(string.format("[TurboGear] group announce not sent for %s - %s",
@@ -3530,6 +6070,11 @@ function M.set_passive(value)
         announce_outbox = {}
         group_announces = {}
         link_scan_queue = {}
+        link_sched.chat_queue = {}
+        link_sched.peer_queue = {}
+        link_sched.legacy_validation_queue = {}
+        link_sched.reset_ownership_warm()
+        link_sched.driver_job = nil
         next_announce_send_at = 0
     else
         M.register()
@@ -3553,7 +6098,56 @@ function M.unregister()
     pending = {}
     pending_items = {}
     announce_outbox = {}
+    group_announces = {}
+    link_scan_queue = {}
+    link_sched.chat_queue = {}
+    link_sched.peer_queue = {}
+    link_sched.legacy_validation_queue = {}
+    link_sched.reset_ownership_warm()
+    link_sched.driver_job = nil
     next_announce_send_at = 0
+end
+
+function M._diet_a_hooks()
+    return {
+        need_for_row = link_sched.generated_diag.need_for_row,
+        step_driver_link_job = link_sched.step_driver_link_job,
+        apply_driver_need_result = link_sched.apply_driver_need_result,
+        try_cold_row_fallback = link_sched.try_cold_row_fallback,
+        tick_ownership_warm = link_sched.tick_ownership_warm,
+        queue_ownership_warm = link_sched.queue_ownership_warm,
+        reset_ownership_warm = link_sched.reset_ownership_warm,
+        ownership_cache_status = link_sched.ownership_cache_status,
+        driver_job_status = link_sched.driver_job_status,
+        ownership_emit_wait_s = link_sched.ownership_emit_wait_s,
+        elapsed_s = link_sched.elapsed_s,
+        work_clock = link_sched.work_clock,
+        sample_elapsed_ms = link_sched.sample_elapsed_ms,
+        stage_latency_report = link_sched.stage_latency_report,
+        enqueue_chat_links = link_sched.enqueue_chat_links,
+        drain_chat_link_queue = link_sched.drain_chat_link_queue,
+        set_elapsed_s = function(fn)
+            link_sched._elapsed_s = type(fn) == "function" and fn or nil
+        end,
+        set_work_clock = function(fn)
+            link_sched._work_clock = type(fn) == "function" and fn or nil
+            if ownership_index._set_work_clock_for_tests then
+                ownership_index._set_work_clock_for_tests(fn)
+            end
+        end,
+        set_driver_job = function(job) link_sched.driver_job = job end,
+        get_driver_job = function() return link_sched.driver_job end,
+        last_finished_job = function() return link_sched.last_finished_job end,
+        last_generated_scan = function() return runtime.last_generated_scan end,
+        clear_ownership_cache_status = function()
+            link_sched._ownership_cache_status = nil
+            link_sched._ownership_cache_status_at = 0
+        end,
+        queue_driver_entry = function(entry)
+            link_sched.bounded_push(link_scan_queue, entry, "announce.link_scan_queue")
+        end,
+        driver_queue_count = function() return #link_scan_queue end,
+    }
 end
 
 return M

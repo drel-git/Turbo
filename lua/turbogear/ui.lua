@@ -1,7 +1,7 @@
 -- TurboGear/ui.lua
 -- The UI shell: window frame, header (Minimize), tab bar, and the crash-safe
--- render wrapper. Data/IO never runs in here beyond what the tabs read from the
--- already-gathered Store/snapshot.
+-- render wrapper. Draw reads cached Store/snapshot data. Engine/main-loop owns
+-- Store refresh; this file does not poll cache because ImGui presented a frame.
 
 local ImGui = require('ImGui')
 local mq    = require('mq')
@@ -25,10 +25,13 @@ local live_stats = require('tabs.live_stats')
 local focus   = require('tabs.focus')
 local suggest = require('tabs.suggestions')
 local bis     = require('tabs.bis')
+local type12_tab = require('tabs.type12')
+local don_tab = require('tabs.don')
 local lockouts_tab = require('tabs.lockouts')
 local spells_tab   = require('tabs.spells')
 local setup   = require('tabs.setup')
 local global_search = require('global_search')
+local index_warm_policy = require('index_warm_policy')
 local snapshot = require('snapshot')
 local item_actions = require('item_actions')
 local inspect_dock = require('inspect_dock')
@@ -43,11 +46,19 @@ M._last_main_w = 900
 
 local last_main_tab = nil
 local last_view_key = nil
-local last_cache_reload = 0
+local last_enter_view_key = nil
+local lua_turbo_banner_dismissed = false
+
+local function request_item_index(reason)
+    pcall(function()
+        index_warm_policy.request_item_index(reason, 3.0)
+    end)
+end
 
 local iconImg = nil
 local iconLoadAttempted = false
-local lastMiniPosSaveMs = 0
+local MINI_CLICK_SLOP = 6.0
+local MAIN_WINDOW_FLAGS = (ImGuiWindowFlags.NoTitleBar or 0) + (ImGuiWindowFlags.NoCollapse or 0)
 
 local function vec2_xy(v, vy)
     if type(v) == "table" then
@@ -61,12 +72,46 @@ local CHROME_ROW_H = 26.0
 local CHROME_GAP = 4.0
 local CHROME_TAIL_H = 14.0
 local HEADER_BAND_H = 46.0
-local MAIN_WINDOW_FLAGS = (ImGuiWindowFlags.NoTitleBar or 0) + (ImGuiWindowFlags.NoCollapse or 0)
 
-local ui_drag = { excludes = {}, grabbing = false, drag_candidate = false, header_band = nil, last_mx = nil, last_my = nil }
-local MAIN_DRAG_THRESHOLD = 4.0
-local MINI_DRAG_THRESHOLD = 6.0
-local MAIN_CUSTOM_DRAG = true
+local function pointer_held()
+    return ImGui.IsMouseDown and ImGui.IsMouseDown(0) == true
+end
+
+local function mark_ui_settings(reason)
+    if cfg.MarkSettingsDirty then
+        cfg.MarkSettingsDirty(reason or "ui")
+    elseif SaveSettings then
+        SaveSettings()
+    end
+end
+
+local function geom_changed(prev, x, y, w, h)
+    if not prev then return true end
+    if x and math.abs((tonumber(prev.x) or 0) - x) >= 0.5 then return true end
+    if y and math.abs((tonumber(prev.y) or 0) - y) >= 0.5 then return true end
+    if w and math.abs((tonumber(prev.w) or 0) - w) >= 0.5 then return true end
+    if h and math.abs((tonumber(prev.h) or 0) - h) >= 0.5 then return true end
+    return false
+end
+
+-- Observe live ImGui geometry. Never pickle while the pointer is held.
+local function persist_window_geom(pos_key, size_key)
+    if not ImGui.GetWindowPos then return end
+    local wx, wy = vec2_xy(ImGui.GetWindowPos())
+    local ww, wh = 0, 0
+    if ImGui.GetWindowSize then ww, wh = vec2_xy(ImGui.GetWindowSize()) end
+    if pointer_held() then return end
+    local dirty = false
+    if pos_key and geom_changed(Settings[pos_key], wx, wy) then
+        Settings[pos_key] = { x = wx, y = wy }
+        dirty = true
+    end
+    if size_key and ww > 0 and wh > 0 and geom_changed(Settings[size_key], nil, nil, ww, wh) then
+        Settings[size_key] = { w = ww, h = wh }
+        dirty = true
+    end
+    if dirty then mark_ui_settings("window_geom") end
+end
 
 local function content_avail_x()
     local avail = ImGui.GetContentRegionAvail and ImGui.GetContentRegionAvail() or 0
@@ -84,11 +129,6 @@ local function content_region_width()
         if max_x > min_x then return max_x - min_x end
     end
     return content_avail_x()
-end
-
-local function mouse_screen_pos()
-    if not ImGui.GetMousePos then return nil, nil end
-    return vec2_xy(ImGui.GetMousePos())
 end
 
 local function window_screen_rect()
@@ -128,159 +168,13 @@ local function screen_rect_at_cursor(w, h)
     return { x1 = x, y1 = y, x2 = x + w, y2 = y + h }
 end
 
-local function item_screen_rect(w, h)
-    if ImGui.GetItemRectMin and ImGui.GetItemRectMax then
-        local rmin, rmin_y = ImGui.GetItemRectMin()
-        local rmax, rmax_y = ImGui.GetItemRectMax()
-        local x1, y1 = vec2_xy(rmin, rmin_y)
-        local x2, y2 = vec2_xy(rmax, rmax_y)
-        if x2 > x1 and y2 > y1 then
-            return { x1 = x1, y1 = y1, x2 = x2, y2 = y2 }
-        end
-    end
-    return screen_rect_at_cursor(w, h)
-end
-
-local function point_in_rect(px, py, rect)
-    if not rect then return false end
-    return px >= rect.x1 and px <= rect.x2 and py >= rect.y1 and py <= rect.y2
-end
-
-local function ui_drag_clear_frame_regions()
-    ui_drag.excludes = {}
-    ui_drag.header_band = nil
-end
-
-local function ui_drag_reset()
-    ui_drag_clear_frame_regions()
-    ui_drag.grabbing = false
-    ui_drag.drag_candidate = false
-    ui_drag.last_mx, ui_drag.last_my = nil, nil
-end
-
 local function hide_main_window()
     state.show = false
     M._last_main_rect = nil
-    ui_drag_reset()
 end
 
-local function ui_drag_set_header_band()
-    if not MAIN_CUSTOM_DRAG then return end
-    local win = window_screen_rect()
-    if not win then return end
-    ui_drag.header_band = {
-        x1 = win.x1,
-        y1 = win.y1,
-        x2 = win.x2,
-        y2 = win.y1 + HEADER_BAND_H,
-    }
-end
-
-local function drag_main_window_manual(mx, my)
-    if not (ImGui.SetWindowPos and mx and my) then return false end
-    if ui_drag.last_mx and ui_drag.last_my then
-        local dx = mx - ui_drag.last_mx
-        local dy = my - ui_drag.last_my
-        if dx ~= 0 or dy ~= 0 then
-            local px, py = vec2_xy(ImGui.GetWindowPos())
-            local nx = math.floor((px + dx) + 0.5)
-            local ny = math.floor((py + dy) + 0.5)
-            ImGui.SetWindowPos(nx, ny)
-        end
-    end
-    ui_drag.last_mx, ui_drag.last_my = mx, my
-    return true
-end
-
-local function ui_drag_add_exclude(rect)
-    if rect then ui_drag.excludes[#ui_drag.excludes + 1] = rect end
-end
-
-local function ui_drag_pointer_blocked(px, py)
-    for _, rect in ipairs(ui_drag.excludes) do
-        if point_in_rect(px, py, rect) then return true end
-    end
-    return false
-end
-
-local function ui_drag_apply_move()
-    if not MAIN_CUSTOM_DRAG then return end
-    if not ui_drag.grabbing then return end
-    if not (ImGui.IsMouseDown and ImGui.IsMouseDown(0)) then return end
-    local mx, my = mouse_screen_pos()
-    if mx and my then drag_main_window_manual(mx, my) end
-end
-
-local function ui_drag_handle_input()
-    if not MAIN_CUSTOM_DRAG then return end
-    local mx, my = mouse_screen_pos()
-    if not mx or not my or not ui_drag.header_band then
-        return
-    end
-    local in_header = point_in_rect(mx, my, ui_drag.header_band)
-    local blocked = ui_drag_pointer_blocked(mx, my)
-    local mouse_down = ImGui.IsMouseDown and ImGui.IsMouseDown(0)
-
-    if ImGui.IsMouseClicked and ImGui.IsMouseClicked(0) then
-        if in_header and not blocked then
-            ui_drag.drag_candidate = true
-            ui_drag.last_mx, ui_drag.last_my = mx, my
-            if ImGui.ResetMouseDragDelta then ImGui.ResetMouseDragDelta(0) end
-        elseif not ui_drag.grabbing then
-            ui_drag.drag_candidate = false
-            ui_drag.last_mx, ui_drag.last_my = nil, nil
-        end
-    end
-
-    if ui_drag.drag_candidate and ImGui.IsMouseDragging and ImGui.IsMouseDragging(0, MAIN_DRAG_THRESHOLD) then
-        ui_drag.grabbing = true
-    end
-
-    if not mouse_down then
-        ui_drag.grabbing = false
-        ui_drag.drag_candidate = false
-        ui_drag.last_mx, ui_drag.last_my = nil, nil
-    end
-
-    if in_header and not blocked and not ui_drag.grabbing and not ui_drag.drag_candidate
-        and not mouse_down and ImGui.SetTooltip then
-        ImGui.SetTooltip("Drag title bar to move TurboGear.")
-    end
-end
-
-local function nowMs()
-    return (mq.gettime and mq.gettime()) or (os.time() * 1000)
-end
-
-local function persistMiniPos(force)
-    if not SaveSettings then return end
-    local wx, wy = ImGui.GetWindowPos()
-    wx, wy = tonumber(wx), tonumber(wy)
-    if not wx or not wy then return end
-    local prev = Settings.miniWindowPos
-    if not force and prev and math.abs((prev.x or 0) - wx) < 0.5 and math.abs((prev.y or 0) - wy) < 0.5 then
-        return
-    end
-    local t = nowMs()
-    if not force and (t - lastMiniPosSaveMs) < 400 then return end
-    Settings.miniWindowPos = { x = wx, y = wy }
-    lastMiniPosSaveMs = t
-    SaveSettings()
-end
-
-local function dragMiniWindow(dragThreshold)
-    dragThreshold = tonumber(dragThreshold) or 0.0
-    if not ImGui.IsMouseDragging or not ImGui.GetMouseDragDelta or not ImGui.SetWindowPos then return false end
-    if not ImGui.IsMouseDragging(0, dragThreshold) then return false end
-    local delta = ImGui.GetMouseDragDelta(0)
-    local dx = type(delta) == "table" and tonumber(delta.x or delta[1]) or tonumber(delta) or 0
-    local dy = type(delta) == "table" and tonumber(delta.y or delta[2]) or 0
-    if dx == 0 and dy == 0 then return false end
-    local px, py = vec2_xy(ImGui.GetWindowPos())
-    ImGui.SetWindowPos(px + dx, py + dy)
-    if ImGui.ResetMouseDragDelta then ImGui.ResetMouseDragDelta(0) end
-    persistMiniPos(false)
-    return true
+local function persistMiniPos()
+    persist_window_geom("miniWindowPos", nil)
 end
 
 local function sync_full()
@@ -359,23 +253,25 @@ end
 local function draw_global_search_bar()
     local clear_w = 64.0
     local sync_w = 88.0
-    local bank_w = 88.0
     if ImGui.BeginTable then
         local flags = (ImGuiTableFlags.NoSavedSettings or 0) + (ImGuiTableFlags.NoPadOuterX or 0)
-        if ImGui.BeginTable("##tg_global_search_bar", 4, flags) then
+        if ImGui.BeginTable("##tg_global_search_bar", 3, flags) then
             ImGui.TableSetupColumn("Search", ImGuiTableColumnFlags.WidthStretch, 1.0)
             ImGui.TableSetupColumn("Clear", ImGuiTableColumnFlags.WidthFixed, clear_w + 8.0)
             ImGui.TableSetupColumn("Sync", ImGuiTableColumnFlags.WidthFixed, sync_w + 8.0)
-            ImGui.TableSetupColumn("Bank", ImGuiTableColumnFlags.WidthFixed, bank_w + 8.0)
             ImGui.TableNextRow()
 
             ImGui.TableSetColumnIndex(0)
             ImGui.SetNextItemWidth(-1)
             local next_val = input_text_hint("##tg_global_search", "Search everywhere...", Settings.globalSearch or "")
+            local search_hot = tostring(next_val or ""):gsub("^%s+", ""):gsub("%s+$", "") ~= ""
+            if ImGui.IsItemActive and ImGui.IsItemActive() then search_hot = true end
+            if ImGui.IsItemFocused and ImGui.IsItemFocused() then search_hot = true end
+            if search_hot then request_item_index("search") end
             if next_val ~= (Settings.globalSearch or "") then
                 Settings.globalSearch = next_val
                 global_search.invalidate()
-                SaveSettings()
+                mark_ui_settings("global_search")
             end
 
             ImGui.TableSetColumnIndex(1)
@@ -383,7 +279,7 @@ local function draw_global_search_bar()
                 if tostring(Settings.globalSearch or "") ~= "" then
                     Settings.globalSearch = ""
                     global_search.invalidate()
-                    SaveSettings()
+                    mark_ui_settings("global_search")
                 end
             end
             if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
@@ -395,61 +291,88 @@ local function draw_global_search_bar()
             if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
                 ImGui.SetTooltip("Refresh inventory cache and sync peers. Cached bank contents are preserved when the bank is closed.")
             end
-
-            ImGui.TableSetColumnIndex(3)
-            if theme.themed_button("Sync Banks##tg_global_bank", Theme.purple, bank_w, 0) then
-                if state.engine_claim_disabled then
-                    local bg_name = tostring((cfg.CFG and cfg.CFG.bg_lua_name) or 'turbogear_bg')
-                    mq.cmd('/squelch /lua run ' .. bg_name)
-                    mq.cmd('/timed 5 /squelch /tgearbg syncbank')
-                    state.bank_sync_reload_until = os.clock() + 10.0
-                else
-                    Engine.sync_banks_network()
-                    pcall(function()
-                        if Store.reload_cache_if_changed then Store.reload_cache_if_changed(false)
-                        else Store.reload_cache() end
-                    end)
-                end
-            end
-            if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
-                ImGui.SetTooltip("Capture this character's open bank and request full snapshots from peers. Open the bank on the owner first.")
-            end
             ImGui.EndTable()
         end
         return
     end
 
-    ImGui.SetNextItemWidth(math.max(120.0, content_avail_x() - (clear_w + sync_w + bank_w + 36.0)))
+    ImGui.SetNextItemWidth(math.max(120.0, content_avail_x() - (clear_w + sync_w + 24.0)))
     local next_val = input_text_hint("##tg_global_search", "Search everywhere...", Settings.globalSearch or "")
+    local search_hot = tostring(next_val or ""):gsub("^%s+", ""):gsub("%s+$", "") ~= ""
+    if ImGui.IsItemActive and ImGui.IsItemActive() then search_hot = true end
+    if ImGui.IsItemFocused and ImGui.IsItemFocused() then search_hot = true end
+    if search_hot then request_item_index("search") end
     if next_val ~= (Settings.globalSearch or "") then
         Settings.globalSearch = next_val
         global_search.invalidate()
-        SaveSettings()
+        mark_ui_settings("global_search")
     end
     ImGui.SameLine()
     if theme.themed_button("Clear##tg_gs_clear", Theme.steel, clear_w, 0) then
         if tostring(Settings.globalSearch or "") ~= "" then
             Settings.globalSearch = ""
             global_search.invalidate()
-            SaveSettings()
+            mark_ui_settings("global_search")
         end
     end
     ImGui.SameLine()
     if theme.sync_button("Sync Now##tg_global", sync_w, 0) then sync_full() end
-    ImGui.SameLine()
-    if theme.themed_button("Sync Banks##tg_global_bank", Theme.purple, bank_w, 0) then
-        if state.engine_claim_disabled then
-            local bg_name = tostring((cfg.CFG and cfg.CFG.bg_lua_name) or 'turbogear_bg')
-            mq.cmd('/squelch /lua run ' .. bg_name)
-            mq.cmd('/timed 5 /squelch /tgearbg syncbank')
-            state.bank_sync_reload_until = os.clock() + 10.0
-        else
-            Engine.sync_banks_network()
-            pcall(function()
-                if Store.reload_cache_if_changed then Store.reload_cache_if_changed(false)
-                else Store.reload_cache() end
-            end)
+end
+
+local function draw_lua_turbo_banner()
+    if lua_turbo_banner_dismissed then return end
+    local st = cfg.lua_turbo_status and cfg.lua_turbo_status() or nil
+    if not (st and st.known and st.warning) then return end
+
+    local value = tonumber(st.value) or 0
+    local rec = tonumber(st.recommended) or 1000
+    local msg = string.format(
+        "Performance setup: MQ2Lua Turbo Num is %d. Recommended: %d for faster linked-needs warmup.",
+        value, rec)
+
+    if ImGui.BeginTable then
+        local flags = (ImGuiTableFlags.NoSavedSettings or 0) + (ImGuiTableFlags.NoPadOuterX or 0)
+        if ImGui.BeginTable("##tg_lua_turbo_banner", 3, flags) then
+            ImGui.TableSetupColumn("Message", ImGuiTableColumnFlags.WidthStretch, 1.0)
+            ImGui.TableSetupColumn("Set", ImGuiTableColumnFlags.WidthFixed, 112.0)
+            ImGui.TableSetupColumn("Later", ImGuiTableColumnFlags.WidthFixed, 64.0)
+            ImGui.TableNextRow()
+
+            ImGui.TableSetColumnIndex(0)
+            col_text(Theme.amber, msg)
+
+            ImGui.TableSetColumnIndex(1)
+            if theme.themed_button("Set to " .. tostring(rec) .. "##tg_lua_turbo_banner_set", Theme.purple, 104, 0) then
+                local applied = cfg.set_recommended_lua_turbo and cfg.set_recommended_lua_turbo()
+                state.sync_hint = "Lua Turbo Num set command sent: " .. tostring(applied or rec)
+                state.sync_hint_until = os.clock() + 4.0
+            end
+            if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
+                ImGui.SetTooltip("Runs /lua conf turboNum " .. tostring(rec) .. ". If the banner does not clear, reload MQ2Lua or relog.")
+            end
+
+            ImGui.TableSetColumnIndex(2)
+            if theme.themed_button("Later##tg_lua_turbo_banner_later", Theme.steel, 58, 0) then
+                lua_turbo_banner_dismissed = true
+            end
+            if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
+                ImGui.SetTooltip("Hide this reminder for this TurboGear session.")
+            end
+            ImGui.EndTable()
         end
+        return
+    end
+
+    col_text(Theme.amber, msg)
+    ImGui.SameLine()
+    if theme.themed_button("Set to " .. tostring(rec) .. "##tg_lua_turbo_banner_set", Theme.purple) then
+        local applied = cfg.set_recommended_lua_turbo and cfg.set_recommended_lua_turbo()
+        state.sync_hint = "Lua Turbo Num set command sent: " .. tostring(applied or rec)
+        state.sync_hint_until = os.clock() + 4.0
+    end
+    ImGui.SameLine()
+    if theme.themed_button("Later##tg_lua_turbo_banner_later", Theme.steel) then
+        lua_turbo_banner_dismissed = true
     end
 end
 
@@ -655,12 +578,12 @@ local function mini_settings_checkbox(label, key)
     end
     if apply then
         Settings[key] = new_val and true or false
-        SaveSettings()
+        mark_ui_settings("mini_icon")
     end
 end
 
 local function draw_mini()
-    return diag.time("ui.mini", function()
+    return diag.time("ui.window.mini", function()
     -- Opt-in dock mode: while the Turbo hub is up, its mini bar owns the TG
     -- entry point; skip drawing our own icon. Auto-shows again if Turbo stops.
     if Settings.miniHideWhenTurboMini and turbo_hub_running() then return end
@@ -698,7 +621,7 @@ local function draw_mini()
             if icon and ImGui.Image then
                 ImGui.Image(icon:GetTextureID(), icon_size)
                 if ImGui.IsItemClicked and ImGui.IsItemClicked(0)
-                    and (not ImGui.IsMouseDragging or not ImGui.IsMouseDragging(0, MINI_DRAG_THRESHOLD)) then
+                    and (not ImGui.IsMouseDragging or not ImGui.IsMouseDragging(0, MINI_CLICK_SLOP)) then
                     state.show = not state.show
                 end
                 if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
@@ -724,12 +647,7 @@ local function draw_mini()
                 ImGui.EndPopup()
             end
 
-            if ImGui.IsWindowHovered and ImGui.IsWindowHovered()
-                and ImGui.IsMouseDragging and ImGui.IsMouseDragging(0, MINI_DRAG_THRESHOLD) then
-                dragMiniWindow(MINI_DRAG_THRESHOLD)
-            end
-
-            persistMiniPos(false)
+            persistMiniPos()
         end
 
         ImGui.End()
@@ -770,7 +688,6 @@ local function draw_window_chrome()
     if theme.themed_button("...##tg_menu", Theme.menu or Theme.steel, side, CHROME_ROW_H) then
         if ImGui.OpenPopup then ImGui.OpenPopup("##tg_title_menu") end
     end
-    ui_drag_add_exclude(item_screen_rect(side, CHROME_ROW_H))
     if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
         ImGui.SetTooltip("TurboGear menu.")
     end
@@ -791,9 +708,6 @@ local function draw_window_chrome()
     if title_rect then
         title_sx, title_sy, title_ex, title_ey = title_rect.x1, title_rect.y1, title_rect.x2, title_rect.y2
     end
-    if ImGui.Dummy then
-        ImGui.Dummy(drag_w, CHROME_ROW_H)
-    end
 
     if ImGui.SetCursorPos then
         ImGui.SetCursorPos(x0 + math.max(0, bar_w - side), y0)
@@ -801,7 +715,6 @@ local function draw_window_chrome()
     if theme.themed_button("-##tg_hide", Theme.gold, side, CHROME_ROW_H) then
         hide_main_window()
     end
-    ui_drag_add_exclude(item_screen_rect(side, CHROME_ROW_H))
     if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
         ImGui.SetTooltip("Minimize TurboGear to the TG icon.")
     end
@@ -851,6 +764,7 @@ end
 
 local function gear_to_legacy_aug_tab(tab)
     if tab == "stored" then return "stored" end
+    if tab == "stats" or tab == "effects" or tab == "focus" then return Settings.augsSubTab or "equipped" end
     return "equipped"
 end
 
@@ -858,21 +772,21 @@ local function current_view_key()
     local main = tostring(Settings.mainTab or "bis")
     if main == "gear" then
         return "gear:" .. tostring(Settings.gearTab or "inventory")
-    elseif main == "inspect" then
-        return "inspect:" .. tostring(Settings.inspectTab or "stats")
     elseif main == "upgrade" then
         return "upgrade:" .. tostring(Settings.upgradeTab or "suggestions")
     elseif main == "bis" then
         return "bis:" .. tostring(Settings.bisListsTab or "catalog")
+    elseif main == "lockouts" then
+        return "lockouts:" .. tostring(Settings.lockoutsTab or "expeditions")
     end
     return main
 end
 
 local function current_view_requires_full()
     local main = tostring(Settings.mainTab or "bis")
-    if main == "inspect" then
-        local tab = tostring(Settings.inspectTab or "stats")
-        return tab == "stats" or tab == "focus" or tab == "live"
+    if main == "gear" then
+        local tab = tostring(Settings.gearTab or "inventory")
+        return tab == "stats" or tab == "focus" or tab == "effects"
     end
     if main == "upgrade" then
         return tostring(Settings.upgradeTab or "suggestions") == "suggestions"
@@ -887,25 +801,28 @@ local function sync_current_view_if_needed()
             last_view_key = view_key
             return
         end
-        -- Effects/Focus: force a full publish with liveStats so tab re-entry
-        -- cannot serve a skipLiveStats module cache that blanked those views.
+        -- Effects/Focus: raise cooperative rich enrichment. Do not blocking-walk
+        -- inventory, and do not drop the current lite/full cache.
         local main = tostring(Settings.mainTab or "")
-        local inspect = tostring(Settings.inspectTab or "stats")
-        local force_inspect = main == "inspect" and (inspect == "live" or inspect == "focus")
+        local gear = tostring(Settings.gearTab or "inventory")
+        local force_inspect = main == "gear" and (gear == "effects" or gear == "focus")
         if force_inspect then
             pcall(function()
                 local items = require('items')
                 if items.clear_meta_cache then items.clear_meta_cache() end
             end)
-            snapshot.invalidate()
+            if Engine.ok then
+                Engine.publish(true, "lite", {
+                    skipLockouts = true,
+                    includeLiveStats = true,
+                    reason = "inspect_tab_enter",
+                })
+            end
+            if gear == "focus" and focus.on_tab_enter then
+                pcall(focus.on_tab_enter)
+            end
         end
         snapshot.ensure_full()
-        if Engine.ok then
-            Engine.publish(force_inspect, "full", {
-                skipLockouts = true,
-                reason = "inspect_tab_enter",
-            })
-        end
     end
     last_view_key = view_key
 end
@@ -913,7 +830,15 @@ end
 local function set_gear_tab(tab)
     Settings.gearTab = tab
     Settings.augsSubTab = gear_to_legacy_aug_tab(tab)
-    SaveSettings()
+    if tab == "stats" then Settings.inspectTab = "stats"
+    elseif tab == "effects" then Settings.inspectTab = "live"
+    elseif tab == "focus" then Settings.inspectTab = "focus" end
+    mark_ui_settings("gear_tab")
+end
+
+local function set_lockouts_tab(tab)
+    Settings.lockoutsTab = tab
+    mark_ui_settings("lockouts_tab")
 end
 
 local function characters_tab_for_main(main)
@@ -924,18 +849,17 @@ local function characters_tab_for_main(main)
     end
     if main == "spells" then return "spells" end
     if main == "lockouts" then return "lockouts" end
-    if main == "inspect" then
-        local inspect = tostring(Settings.inspectTab or "stats")
-        if inspect == "live" then return "effects" end
-        if inspect == "focus" then return "focus" end
-        if inspect == "stats" then
+    if main == "gear" then
+        local gear = tostring(Settings.gearTab or "inventory")
+        if gear == "effects" then return "effects" end
+        if gear == "focus" then return "focus" end
+        if gear == "stats" then
             local mode = tostring(Settings.statsViewMode or "character")
             if mode == "search" then return "stats_search" end
             if mode == "character" then return "stats_character" end
             if mode == "plan" then return "stats_plan" end
             return nil
         end
-        return nil
     end
     if main == "upgrade" then
         local upgrade = tostring(Settings.upgradeTab or "suggestions")
@@ -951,9 +875,10 @@ local function characters_tab_for_main(main)
         local gear = tostring(Settings.gearTab or "inventory")
         if gear == "worn" then return "worn" end
         if gear == "stored" then return "stored" end
-        if gear == "stock" then return "stock" end
         return "inventory"
     end
+    if main == "stock" then return "stock" end
+    if main == "type12" then return "type12" end
     return nil
 end
 
@@ -997,18 +922,27 @@ local function draw_gear_chrome()
         { key = "inventory", label = "Inventory" },
         { key = "worn", label = "Worn Augs" },
         { key = "stored", label = "Stored Augs" },
-        { key = "stock", label = "Stock Up" },
+        { key = "stats", label = "Stats" },
+        { key = "effects", label = "Effects" },
+        { key = "focus", label = "Focus" },
     }, cur, "tg_gear", true, set_gear_tab)
     ImGui.Separator()
+    if cur == "stats" and stats.draw_view_chrome then
+        stats.draw_view_chrome()
+    end
     return cur
 end
 
 local function draw_gear_body(cur)
     cur = tostring(cur or Settings.gearTab or "inventory")
+    if cur == "stats" then request_item_index("stats")
+    elseif cur == "focus" then request_item_index("focus") end
     sync_current_view_if_needed()
     if cur == "worn" then diag.time("ui.gear.worn", worn.draw)
     elseif cur == "stored" then diag.time("ui.gear.stored", augbag.draw)
-    elseif cur == "stock" then diag.time("ui.gear.stock", inventory.draw_stock)
+    elseif cur == "stats" then diag.time("ui.gear.stats", stats.draw)
+    elseif cur == "effects" then diag.time("ui.gear.effects", live_stats.draw)
+    elseif cur == "focus" then diag.time("ui.gear.focus", focus.draw)
     else diag.time("ui.gear.inventory", inventory.draw) end
 end
 
@@ -1020,7 +954,7 @@ local function draw_inspect_chrome()
         { key = "focus", label = "Focus" },
     }, cur, "tg_inspect", true, function(tab)
         Settings.inspectTab = tab
-        SaveSettings()
+        mark_ui_settings("inspect_tab")
     end)
     ImGui.Separator()
     if cur == "stats" and stats.draw_view_chrome then
@@ -1031,6 +965,8 @@ end
 
 local function draw_inspect_body(cur)
     cur = tostring(cur or Settings.inspectTab or "stats")
+    if cur == "stats" then request_item_index("stats")
+    elseif cur == "focus" then request_item_index("focus") end
     sync_current_view_if_needed()
     if cur == "focus" then diag.time("ui.inspect.focus", focus.draw)
     elseif cur == "live" then diag.time("ui.inspect.live", live_stats.draw)
@@ -1045,13 +981,14 @@ local function draw_upgrade_chrome()
         { key = "empty", label = "Empty" },
     }, cur, "tg_upgrade", true, function(tab)
         Settings.upgradeTab = tab
-        SaveSettings()
+        mark_ui_settings("upgrade_tab")
     end)
     ImGui.Separator()
     return cur
 end
 
 local function draw_upgrade_body(cur)
+    request_item_index("upgrade")
     cur = tostring(cur or Settings.upgradeTab or "suggestions")
     sync_current_view_if_needed()
     if cur == "compare" then diag.time("ui.upgrade.compare", compare.draw)
@@ -1082,12 +1019,37 @@ local function draw_bis_lists_body(cur)
     end
 end
 
+local function draw_lockouts_chrome()
+    local cur = Settings.lockoutsTab or "expeditions"
+    cur = draw_tab_buttons({
+        { key = "expeditions", label = "Instances" },
+        { key = "don", label = "Dragons of Norrath" },
+    }, cur, "tg_lockouts", true, set_lockouts_tab)
+    ImGui.Separator()
+    return cur
+end
+
+local function draw_lockouts_mode_chrome()
+    local cur = Settings.lockoutsTab or "expeditions"
+    return draw_tab_buttons({
+        { key = "expeditions", label = "Instances" },
+        { key = "don", label = "Dragons of Norrath" },
+    }, cur, "tg_lockouts_inline", true, set_lockouts_tab)
+end
+
+local function draw_lockouts_body(cur)
+    cur = tostring(cur or Settings.lockoutsTab or "expeditions")
+    sync_current_view_if_needed()
+    if cur == "don" then diag.time("ui.lockouts.don", don_tab.draw)
+    else diag.time("ui.lockouts.expeditions", lockouts_tab.draw) end
+end
+
 local function draw_secondary_chrome(main)
     main = tostring(main or "")
     if main == "gear" then return draw_gear_chrome() end
-    if main == "inspect" then return draw_inspect_chrome() end
     if main == "upgrade" then return draw_upgrade_chrome() end
     if main == "bis" then return draw_bis_lists_chrome() end
+    if main == "lockouts" then return draw_lockouts_chrome() end
     return nil
 end
 
@@ -1095,46 +1057,69 @@ local function draw_main_tab_chrome()
     local cur = Settings.mainTab or "bis"
     local tabs = {
         { key = "gear", label = "Gear" },
-        { key = "inspect", label = "Inspect" },
         { key = "upgrade", label = "Upgrade" },
-        { key = "bis", label = "BiS + Lists" },
+        { key = "bis", label = "TurboBiS" },
+        { key = "type12", label = "Type 12" },
         { key = "spells", label = "Spells" },
         { key = "lockouts", label = "Lockouts" },
+        { key = "stock", label = "Stock Up" },
         { key = "setup", label = "Setup" },
     }
     cur = draw_tab_buttons(tabs, cur, "tg_main", false, function(tab_key)
         if cur ~= tab_key then
             Settings.mainTab = tab_key
-            SaveSettings()
+            mark_ui_settings("main_tab")
         end
     end)
     ImGui.Separator()
-    if draw_characters_chrome(cur) then
+    local drew = draw_characters_chrome(cur)
+    local inline_secondary = nil
+    if cur == "spells" and spells_tab.draw_mode_chrome then
+        if drew then ImGui.SameLine() end
+        inline_secondary = spells_tab.draw_mode_chrome()
+        drew = true
+    elseif cur == "lockouts" then
+        if drew then ImGui.SameLine() end
+        inline_secondary = draw_lockouts_mode_chrome()
+        drew = true
+    end
+    if drew then
         ImGui.Separator()
     end
-    local secondary = draw_secondary_chrome(cur)
+    local secondary = inline_secondary or draw_secondary_chrome(cur)
     return cur, secondary
 end
 
 local function draw_main_tab_body(cur, secondary)
     cur = tostring(cur or Settings.mainTab or "bis")
-    local prev_tab = last_main_tab
-    if prev_tab ~= cur then
+    local enter_key = cur .. ":" .. tostring(secondary or "")
+    if last_enter_view_key ~= enter_key then
         if cur == "spells" and spells_tab.on_tab_enter then spells_tab.on_tab_enter()
+        elseif cur == "lockouts" and tostring(secondary or Settings.lockoutsTab or "expeditions") == "don"
+            and don_tab.on_tab_enter then don_tab.on_tab_enter()
         elseif cur == "lockouts" and lockouts_tab.on_tab_enter then lockouts_tab.on_tab_enter() end
     end
+    last_enter_view_key = enter_key
     last_main_tab = cur
-    if cur == "gear" then draw_gear_body(secondary)
-    elseif cur == "inspect" then draw_inspect_body(secondary)
-    elseif cur == "upgrade" then draw_upgrade_body(secondary)
-    elseif cur == "bis" then draw_bis_lists_body(secondary)
-    else
-        sync_current_view_if_needed()
-        if cur == "spells" then diag.time("ui.tab.spells", spells_tab.draw)
-        elseif cur == "lockouts" then diag.time("ui.tab.lockouts", lockouts_tab.draw)
-        elseif cur == "setup" then diag.time("ui.tab.setup", setup.draw)
-        else draw_bis_lists_body(secondary) end
-    end
+    local tab_key = "ui.tab." .. cur
+    diag.time(tab_key, function()
+        if cur == "gear" then draw_gear_body(secondary)
+        elseif cur == "upgrade" then draw_upgrade_body(secondary)
+        elseif cur == "bis" then draw_bis_lists_body(secondary)
+        elseif cur == "type12" then
+            sync_current_view_if_needed()
+            diag.time("ui.type12", type12_tab.draw)
+        elseif cur == "lockouts" then draw_lockouts_body(secondary)
+        elseif cur == "stock" then
+            sync_current_view_if_needed()
+            diag.time("ui.stock", inventory.draw_stock)
+        else
+            sync_current_view_if_needed()
+            if cur == "spells" then spells_tab.draw()
+            elseif cur == "setup" then setup.draw()
+            else draw_bis_lists_body(secondary) end
+        end
+    end)
 end
 
 local function begin_main_scroll_child()
@@ -1175,6 +1160,7 @@ local function draw_main_body()
         if item_actions.draw_pending_modal then item_actions.draw_pending_modal() end
         if item_actions.draw_in_flight then item_actions.draw_in_flight() end
         diag.time("ui.global_search.bar", draw_global_search_bar)
+        draw_lua_turbo_banner()
         ImGui.Separator()
 
         local searching = global_search_active()
@@ -1209,37 +1195,29 @@ function M.main_window_rect()
 end
 
 function M.draw_ui()
-    return diag.time("ui.draw_ui", function()
+    return diag.time("ui.draw", function()
     -- Background responder draws nothing until shown (/tgear show sets state.show,
     -- promoting the hidden instance to a visible window without a new process).
     if state.bg and not state.show then return end
     local th = push_theme()
-    if state.show and not state.bg then
-        -- After Sync/Request: poll shared cache more often so late peer snaps appear.
-        if suggest.tick_cache_watch then
-            pcall(suggest.tick_cache_watch)
-        end
-        local now = os.clock()
-        local watch = suggest.cache_watch_active and suggest.cache_watch_active()
-        local gap = watch and 0.25 or 0.75
-        if (now - (last_cache_reload or 0)) >= gap then
-            last_cache_reload = now
-            if not watch then
-                pcall(function()
-                    if Store.reload_cache_if_changed then Store.reload_cache_if_changed(false)
-                    else Store.reload_cache() end
-                end)
-            end
-        end
-    end
+    local visible = state.show == true and not state.bg
+    diag.time(visible and "ui.draw_visible" or "ui.draw_hidden", function()
     if not state.show then draw_mini() end
     if state.show then
-        diag.time("ui.main_shell", function()
+        diag.time("ui.window.main", function()
         ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 1.5)
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, ImVec2(6, 4))
         ImGui.PushStyleColor(ImGuiCol.Border, 0.88, 0.65, 0.24, 0.78)
         local title = string.format("TurboGear v%s###TurboGearMain", tostring(CFG.version or "?"))
         local window_open = state.show ~= false
+        local pos = Settings.mainWindowPos
+        if pos and pos.x and pos.y and ImGui.SetNextWindowPos then
+            ImGui.SetNextWindowPos(pos.x, pos.y, ImGuiCond.Appearing)
+        end
+        local size = Settings.mainWindowSize
+        if size and size.w and size.h and ImGui.SetNextWindowSize then
+            ImGui.SetNextWindowSize(size.w, size.h, ImGuiCond.Appearing)
+        end
         local begin_ok, open, vis = pcall(function()
             return diag.time("ui.main_begin", function()
             return ImGui.Begin(title, window_open, MAIN_WINDOW_FLAGS)
@@ -1255,16 +1233,9 @@ function M.draw_ui()
             end
             if vis and state.show ~= false then
                 local ok, e = pcall(function()
-                    ui_drag_set_header_band()
-                    ui_drag_handle_input()
-                    ui_drag_apply_move()
-                    -- Move before drawing this frame. Calling SetWindowPos after
-                    -- chrome/body rendering makes the right edge appear to pulse
-                    -- because some draw calls used the old position.
-                    ui_drag_clear_frame_regions()
-                    ui_drag_set_header_band()
                     draw_window_chrome()
                     draw_main_body()
+                    persist_window_geom("mainWindowPos", "mainWindowSize")
                     M._last_main_rect = window_screen_rect()
                     if inspect_dock.enabled and inspect_dock.enabled() then
                         inspect_dock.set_anchor(M._last_main_rect)
@@ -1279,6 +1250,7 @@ function M.draw_ui()
         ImGui.PopStyleVar(2)
         end)
     end
+    end)
     pop_theme(th)
     if state.err_once then print(string.format("[TurboGear] render error: %s", tostring(state.err_once))); state.err_once = nil end
     if state.pending_stop then

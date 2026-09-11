@@ -1011,23 +1011,32 @@ local function buildSettingsTable()
     }
 end
 
+-- Load a saved boolean. `x ~= nil and x or default` drops false (false or default
+-- -> default), so any option that defaults to true could never be turned off.
+-- Attached to ux (not a file-scope local) because the main chunk is at the
+-- 200-local ceiling.
+ux.pickBool = function(value, fallback)
+    if value == nil then return fallback end
+    return value == true
+end
+
 local function applySettingsTable(data)
     if type(data) ~= 'table' then return end
-    compactMode = data.compactMode ~= nil and data.compactMode or compactMode
-    enabled = data.enabled ~= nil and data.enabled or enabled
-    ux.showMore = data.showMore ~= nil and data.showMore or ux.showMore
+    compactMode = ux.pickBool(data.compactMode, compactMode)
+    enabled = ux.pickBool(data.enabled, enabled)
+    ux.showMore = ux.pickBool(data.showMore, ux.showMore)
     ux.settingsAdvanced = data.settingsAdvanced == true
-    ux.showSettings = data.showSettings ~= nil and data.showSettings or ux.showSettings
-    compatVarsEnabled = data.compatVarsEnabled ~= nil and data.compatVarsEnabled or compatVarsEnabled
-    spawnMasterCompat = data.spawnMasterCompat ~= nil and data.spawnMasterCompat or spawnMasterCompat
+    ux.showSettings = ux.pickBool(data.showSettings, ux.showSettings)
+    compatVarsEnabled = ux.pickBool(data.compatVarsEnabled, compatVarsEnabled)
+    spawnMasterCompat = ux.pickBool(data.spawnMasterCompat, spawnMasterCompat)
     ux.targetCompatVarsEnabled = data.targetCompatVarsEnabled == true
-    npcOnly = data.npcOnly ~= nil and data.npcOnly or npcOnly
-    ux.targetableOnly = data.targetableOnly ~= nil and data.targetableOnly or ux.targetableOnly
-    namedOnly = data.namedOnly ~= nil and data.namedOnly or namedOnly
-    includeCorpses = data.includeCorpses ~= nil and data.includeCorpses or includeCorpses
-    includePlayers = data.includePlayers ~= nil and data.includePlayers or includePlayers
-    includePets = data.includePets ~= nil and data.includePets or includePets
-    includeGroundItems = data.includeGroundItems ~= nil and data.includeGroundItems or includeGroundItems
+    npcOnly = ux.pickBool(data.npcOnly, npcOnly)
+    ux.targetableOnly = ux.pickBool(data.targetableOnly, ux.targetableOnly)
+    namedOnly = ux.pickBool(data.namedOnly, namedOnly)
+    includeCorpses = ux.pickBool(data.includeCorpses, includeCorpses)
+    includePlayers = ux.pickBool(data.includePlayers, includePlayers)
+    includePets = ux.pickBool(data.includePets, includePets)
+    includeGroundItems = ux.pickBool(data.includeGroundItems, includeGroundItems)
     ux.bodyFilter = tostring(data.bodyFilter or ux.bodyFilter or '')
     ux.raceFilter = tostring(data.raceFilter or ux.raceFilter or '')
     ux.classFilter = tostring(data.classFilter or ux.classFilter or '')
@@ -1042,20 +1051,20 @@ local function applySettingsTable(data)
     ux.normalizeLevelFilters()
     sortMode = data.sortMode or sortMode
     if sortMode == 'Direction' then sortMode = 'Distance' end
-    sortAscending = data.sortAscending ~= nil and data.sortAscending or sortAscending
-    ux.showIdColumn = data.showIdColumn ~= nil and data.showIdColumn or ux.showIdColumn
-    ux.showTypeColumn = data.showTypeColumn ~= nil and data.showTypeColumn or ux.showTypeColumn
-    ux.showBodyColumn = data.showBodyColumn ~= nil and data.showBodyColumn or ux.showBodyColumn
-    ux.showTrueNameColumn = data.showTrueNameColumn ~= nil and data.showTrueNameColumn or ux.showTrueNameColumn
-    ux.showClassColumn = data.showClassColumn ~= nil and data.showClassColumn or ux.showClassColumn
+    sortAscending = ux.pickBool(data.sortAscending, sortAscending)
+    ux.showIdColumn = ux.pickBool(data.showIdColumn, ux.showIdColumn)
+    ux.showTypeColumn = ux.pickBool(data.showTypeColumn, ux.showTypeColumn)
+    ux.showBodyColumn = ux.pickBool(data.showBodyColumn, ux.showBodyColumn)
+    ux.showTrueNameColumn = ux.pickBool(data.showTrueNameColumn, ux.showTrueNameColumn)
+    ux.showClassColumn = ux.pickBool(data.showClassColumn, ux.showClassColumn)
     ux.showDirectionColumn = false
-    ux.showDirectionArrows = data.showDirectionArrows ~= nil and data.showDirectionArrows or ux.showDirectionArrows
-    respawnSound = data.respawnSound ~= nil and data.respawnSound or (data.alertBeep ~= nil and data.alertBeep or respawnSound)
+    ux.showDirectionArrows = ux.pickBool(data.showDirectionArrows, ux.showDirectionArrows)
+    respawnSound = ux.pickBool(data.respawnSound, ux.pickBool(data.alertBeep, respawnSound))
     respawnSoundName = data.respawnSoundName or respawnSoundName
     respawnSoundPath = data.respawnSoundPath or respawnSoundPath
-    alertEcho = data.alertEcho ~= nil and data.alertEcho or alertEcho
+    alertEcho = ux.pickBool(data.alertEcho, alertEcho)
     announceMethod = data.announceMethod or announceMethod
-    ux.spawnPopup = data.spawnPopup ~= nil and data.spawnPopup or ux.spawnPopup
+    ux.spawnPopup = ux.pickBool(data.spawnPopup, ux.spawnPopup)
     ux.spawnPopupCommand = type(data.spawnPopupCommand) == 'string' and data.spawnPopupCommand or ux.spawnPopupCommand
     -- Disabled until the MQ highlight command path is confirmed working. Keeping
     -- this false also avoids wasted background watch resolution in tester builds.
@@ -1075,21 +1084,21 @@ local function applySettingsTable(data)
         ux.bulkScanMigratedV1 = true
         ux.bulkScanJustMigrated = true
     end
-    ux.showAlertPopup = data.showAlertPopup ~= nil and data.showAlertPopup or ux.showAlertPopup
+    ux.showAlertPopup = ux.pickBool(data.showAlertPopup, ux.showAlertPopup)
     ux.alertPopupRemindSeconds = tonumber(data.alertPopupRemindSeconds) or ux.alertPopupRemindSeconds
     ux.disabledZones = type(data.disabledZones) == 'table' and data.disabledZones or ux.disabledZones
-    ux.doubleClickNav = data.doubleClickNav ~= nil and data.doubleClickNav or ux.doubleClickNav
+    ux.doubleClickNav = ux.pickBool(data.doubleClickNav, ux.doubleClickNav)
     if tostring(data.watchMode or ''):lower() ~= 'ultra' and data.watchModeUltraMigratedV1 ~= true then
         ux.watchModeLeanMigrated = true
     end
     ux.watchMode = 'ultra'
     ux.watchModeUltraMigratedV1 = true
-    ux.watchShowAll = data.watchShowAll ~= nil and data.watchShowAll or ux.watchShowAll
+    ux.watchShowAll = ux.pickBool(data.watchShowAll, ux.watchShowAll)
     ux.watchShowUnknown = data.watchShowUnknown == true
     ux.watchHideKnownTimersUntilSoon = data.watchHideKnownTimersUntilSoon == true
-    ux.watchCurrentZoneOnly = data.watchCurrentZoneOnly ~= nil and data.watchCurrentZoneOnly or ux.watchCurrentZoneOnly
-    ux.watchNamedOnly = data.watchNamedOnly ~= nil and data.watchNamedOnly or ux.watchNamedOnly
-    ux.namedOrPHOnly = data.namedOrPHOnly ~= nil and data.namedOrPHOnly or ux.namedOrPHOnly
+    ux.watchCurrentZoneOnly = ux.pickBool(data.watchCurrentZoneOnly, ux.watchCurrentZoneOnly)
+    ux.watchNamedOnly = ux.pickBool(data.watchNamedOnly, ux.watchNamedOnly)
+    ux.namedOrPHOnly = ux.pickBool(data.namedOrPHOnly, ux.namedOrPHOnly)
     if (tonumber(data.searchDefaultModeVersion) or 0) < 1 then
         if data.namedOnly ~= true then
             namedOnly = false
@@ -1097,29 +1106,29 @@ local function applySettingsTable(data)
         end
     end
     ux.searchDefaultModeVersion = 1
-    ux.watchIncludeGround = data.watchIncludeGround ~= nil and data.watchIncludeGround or ux.watchIncludeGround
+    ux.watchIncludeGround = ux.pickBool(data.watchIncludeGround, ux.watchIncludeGround)
     ux.watchDetailZone = type(data.watchDetailZone) == 'string' and data.watchDetailZone or ux.watchDetailZone
     if data.liveSearchMigratedV2 == true then
-        ux.liveSearch = data.liveSearch ~= nil and data.liveSearch or ux.liveSearch
+        ux.liveSearch = ux.pickBool(data.liveSearch, ux.liveSearch)
         ux.liveSearchMigratedV2 = true
     else
         if data.liveSearch == true then
             ux.liveSearch = false
             ux.liveSearchJustMigrated = true
         else
-            ux.liveSearch = data.liveSearch ~= nil and data.liveSearch or ux.liveSearch
+            ux.liveSearch = ux.pickBool(data.liveSearch, ux.liveSearch)
         end
         ux.liveSearchMigratedV2 = true
     end
     if data.watchZoneViewMigratedV2 == true then
-        ux.watchCurrentZoneOnly = data.watchCurrentZoneOnly ~= nil and data.watchCurrentZoneOnly or ux.watchCurrentZoneOnly
+        ux.watchCurrentZoneOnly = ux.pickBool(data.watchCurrentZoneOnly, ux.watchCurrentZoneOnly)
         ux.watchZoneViewMigratedV2 = true
     else
         if data.watchCurrentZoneOnly == false then
             ux.watchCurrentZoneOnly = true
             ux.watchZoneViewJustMigrated = true
         else
-            ux.watchCurrentZoneOnly = data.watchCurrentZoneOnly ~= nil and data.watchCurrentZoneOnly or ux.watchCurrentZoneOnly
+            ux.watchCurrentZoneOnly = ux.pickBool(data.watchCurrentZoneOnly, ux.watchCurrentZoneOnly)
         end
         ux.watchZoneViewMigratedV2 = true
     end
@@ -1143,14 +1152,14 @@ local function applySettingsTable(data)
         ux.zoneIntelFilterMigratedV3 = true
         ux.zoneIntelFilterJustMigrated = true
     end
-    ux.zoneIntelShowIgnored = data.zoneIntelShowIgnored ~= nil and data.zoneIntelShowIgnored or ux.zoneIntelShowIgnored
+    ux.zoneIntelShowIgnored = ux.pickBool(data.zoneIntelShowIgnored, ux.zoneIntelShowIgnored)
     ux.zoneIntelPageSize = tonumber(data.zoneIntelPageSize) or tonumber(data.zoneIntelMaxRows) or ux.zoneIntelPageSize
     ux.zoneIntelPageSize = math.max(50, math.min(250, ux.zoneIntelPageSize))
     ux.windowGeom = type(data.windowGeom) == 'table' and data.windowGeom or ux.windowGeom
-    ux.learnAllSpawns = data.learnAllSpawns ~= nil and data.learnAllSpawns or ux.learnAllSpawns
-    ux.autoPauseSafeZones = data.autoPauseSafeZones ~= nil and data.autoPauseSafeZones or ux.autoPauseSafeZones
-    welcomed = data.welcomed ~= nil and data.welcomed or welcomed
-    allaHintShown = data.allaHintShown ~= nil and data.allaHintShown or allaHintShown
+    ux.learnAllSpawns = ux.pickBool(data.learnAllSpawns, ux.learnAllSpawns)
+    ux.autoPauseSafeZones = ux.pickBool(data.autoPauseSafeZones, ux.autoPauseSafeZones)
+    welcomed = ux.pickBool(data.welcomed, welcomed)
+    allaHintShown = ux.pickBool(data.allaHintShown, allaHintShown)
     ux.bundledSeedAutoImported = data.bundledSeedAutoImported == true
     if type(data.useBundledSeedTimers) == 'boolean' then
         ux.useBundledSeedTimers = data.useBundledSeedTimers
@@ -1207,7 +1216,7 @@ ux.applyWindowGeometry = function(key, defaultW, defaultH, cond)
     ux.windowGeom = ux.windowGeom or {}
     local g = ux.windowGeom[key]
     if type(g) == 'table' and tonumber(g.x) and tonumber(g.y) then
-        pcall(function() ImGui.SetNextWindowPos(tonumber(g.x), tonumber(g.y), ImGuiCond.FirstUseEver) end)
+        pcall(function() ImGui.SetNextWindowPos(tonumber(g.x), tonumber(g.y), ImGuiCond.Appearing) end)
     end
     if type(g) == 'table' and tonumber(g.w) and tonumber(g.h) then
         pcall(function() ImGui.SetNextWindowSize(tonumber(g.w), tonumber(g.h), ImGuiCond.FirstUseEver) end)
@@ -1229,12 +1238,19 @@ ux.captureWindowGeometry = function(key)
     ux.windowGeom = ux.windowGeom or {}
     local prev = ux.windowGeom[key] or {}
     x, y, w, h = math.floor(x + 0.5), math.floor(y + 0.5), math.floor(w + 0.5), math.floor(h + 0.5)
-    if prev.x == x and prev.y == y and prev.w == w and prev.h == h then return end
-    ux.windowGeom[key] = { x = x, y = y, w = w, h = h }
-    ux.geomSaveAt = ux.geomSaveAt or {}
     local nowValue = nowMs()
-    if (nowValue - (ux.geomSaveAt[key] or 0)) < 1000 then return end
-    ux.geomSaveAt[key] = nowValue
+    ux.geomDirtyAt = ux.geomDirtyAt or {}
+    if not (prev.x == x and prev.y == y and prev.w == w and prev.h == h) then
+        ux.windowGeom[key] = { x = x, y = y, w = w, h = h }
+        ux.geomDirtyAt[key] = nowValue
+    end
+    if ImGui.IsMouseDown and ImGui.IsMouseDown(0) == true then
+        if ux.geomDirtyAt[key] then ux.geomDirtyAt[key] = nowValue end
+        return
+    end
+    if not ux.geomDirtyAt[key] then return end
+    if (nowValue - ux.geomDirtyAt[key]) < 800 then return end
+    ux.geomDirtyAt[key] = nil
     saveSettings()
 end
 
@@ -2243,187 +2259,29 @@ ux.navigationActive = function()
     return safeCall(function() return mq.TLO.Navigation.Active() end, false) == true
 end
 
-ux.dragCurrentWindow = function()
-    if not ImGui.IsMouseDragging or not ImGui.GetMouseDragDelta or not ImGui.SetWindowPos then return end
-    if not ImGui.IsMouseDragging(0, 0.0) then return end
-    local delta = ImGui.GetMouseDragDelta(0)
-    local dx = type(delta) == 'table' and tonumber(delta.x or delta.X or delta[1]) or tonumber(delta) or 0
-    local dy = type(delta) == 'table' and tonumber(delta.y or delta.Y or delta[2]) or 0
-    if dx == 0 and dy == 0 then return end
-    local px, py = ImGui.GetWindowPos()
-    px, py = tonumber(px) or 0, tonumber(py) or 0
-    ImGui.SetWindowPos(px + dx, py + dy)
-    if ImGui.ResetMouseDragDelta then ImGui.ResetMouseDragDelta(0) end
-end
-
-ux.chromeDragState = {
-    excludes = {},
-    band = nil,
-    grabbing = false,
-    lastX = nil,
-    lastY = nil,
-}
--- Separate state for the mini watch popup so it doesn't share state with the main window.
-ux.chromeDragStateWatch = {
-    excludes = {},
-    band = nil,
-    grabbing = false,
-    lastX = nil,
-    lastY = nil,
-}
-
-ux.vec2XY = function(v, y)
-    if type(v) == 'table' then
-        return tonumber(v.x or v.X or v[1]) or 0, tonumber(v.y or v.Y or v[2]) or 0
-    end
-    return tonumber(v) or 0, tonumber(y) or 0
-end
-
-ux.chromeDragCanHandle = function()
-    return ImGui.GetMousePos and ImGui.GetWindowPos and ImGui.GetWindowSize
-        and ImGui.GetCursorScreenPos and ImGui.GetItemRectMin and ImGui.GetItemRectMax
-        and ImGui.SetWindowPos and ImGui.IsMouseClicked and ImGui.IsMouseDown
-end
-
-ux.chromeMousePos = function()
-    if not ImGui.GetMousePos then return nil, nil end
-    local x, y = ImGui.GetMousePos()
-    return ux.vec2XY(x, y)
-end
-
-ux.chromeWindowRect = function()
-    if not (ImGui.GetWindowPos and ImGui.GetWindowSize) then return nil end
-    local x, y = ux.vec2XY(ImGui.GetWindowPos())
-    local w, h = ux.vec2XY(ImGui.GetWindowSize())
-    return { x1 = x, y1 = y, x2 = x + w, y2 = y + h }
-end
-
-ux.chromeCursorScreenY = function()
-    if not ImGui.GetCursorScreenPos then return nil end
-    local _, y = ux.vec2XY(ImGui.GetCursorScreenPos())
-    return y
-end
-
-ux.chromeItemRect = function()
-    if not (ImGui.GetItemRectMin and ImGui.GetItemRectMax) then return nil end
-    local minX, minY = ImGui.GetItemRectMin()
-    local maxX, maxY = ImGui.GetItemRectMax()
-    local x1, y1 = ux.vec2XY(minX, minY)
-    local x2, y2 = ux.vec2XY(maxX, maxY)
-    return { x1 = x1, y1 = y1, x2 = x2, y2 = y2 }
-end
-
-ux.pointInRect = function(x, y, r)
-    return r and x >= r.x1 and x <= r.x2 and y >= r.y1 and y <= r.y2
-end
-
-ux.chromeDragReset = function(st)
-    st = st or ux.chromeDragState
-    st.excludes = {}
-    st.band = nil
-end
-
-ux.chromeDragAddLastItem = function(st)
-    st = st or ux.chromeDragState
-    local r = ux.chromeItemRect()
-    if r then st.excludes[#st.excludes + 1] = r end
-end
-
-ux.chromeDragSetBandToCursor = function(st)
-    st = st or ux.chromeDragState
-    local win = ux.chromeWindowRect()
-    local cy = ux.chromeCursorScreenY()
-    if not win or not cy then return end
-    st.band = {
-        x1 = win.x1,
-        y1 = win.y1,
-        x2 = win.x2,
-        y2 = math.max(win.y1 + 48, cy),
-    }
-end
-
-ux.chromeDragBlocked = function(x, y, st)
-    st = st or ux.chromeDragState
-    for _, r in ipairs(st.excludes or {}) do
-        if ux.pointInRect(x, y, r) then return true end
-    end
-    return false
-end
-
-ux.chromeDragMove = function(x, y, st)
-    if not (ImGui.SetWindowPos and x and y) then return end
-    st = st or ux.chromeDragState
-    if st.lastX and st.lastY then
-        local dx = x - st.lastX
-        local dy = y - st.lastY
-        if dx ~= 0 or dy ~= 0 then
-            local wx, wy = ux.vec2XY(ImGui.GetWindowPos())
-            ImGui.SetWindowPos(wx + dx, wy + dy)
+ux.drawChromeTitleText = function(titleA, titleB, x0, y0, barW, leftReserve, rightReserve)
+    leftReserve = tonumber(leftReserve) or 0
+    rightReserve = tonumber(rightReserve) or 0
+    local titleW = ux.imguiTextWidth(titleA) + ux.imguiTextWidth(titleB)
+    local sx, sy = x0, y0
+    if ImGui.GetCursorScreenPos then
+        if ImGui.SetCursorPos then ImGui.SetCursorPos(x0 + leftReserve, y0) end
+        local cx, cy = ImGui.GetCursorScreenPos()
+        if type(cx) == 'table' then
+            sx = tonumber(cx.x or cx.X or cx[1]) or sx
+            sy = tonumber(cx.y or cx.Y or cx[2]) or tonumber(cy) or sy
+        else
+            sx, sy = tonumber(cx) or sx, tonumber(cy) or sy
         end
     end
-    st.lastX, st.lastY = x, y
-end
-
-ux.chromeDragApplyActive = function(st)
-    st = st or ux.chromeDragState
-    if not st.grabbing then return end
-    if not (ImGui.IsMouseDown and ImGui.IsMouseDown(0)) then
-        st.grabbing = false
-        st.lastX, st.lastY = nil, nil
-        return
-    end
-    local mx, my = ux.chromeMousePos()
-    if not mx or not my then return end
-    if ImGui.ClearActiveID then ImGui.ClearActiveID() end
-    ux.chromeDragMove(mx, my, st)
-end
-
-ux.chromeDragActiveItem = function(st)
-    if not (ImGui.IsItemActive and ImGui.IsItemActive()) then return false end
-    if not (ImGui.IsMouseDown and ImGui.IsMouseDown(0)) then return false end
-    st = st or ux.chromeDragState
-    local mx, my = ux.chromeMousePos()
-    if not mx or not my then return false end
-    if not st.grabbing then
-        st.grabbing = true
-        st.lastX, st.lastY = mx, my
-        if ImGui.ResetMouseDragDelta then ImGui.ResetMouseDragDelta(0) end
-    end
-    if ImGui.ClearActiveID then ImGui.ClearActiveID() end
-    ux.chromeDragMove(mx, my, st)
-    return true
-end
-
-ux.chromeDragHandle = function(tooltip, st)
-    if not ux.chromeDragCanHandle() then return end
-    st = st or ux.chromeDragState
-    local mx, my = ux.chromeMousePos()
-    if not mx or not my or not st.band then return end
-    local hovered = not ImGui.IsWindowHovered or ImGui.IsWindowHovered()
-    local inBand = ux.pointInRect(mx, my, st.band)
-    local blocked = ux.chromeDragBlocked(mx, my, st)
-    local down = ImGui.IsMouseDown(0)
-
-    if ImGui.IsMouseClicked(0) then
-        if hovered and inBand and not blocked then
-            st.grabbing = true
-            st.lastX, st.lastY = mx, my
-            if ImGui.ResetMouseDragDelta then ImGui.ResetMouseDragDelta(0) end
-        elseif not st.grabbing then
-            st.lastX, st.lastY = nil, nil
-        end
-    end
-
-    if not down then
-        st.grabbing = false
-        st.lastX, st.lastY = nil, nil
-        return
-    end
-
-    if st.grabbing then
-        if ImGui.ClearActiveID then ImGui.ClearActiveID() end
-    elseif hovered and inBand and not blocked and ImGui.SetTooltip then
-        ImGui.SetTooltip(tooltip or 'Drag empty header space to move this window.')
+    local avail = math.max(20, (tonumber(barW) or 0) - leftReserve - rightReserve)
+    if ImGui.GetWindowDrawList then
+        local drawX = sx + math.max(0, (avail - titleW) * 0.5)
+        local drawY = sy + 4
+        local gold = IM_COL32 and IM_COL32(255, 199, 82, 255) or 0xFF52C7FF
+        local idle = IM_COL32 and IM_COL32(166, 176, 194, 255) or 0xFFC2B0A6
+        ImGui.GetWindowDrawList():AddText(ImVec2(drawX, drawY), gold, titleA)
+        ImGui.GetWindowDrawList():AddText(ImVec2(drawX + ux.imguiTextWidth(titleA), drawY), idle, titleB)
     end
 end
 
@@ -2469,7 +2327,8 @@ ux.calcTurboWatchSize = function(rows, opts)
 end
 
 ux.applyTurboWatchAutoSize = function(rows, opts)
-    if ux._watchHeaderDragging then
+    local pointerHeld = ImGui.IsMouseDown and ImGui.IsMouseDown(0) == true
+    if pointerHeld then
         return tonumber(ux._lastAppliedWatchW) or 300, tonumber(ux._lastAppliedWatchH) or 200
     end
     local desiredW, desiredH = ux.calcTurboWatchSize(rows, opts)
@@ -2485,13 +2344,9 @@ ux.applyTurboWatchAutoSize = function(rows, opts)
 end
 
 ux.drawTurboWatchChrome = function()
-    -- Use separate drag state from the main window so they don't interfere.
-    local dSt = ux.chromeDragStateWatch
-    ux.chromeDragReset(dSt)
     local barW = ux.contentRegionWidth()
     local titleA = 'Turbo'
     local titleB = ' Mobs'
-    local titleW = ux.imguiTextWidth(titleA) + ux.imguiTextWidth(titleB)
     local btnW, btnH = 30, 22
     local x0 = 0
     local y0 = 0
@@ -2503,7 +2358,6 @@ ux.drawTurboWatchChrome = function()
     if styledButton('...##watch_menu_btn', 'menu', 7, 3, 'Watch menu.', btnW, btnH) then
         if ImGui.OpenPopup then ImGui.OpenPopup('##watch_menu_popup') end
     end
-    ux.chromeDragAddLastItem(dSt)
     if ImGui.BeginPopup and ImGui.BeginPopup('##watch_menu_popup') then
         if styledButton('Watch Target##watch_menu_watch', 'primary', 7, 3, 'Add your current in-game target to the watch list and keep it on Turbo Watch.') then
             if ux.addWatchFromCurrentTarget then ux.addWatchFromCurrentTarget() end
@@ -2533,28 +2387,7 @@ ux.drawTurboWatchChrome = function()
         ImGui.EndPopup()
     end
 
-    local dragX = x0 + btnW + 4
-    local dragW = math.max(20, barW - (btnW * 2) - 8)
-    if ImGui.SetCursorPos and ImGui.InvisibleButton then
-        ImGui.SetCursorPos(dragX, y0)
-        ImGui.InvisibleButton('##watch_header_drag', dragW, 38)
-        ux._watchHeaderDragging = ImGui.IsItemActive and ImGui.IsItemActive() or false
-        if ux.chromeDragActiveItem then ux.chromeDragActiveItem(dSt) end
-        if (not ux.chromeDragCanHandle()) and ux._watchHeaderDragging then ux.dragCurrentWindow() end
-        if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then ImGui.SetTooltip('Drag to move Turbo Watch.') end
-    else
-        ux._watchHeaderDragging = false
-    end
-
-    if ImGui.SetCursorPos then
-        ImGui.SetCursorPos(dragX + math.max(0, (dragW - titleW) * 0.5), y0 + 4)
-        coloredText(titleA, 'etaSoon')
-        ImGui.SameLine(0, 0)
-        coloredText(titleB, 'idle')
-    else
-        ImGui.SameLine()
-        coloredText(titleA .. titleB, 'etaSoon')
-    end
+    ux.drawChromeTitleText(titleA, titleB, x0, y0, barW, btnW + 4, btnW + 4)
 
     if ImGui.SetCursorPos then
         ImGui.SetCursorPos(x0 + math.max(0, barW - btnW), y0)
@@ -2565,27 +2398,19 @@ ux.drawTurboWatchChrome = function()
     if styledButton('+##watch_expand', 'windowToggle', 7, 3, showWindow and 'Close the full TurboMobs window.' or 'Open the full TurboMobs window.', btnW, btnH) then
         ux.toggleFullMainWindow()
     end
-    ux.chromeDragAddLastItem(dSt)
 
     if ImGui.SetCursorPos then
         ImGui.SetCursorPos(x0, y0 + 42)
     else
         ImGui.NewLine()
     end
-    ux.chromeDragSetBandToCursor(dSt)
-    ux.chromeDragHandle('Drag Turbo Watch header to move the window.', dSt)
-    if ux.chromeDragCanHandle() then
-        ux._watchHeaderDragging = dSt.grabbing == true
-    end
     ImGui.Separator()
 end
 
 ux.drawFullWindowChrome = function()
-    ux.chromeDragReset()
     local barW = ux.contentRegionWidth()
     local titleA = 'Turbo'
     local titleB = string.format('Mobs v%s', VERSION)
-    local titleW = ux.imguiTextWidth(titleA) + ux.imguiTextWidth(titleB)
     local btnW, btnH = 30, 22
     local x0 = 0
     local y0 = 0
@@ -2597,7 +2422,6 @@ ux.drawFullWindowChrome = function()
     if styledButton('...##full_menu_btn', 'menu', 7, 3, 'TurboMobs menu.', btnW, btnH) then
         if ImGui.OpenPopup then ImGui.OpenPopup('##full_menu_popup') end
     end
-    ux.chromeDragAddLastItem()
     if ImGui.BeginPopup and ImGui.BeginPopup('##full_menu_popup') then
         if styledButton('Show Turbo Watch##full_menu_watch', 'primary', 7, 3, 'Show the Turbo Watch mini window.') then
             ux.showWatchWindow()
@@ -2617,25 +2441,7 @@ ux.drawFullWindowChrome = function()
         ImGui.EndPopup()
     end
 
-    local dragX = x0 + btnW + 4
-    local dragW = math.max(20, barW - (btnW * 2) - 8)
-    if ImGui.SetCursorPos and ImGui.InvisibleButton then
-        ImGui.SetCursorPos(dragX, y0)
-        ImGui.InvisibleButton('##full_header_drag', dragW, 38)
-        if ux.chromeDragActiveItem then ux.chromeDragActiveItem() end
-        if (not ux.chromeDragCanHandle()) and ImGui.IsItemActive and ImGui.IsItemActive() then ux.dragCurrentWindow() end
-        if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then ImGui.SetTooltip('Drag to move TurboMobs.') end
-    end
-
-    if ImGui.SetCursorPos then
-        ImGui.SetCursorPos(dragX + math.max(0, (dragW - titleW) * 0.5), y0 + 4)
-        coloredText(titleA, 'etaSoon')
-        ImGui.SameLine(0, 0)
-        coloredText(titleB, 'idle')
-    else
-        ImGui.SameLine()
-        coloredText(titleA .. titleB, 'etaSoon')
-    end
+    ux.drawChromeTitleText(titleA, titleB, x0, y0, barW, btnW + 4, btnW + 4)
 
     if ImGui.SetCursorPos then
         ImGui.SetCursorPos(x0 + math.max(0, barW - btnW), y0)
@@ -2647,15 +2453,12 @@ ux.drawFullWindowChrome = function()
         ux.hideFullWindow()
         ux.showWatchWindow()
     end
-    ux.chromeDragAddLastItem()
 
     if ImGui.SetCursorPos then
         ImGui.SetCursorPos(x0, y0 + 42)
     else
         ImGui.NewLine()
     end
-    ux.chromeDragSetBandToCursor()
-    ux.chromeDragHandle('Drag TurboMobs header to move the window.')
     ImGui.Separator()
 end
 
@@ -14033,7 +13836,6 @@ ux.drawAlertPopupWindow = function()
         return
     end
 
-    ux.chromeDragApplyActive(ux.chromeDragStateWatch)
     ux.drawTurboWatchChrome()
     tControlsAt = nowMs()
     if not ux.showAlertPopup then
@@ -16117,7 +15919,6 @@ ux.drawFullWindow = function()
         return
     end
 
-    ux.chromeDragApplyActive(ux.chromeDragState)
     ux.drawFullWindowChrome()
 
     local tabStylePushed = pushActiveTabStyle()

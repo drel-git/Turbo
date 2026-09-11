@@ -7,6 +7,10 @@ local mq  = require('mq')
 local cfg = require('config')
 local CFG, Settings = cfg.CFG, cfg.Settings
 local diag = require('diagnostics')
+local persist_encoder = require('store_persist_encoder')
+-- Pure resolver (no mq, no clock); required here only for its state digest, so
+-- the Store keeps one definition of what a meaningful DoN change is.
+local don_state = require('don_state')
 
 local M = {}
 
@@ -51,6 +55,14 @@ local function schedule_content_flush()
     content_flush_due_at = os.clock() + coalesce
 end
 
+-- Next Store.tick may start the budgeted persist job. Never call Store.save
+-- from an actor callback; that blocking persist hitches/disconnects the client.
+function Store.request_flush()
+    if not Store.dirty then return false end
+    content_flush_due_at = os.clock()
+    return true
+end
+
 local function mark_persist_dirty(key)
     key = tostring(key or "")
     if key == "" then return end
@@ -61,14 +73,17 @@ local function my_key()
     return (mq.TLO.MacroQuest.Server() or "?") .. "_" .. (mq.TLO.Me.CleanName() or "?")
 end
 
--- Own row: always persist. Peer rows: only when this bg shares the box with a
--- TurboGear UI (viewer reads SQLite, not actor mail). Pure bg bots must not
--- rewrite peer rows — that reintroduced Discord's multi-minute serialize hitch.
+-- Persist only when a local TurboGear UI will read this process's writes.
+-- Pure bg-only alts publish over actors; opening the shared SQLite DB on
+-- those boxes is the silent-disconnect at /lua run turbogear_bg.
 local function should_persist_key(key)
-    if key == my_key() then return true end
     local ok, st = pcall(require, 'state')
-    if not ok or type(st) ~= "table" or st.bg ~= true then return false end
-    local scripts = st.local_guard_scripts
+    if ok and type(st) == "table" and st.bg == true then
+        local scripts = st.local_guard_scripts
+        if type(scripts) ~= "table" or scripts.main ~= true then return false end
+    end
+    if key == my_key() then return true end
+    local scripts = ok and st and st.local_guard_scripts
     return type(scripts) == "table" and scripts.main == true
 end
 
@@ -279,6 +294,74 @@ local function list_count(list)
     return type(list) == "table" and #list or 0
 end
 
+--- Digest of the lockouts a row holds.
+---
+--- Keyed on absolute expiry bucketed to the minute. expiresAt is recomputed as
+--- capturedAt + remaining on every read and wobbles a second or two, so a
+--- digest of the raw value would differ on every publish and mark the row dirty
+--- on every heartbeat -- which is the opposite of what we want from a change
+--- signal.
+local function lockout_sig(map)
+    if type(map) ~= "table" then return "" end
+    local parts = {}
+    -- DoN state rides in the same table but is a different shape, with its own
+    -- notion of which facts are semantic. It gets the same treatment for the
+    -- same reason: a peer gaining a replay timer or picking up a mission has to
+    -- mark their row dirty, or the receiving bg updates memory the viewer can
+    -- never read.
+    if type(map.DoNState) == "table" then
+        parts[#parts + 1] = "DoN\30" .. don_state.signature(map.DoNState)
+    end
+    for cat, entries in pairs(map) do
+        if type(entries) == "table" and cat ~= "DoNState" then
+            for name, rec in pairs(entries) do
+                if type(rec) == "table" and rec.found == true then
+                    parts[#parts + 1] = string.format("%s/%s:%d", cat, name,
+                        math.floor((tonumber(rec.expiresAt) or 0) / 60))
+                end
+            end
+        end
+    end
+    table.sort(parts)
+    return table.concat(parts, "\30")
+end
+
+local function locked_count(map)
+    if type(map) ~= "table" then return 0 end
+    local n = 0
+    for cat, entries in pairs(map) do
+        if type(entries) == "table" and cat ~= "DoNState" then
+            for _, rec in pairs(entries) do
+                if type(rec) == "table" and rec.found == true then n = n + 1 end
+            end
+        end
+    end
+    return n
+end
+
+--- Replay timers plus assigned missions, for the same diagnostic reason.
+local function don_count(map)
+    local state = type(map) == "table" and map.DoNState or nil
+    if type(state) ~= "table" then return 0 end
+    local n = 0
+    for _ in pairs(state.replays or {}) do n = n + 1 end
+    for _ in pairs(state.active or {}) do n = n + 1 end
+    return n
+end
+
+local function diag_heap_kb()
+    if diag.is_enabled and diag.is_enabled() then
+        return collectgarbage("count")
+    end
+    return nil
+end
+
+local function diag_heap_delta(label, before_kb)
+    if before_kb == nil then return end
+    local after_kb = collectgarbage("count")
+    diag.sample(label, after_kb - before_kb)
+end
+
 local function note_content_change(source, key, snap, old_sig, new_sig)
     local change = {
         source = tostring(source or "?"),
@@ -292,12 +375,17 @@ local function note_content_change(source, key, snap, old_sig, new_sig)
         equipped = list_count(snap and snap.equipped),
         bags = list_count(snap and snap.bags),
         bank = list_count(snap and snap.bank),
+        locked = locked_count(snap and snap.lockouts),
+        -- Named separately from locked: a DoN-only change leaves the expedition
+        -- count identical, so without this the two are indistinguishable in a
+        -- trace of why a row was written.
+        don = don_count(snap and snap.lockouts),
     }
     Store.last_content_change = change
     Store.last_content_change_by_key[tostring(key or "?")] = change
     diag.count("store.content_changed")
     diag.event("store.content_changed", string.format(
-        "%s key=%s name=%s depth=%s eq=%d bag=%d bank=%d oldLen=%d newLen=%d v=%d",
+        "%s key=%s name=%s depth=%s eq=%d bag=%d bank=%d locked=%d don=%d oldLen=%d newLen=%d v=%d",
         change.source,
         change.key,
         change.name,
@@ -305,6 +393,8 @@ local function note_content_change(source, key, snap, old_sig, new_sig)
         change.equipped,
         change.bags,
         change.bank,
+        change.locked,
+        change.don,
         change.old_len,
         change.new_len,
         change.version))
@@ -314,6 +404,15 @@ local function snapshot_content_sig(snap)
     if type(snap) ~= "table" then return "" end
     -- bankLive + bankCapturedAt: stamp-only bank refreshes (re-open with same
     -- items) must dirty persist so the UI process can reload age/live state.
+    --
+    -- lockouts for the same reason, and it is the only thing the viewer can
+    -- learn a peer's lockouts from. The UI process owns no mailbox, so peer
+    -- snapshots reach it solely by the bg responder persisting the row and the
+    -- UI polling the backing store. While lockouts were absent here, a peer
+    -- gaining one changed nothing in this digest, the row was never marked
+    -- dirty, it was never written, and the viewer kept rendering the last state
+    -- that some unrelated inventory change happened to flush -- for minutes, or
+    -- until the peer looted something.
     return table.concat({
         tostring(snap.server or ""),
         tostring(snap.name or ""),
@@ -324,6 +423,7 @@ local function snapshot_content_sig(snap)
         item_list_sig(snap.bank),
         snap.bankLive == true and "1" or "0",
         tostring(tonumber(snap.bankCapturedAt) or 0),
+        lockout_sig(snap.lockouts),
     }, "\31")
 end
 
@@ -371,7 +471,29 @@ end
 -- "auto"/"sqlite": use the SQLite backend when lsqlite3 is available; fall back
 -- to the file backend otherwise (or when storeBackend="file"). The interface is
 -- identical, so the rest of the Store is agnostic to which one is active.
-do
+--
+-- Pure bg-only processes stay on a memory stub: opening the shared
+-- TurboGear_cache.db at /lua run turbogear_bg is enough to drop some clients.
+function Store._disk_wanted()
+    local ok, st = pcall(require, 'state')
+    if not ok or type(st) ~= "table" then return true end
+    if st.bg ~= true then return true end
+    return type(st.local_guard_scripts) == "table" and st.local_guard_scripts.main == true
+end
+
+function Store._memory_backend()
+    return {
+        kind = "memory",
+        available = function() return true end,
+        load = function() return true, {}, nil end,
+        reload = function() return true, {}, nil end,
+        save = function() return true end,
+        signature = function() return "memory" end,
+        status = function() return { backend = "memory" } end,
+    }
+end
+
+function Store._open_disk_backend()
     local backend_opts = { newer = is_newer, key_fn = my_key }
     local pref = tostring((Settings and Settings.storeBackend) or "auto"):lower()
     if pref == "auto" or pref == "sqlite" then
@@ -381,13 +503,27 @@ do
             if b and b:available() then
                 backend = b
                 diag.event("store.backend", "using sqlite backend")
+                return backend
             end
         end
     end
-    if not backend then
-        backend = require('store_backend_file').new(backend_opts)
-        diag.event("store.backend", "using file backend")
-    end
+    backend = require('store_backend_file').new(backend_opts)
+    diag.event("store.backend", "using file backend")
+    return backend
+end
+
+function Store._ensure_backend()
+    if backend and backend.kind ~= "memory" then return backend end
+    if Store._disk_wanted() then return Store._open_disk_backend() end
+    if not backend then backend = Store._memory_backend() end
+    return backend
+end
+
+if Store._disk_wanted() then
+    Store._open_disk_backend()
+else
+    backend = Store._memory_backend()
+    diag.event("store.backend", "using memory backend (bg-only)")
 end
 
 local function item_match_key(item)
@@ -866,25 +1002,28 @@ function Store.discover_peer(name, provider)
 end
 
 function Store.tick()
+    diag.count("store.tick.calls")
     -- Aging is second-granular (stale/offline thresholds are in seconds), so the
     -- per-source sweep is throttled to ~1Hz instead of running every loop pass
     -- (P3). The save debounce below still runs every tick.
     local sweep_now = os.clock()
     if (sweep_now - (Store.last_age_sweep or 0)) >= (tonumber(CFG.age_sweep_interval_s) or 1.0) then
         Store.last_age_sweep = sweep_now
-        local now = os.time()
-        for _, s in pairs(Store.sources) do
-            if s.last_seen and s.last_seen > 0 then
-                local age = now - s.last_seen
-                local next_status = s.status
-                if age > (Settings.offlineSeconds or 45) then next_status = "offline"
-                elseif age > (Settings.staleSeconds or 20) then next_status = "stale" end
-                if next_status ~= s.status then
-                    s.status = next_status
-                    Store.version = (Store.version or 0) + 1
+        diag.time("store.tick.age_sweep", function()
+            local now = os.time()
+            for _, s in pairs(Store.sources) do
+                if s.last_seen and s.last_seen > 0 then
+                    local age = now - s.last_seen
+                    local next_status = s.status
+                    if age > (Settings.offlineSeconds or 45) then next_status = "offline"
+                    elseif age > (Settings.staleSeconds or 20) then next_status = "stale" end
+                    if next_status ~= s.status then
+                        s.status = next_status
+                        Store.version = (Store.version or 0) + 1
+                    end
                 end
             end
-        end
+        end)
     end
     local st = require('state')
     local save_every = tonumber(CFG.save_every_s) or 15.0
@@ -902,23 +1041,43 @@ function Store.tick()
     -- Quiet settle: while the coalesce window is still open, do not disk-save
     -- (including save_every). Actor publish already updated peers.
     if content_flush_due_at and now < content_flush_due_at then
+        diag.count("store.tick.coalescing")
+        diag.sample("store.tick.coalesce_remaining_ms", (content_flush_due_at - now) * 1000)
         return
     end
     -- Budgeted payload build in progress.
     if persist_job then
-        progress_persist_job(CFG.save_persist_budget_ms)
+        diag.time("store.tick.persist_progress", function()
+            progress_persist_job(CFG.save_persist_budget_ms)
+        end)
         return
     end
     if content_flush_due_at and Store.dirty and now >= content_flush_due_at then
         diag.count("store.content_flush")
         content_flush_due_at = nil
-        begin_persist_job()
-        if persist_job then progress_persist_job(CFG.save_persist_budget_ms) end
-    elseif Store.dirty and (now - Store.last_save) > save_every then
-        begin_persist_job()
+        diag.count("store.tick.start_content_flush")
+        diag.time("store.tick.begin_persist_job", function()
+            begin_persist_job()
+        end)
         if persist_job then
-            progress_persist_job(CFG.save_persist_budget_ms)
+            diag.time("store.tick.persist_progress_after_start", function()
+                progress_persist_job(CFG.save_persist_budget_ms)
+            end)
         end
+    elseif Store.dirty and (now - Store.last_save) > save_every then
+        diag.count("store.tick.start_debounce_save")
+        diag.time("store.tick.begin_persist_job", function()
+            begin_persist_job()
+        end)
+        if persist_job then
+            diag.time("store.tick.persist_progress_after_start", function()
+                progress_persist_job(CFG.save_persist_budget_ms)
+            end)
+        end
+    elseif Store.dirty then
+        diag.count("store.tick.dirty_wait_save_every")
+    else
+        diag.count("store.tick.clean")
     end
 end
 
@@ -1144,7 +1303,7 @@ local function section_payload(cache, sig_key, ser_key, sig, live_list, serializ
     if cache[sig_key] == sig and type(cache[ser_key]) == "string" then
         return cache[ser_key], true
     end
-    local ser = serialize_fn(slim_item_list(live_list))
+    local ser = persist_encoder.encode_item_list(slim_item_list(live_list))
     cache[sig_key] = sig
     cache[ser_key] = ser
     return ser, false
@@ -1269,6 +1428,7 @@ local function assemble_payload_from_cache(key, live, cache, serialize_fn, hash_
 end
 
 begin_persist_job = function()
+    backend = Store._ensure_backend()
     local serialize_fn, hash_fn = backend_codec()
     if not serialize_fn or not hash_fn then
         Store.save()
@@ -1306,7 +1466,10 @@ local function finish_persist_job()
         persist_job = nil
         return
     end
-    local ok_save, save_reason = backend:save(job.out, { partial = true })
+    local ok_save, save_reason
+    diag.time("store.persist.finish_backend_save", function()
+        ok_save, save_reason = backend:save(job.out, { partial = true })
+    end)
     Store.cache_last_reload_reason = ok_save and "saved atomically" or ("save failed: " .. tostring(save_reason or "?"))
     Store.last_save = os.clock()
     if not ok_save then
@@ -1319,10 +1482,16 @@ local function finish_persist_job()
             persisted_content_sig[k] = Store.content_signatures[k]
             dirty_persist_keys[k] = nil
         end
-        pcall(write_wallet_sidecar, Store.sources)
-        Store.cache_signature = backend:signature()
+        diag.time("store.persist.finish_wallet_sidecar", function()
+            pcall(write_wallet_sidecar, Store.sources)
+        end)
+        diag.time("store.persist.finish_signature", function()
+            Store.cache_signature = backend:signature()
+        end)
         local still = false
-        for _ in pairs(dirty_persist_keys) do still = true; break end
+        diag.time("store.persist.finish_dirty_scan", function()
+            for _ in pairs(dirty_persist_keys) do still = true; break end
+        end)
         if still then
             Store.dirty = true
             schedule_content_flush()
@@ -1338,6 +1507,7 @@ end
 progress_persist_job = function(budget_ms)
     local job = persist_job
     if not job then return end
+    diag.count("store.persist.progress_calls")
     local budget = (tonumber(budget_ms) or tonumber(CFG.save_persist_budget_ms) or 4.0) / 1000.0
     if budget <= 0 then budget = 0.004 end
     local t0 = os.clock()
@@ -1366,6 +1536,7 @@ progress_persist_job = function(budget_ms)
         end
 
         if not job.section then
+            local prep_t0 = os.clock()
             local cache = section_ser_cache[key]
             if not cache then
                 cache = {}
@@ -1406,9 +1577,26 @@ progress_persist_job = function(budget_ms)
             if cache.eq_sig == job.eq_sig and type(cache.eq) == "string" then
                 diag.count("store.serialize_section_reuse")
             end
+            local section_names = {}
+            for _, need in ipairs(job.need) do section_names[#section_names + 1] = tostring(need.name or "?") end
+            local last_change = Store.last_content_change_by_key[key]
+            diag.event("store.persist.prepare_key", string.format(
+                "key=%s sections=%s eq=%d bags=%d bank=%d change=%s v=%s oldLen=%s newLen=%s",
+                tostring(key or "?"),
+                table.concat(section_names, "+"),
+                list_count(live.equipped),
+                list_count(live.bags),
+                list_count(live.bank),
+                tostring(last_change and last_change.source or "?"),
+                tostring(last_change and last_change.version or "?"),
+                tostring(last_change and last_change.old_len or "?"),
+                tostring(last_change and last_change.new_len or "?")))
             job.need_i = 1
             job.section = "build"
             job.work = nil
+            diag.sample("store.persist.prepare_key", (os.clock() - prep_t0) * 1000)
+            diag.count("store.persist.keys_prepared")
+            diag.count("store.persist.sections_needed", #job.need)
         end
 
         if Store.content_signatures[key] ~= job.key_sig then
@@ -1424,29 +1612,62 @@ progress_persist_job = function(budget_ms)
                 local list = need.list or {}
                 work = { i = 1, n = #list, list = list, parts = {} }
                 job.work = work
+                diag.count("store.persist.section." .. tostring(need.name or "?") .. ".started")
+                diag.count("store.persist.section.started")
+                diag.event("store.persist.section_start", string.format(
+                    "key=%s section=%s items=%d",
+                    tostring(key or "?"), tostring(need.name or "?"), work.n or 0))
                 if work.n <= 0 then
                     job.cache[need.sig_key] = need.sig
                     job.cache[need.ser_key] = "{}"
+                    diag.count("store.persist.section." .. tostring(need.name or "?") .. ".completed")
+                    diag.count("store.persist.section.completed")
                     job.need_i = job.need_i + 1
                     job.work = nil
                     goto continue_persist
                 end
             end
+            local serialize_t0 = os.clock()
+            local serialize_i0 = work.i
             while work.i <= work.n and (os.clock() - t0) < budget do
-                work.parts[work.i] = serialize_fn(slim_item(work.list[work.i]))
+                local item_t0 = os.clock()
+                local heap0 = diag_heap_kb()
+                local slim_t0 = os.clock()
+                local slim = slim_item(work.list[work.i])
+                diag.sample("store.persist.slim_item", (os.clock() - slim_t0) * 1000)
+                diag_heap_delta("store.persist.slim_item_heap_kb", heap0)
+                local ser_heap0 = diag_heap_kb()
+                local ser_t0 = os.clock()
+                work.parts[work.i] = persist_encoder.encode_item(slim)
+                diag.sample("store.persist.backend_serialize_item", (os.clock() - ser_t0) * 1000)
+                diag_heap_delta("store.persist.backend_serialize_item_heap_kb", ser_heap0)
+                diag.sample("store.persist.item_total", (os.clock() - item_t0) * 1000)
                 work.i = work.i + 1
             end
+            if work.i > serialize_i0 then
+                diag.sample("store.persist.serialize_items", (os.clock() - serialize_t0) * 1000)
+                diag.count("store.persist.items_serialized", work.i - serialize_i0)
+                diag.count("store.persist.section." .. tostring(need.name or "?") .. ".items_serialized", work.i - serialize_i0)
+            end
             if work.i <= work.n then return end -- budget exhausted mid-section
+            local concat_heap0 = diag_heap_kb()
+            local concat_t0 = os.clock()
             local ser = "{" .. table.concat(work.parts, ",") .. "}"
+            diag.sample("store.persist.section_concat", (os.clock() - concat_t0) * 1000)
+            diag_heap_delta("store.persist.section_concat_heap_kb", concat_heap0)
             job.cache[need.sig_key] = need.sig
             job.cache[need.ser_key] = ser
+            diag.count("store.persist.section." .. tostring(need.name or "?") .. ".completed")
+            diag.count("store.persist.section.completed")
             job.need_i = job.need_i + 1
             job.work = nil
             goto continue_persist
         end
 
         -- All sections ready: assemble + queue for upsert.
+        local assemble_t0 = os.clock()
         local payload, phash = assemble_payload_from_cache(key, live, job.cache, serialize_fn, hash_fn)
+        diag.sample("store.persist.assemble_payload", (os.clock() - assemble_t0) * 1000)
         job.out[key] = {
             name = live.name, server = live.server, class = live.class, level = live.level,
             updated = live.updated, seq = live.seq,
@@ -1459,6 +1680,7 @@ progress_persist_job = function(budget_ms)
         job.section = nil
         job.work = nil
         job.need = nil
+        diag.count("store.persist.keys_completed")
         ::continue_persist::
     end
 end
@@ -1492,6 +1714,7 @@ end
 -- dirty_persist_keys so content_flush cannot re-serialize the whole fleet.
 function Store.save(opts)
     opts = type(opts) == "table" and opts or {}
+    backend = Store._ensure_backend()
     abort_persist_job("blocking_save")
     content_flush_due_at = nil
     Store.last_save = os.clock(); Store.dirty = false
@@ -1653,6 +1876,7 @@ local function ingest_cache_table(t, mark_offline)
 end
 
 function Store.load()
+    backend = Store._ensure_backend()
     local ok, t, reason = backend:load()
     if ok and type(t) == "table" then ingest_cache_table(t, true) end
     Store.cache_signature = backend:signature()

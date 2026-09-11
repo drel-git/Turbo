@@ -4,6 +4,8 @@
 
 local ImGui = require('ImGui')
 local CFG   = require('config').CFG
+local ok_icons, icons = pcall(require, 'mq/icons')
+if not ok_icons then icons = nil end
 
 local M = {}
 
@@ -36,6 +38,8 @@ M.Theme = {
     charactersPill = { 0.30, 0.44, 0.42, 1.0 },
     -- List pill (BiS mode): slightly cooler steel so it sits next to Characters.
     listPill = { 0.34, 0.40, 0.48, 1.0 },
+    customize = { 0.52, 0.38, 0.20, 1.0 },
+    customizeActive = { 0.62, 0.45, 0.23, 1.0 },
     location = { 0.58, 0.61, 0.68, 1.0 }, owner = { 0.64, 0.68, 0.75, 1.0 },
     value = { 0.72, 0.88, 0.74, 1.0 }, valueTop = { 0.85, 0.64, 0.25, 1.0 },
     neutral = { 0.78, 0.82, 0.88, 1.0 },
@@ -46,6 +50,28 @@ M.Theme = {
 
 function M.col_text(c, txt)
     ImGui.TextColored(c[1], c[2], c[3], c[4], txt)
+end
+
+function M.draw_unlock_icon(color, size, centered)
+    color = color or M.Theme.green
+    size = tonumber(size) or 12.0
+    local glyph = icons and icons.FA_UNLOCK
+    if not glyph or glyph == "" then
+        return false
+    end
+    if centered and ImGui.GetColumnWidth and ImGui.GetCursorPosX and ImGui.SetCursorPosX then
+        local col_w = tonumber(ImGui.GetColumnWidth()) or 0
+        local cur_x = tonumber(ImGui.GetCursorPosX()) or 0
+        local text_w = size
+        if ImGui.CalcTextSize then
+            local w = ImGui.CalcTextSize(glyph)
+            if type(w) == "table" then w = w.x or w[1] end
+            text_w = tonumber(w) or text_w
+        end
+        if col_w > text_w then ImGui.SetCursorPosX(cur_x + math.max(0, (col_w - text_w) * 0.5)) end
+    end
+    M.col_text(color, glyph)
+    return true
 end
 
 function M.location_color(group, text)

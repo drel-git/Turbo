@@ -810,8 +810,7 @@ function M.add_keep_qty(item_name, item_id, qty, scope)
 end
 
 function M.open_stock_view()
-    Settings.mainTab = "gear"
-    Settings.gearTab = "stock"
+    Settings.mainTab = "stock"
     SaveSettings()
     return true, "Opening Stock Up."
 end

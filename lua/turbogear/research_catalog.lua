@@ -67,7 +67,8 @@ function M.normalize_class(className)
 end
 
 function M.normalize_name(name)
-    return trim(name):lower():gsub('^spell:%s*', ''):gsub('^skill:%s*', ''):gsub('^tome of%s*', '')
+    return (trim(name):lower():gsub('^spell:%s*', ''):gsub('^song:%s*', ''):gsub('^skill:%s*', '')
+        :gsub('^tome of%s*', ''):gsub('^tome:%s*', ''))
 end
 
 local SPELL_LEARNED_ALIASES = {
@@ -75,8 +76,15 @@ local SPELL_LEARNED_ALIASES = {
     ['circle of nettles'] = { 'Legacy of Nettles' },
 }
 
+-- Scroll/tome item prefixes -> bare spell name. Song: (bard) and Tome: were
+-- missing, so those items never normalized to their spell.
+local function strip_item_prefix(raw)
+    return (tostring(raw or ''):gsub('^Spell:%s*', ''):gsub('^Song:%s*', ''):gsub('^Skill:%s*', '')
+        :gsub('^Tome of%s*', ''):gsub('^Tome:%s*', ''))
+end
+
 local function base_product_norm(raw)
-    return M.normalize_name(tostring(raw or ''):gsub('^Spell:%s*', ''):gsub('^Skill:%s*', ''):gsub('^Tome of%s*', ''):gsub('%s+Rk%.%s*II$', ''))
+    return M.normalize_name(strip_item_prefix(raw):gsub('%s+Rk%.%s*II$', ''))
 end
 
 function M.learned_alias_names(name)
@@ -330,7 +338,9 @@ function M.find_ini_recipe(className, spellName)
     return nil
 end
 
-function M.spell_inventory_info(displayName, iniRaw, spellBook, allowLive)
+local scroll_queries = 0
+
+function M.spell_inventory_info(displayName, iniRaw, spellBook, allowLive, classKey)
     displayName = trim(displayName)
     local norm = M.product_norm(displayName)
     local norm_candidates = product_norm_candidates(displayName)
@@ -365,44 +375,80 @@ function M.spell_inventory_info(displayName, iniRaw, spellBook, allowLive)
         return { inBook = false, scroll = 0, noData = true }
     end
 
-    local variants = { displayName, scroll_label(displayName) }
-    if iniRaw and trim(iniRaw) ~= '' then
-        variants[#variants + 1] = trim(iniRaw)
+    -- Lean live check. Book names never carry an item prefix, so only bare
+    -- names are probed (display, recipe name without prefix, learned aliases);
+    -- a spell_cache hit costs no TLO. Scrolls are counted ONLY when the spell
+    -- is not in the book, by exact item name: the researchlearn.ini product
+    -- (authoritative) first, then class-based fallbacks (Song:/Tome of/Tome:).
+    local book_names, seen = {}, {}
+    local function add_book(n)
+        n = trim(n)
+        local k = n:lower()
+        if n ~= '' and not seen[k] then seen[k] = true; book_names[#book_names + 1] = n end
     end
-    for _, alias in ipairs(M.learned_alias_names(displayName)) do
-        variants[#variants + 1] = alias
-        variants[#variants + 1] = scroll_label(alias)
-    end
+    add_book(displayName)
+    if iniRaw and trim(iniRaw) ~= '' then add_book(strip_item_prefix(trim(iniRaw))) end
+    for _, alias in ipairs(M.learned_alias_names(displayName)) do add_book(alias) end
+
     local inBook = false
     pcall(function()
         local okC, SC = pcall(require, 'spell_cache')
-        for _, variant in ipairs(variants) do
-            if okC and SC then
-                if SC.building and SC.building() and SC.probe_name and SC.probe_name(variant) then
-                    inBook = true
-                    break
-                end
-                if SC.ready and SC.ready() and SC.is_known and SC.is_known(variant) then
-                    inBook = true
-                    break
-                end
-            end
-            local ok, mod = pcall(require, 'spell_known')
-            if ok and mod and mod.live and mod.live(variant) then
+        local okK, SK = pcall(require, 'spell_known')
+        local cache_ready = okC and SC and not (SC.building and SC.building())
+            and SC.ready and SC.ready() and SC.is_known
+        for _, n in ipairs(book_names) do
+            if cache_ready and SC.is_known(n) then inBook = true; break end
+            if okK and SK and SK.live_lean and SK.live_lean(n) then
                 inBook = true
+                if okC and SC and SC.note_known then SC.note_known(n) end
                 break
             end
         end
     end)
+
     local scroll = 0
-    pcall(function()
-        for _, variant in ipairs(variants) do
-            scroll = math.max(scroll, mq.TLO.FindItemCount('=' .. variant)() or 0)
-            scroll = math.max(scroll, mq.TLO.FindItemBankCount('=' .. variant)() or 0)
-        end
-    end)
+    if not inBook then
+        pcall(function()
+            for _, item_name in ipairs(M.scroll_item_candidates(displayName, iniRaw, classKey)) do
+                scroll_queries = scroll_queries + 2
+                local n = (mq.TLO.FindItemCount('=' .. item_name)() or 0)
+                    + (mq.TLO.FindItemBankCount('=' .. item_name)() or 0)
+                if n > 0 then scroll = n; break end
+            end
+        end)
+    end
     return { inBook = inBook, scroll = scroll }
 end
+
+--- Exact item names a held (unscribed) copy of this spell could have.
+--- researchlearn.ini's product name first; class fallbacks for rows without a
+--- recipe (or bard songs listed as "Spell:"). Capped at 3 names.
+local MELEE_TOME_CLASSES = { warrior = true, monk = true, rogue = true, berserker = true }
+local HYBRID_TOME_CLASSES = { paladin = true, shadowknight = true, ranger = true, beastlord = true, bard = true }
+function M.scroll_item_candidates(displayName, iniRaw, classKey)
+    local out, seen = {}, {}
+    local function add(n)
+        n = trim(n)
+        local k = n:lower()
+        if n ~= '' and not seen[k] and #out < 3 then seen[k] = true; out[#out + 1] = n end
+    end
+    add(iniRaw)
+    local bare = trim(strip_item_prefix(displayName))
+    if bare ~= trim(displayName) then add(displayName) end -- display already an item name
+    classKey = M.normalize_class(classKey or '')
+    if classKey == 'bard' then
+        add('Song: ' .. bare); add('Spell: ' .. bare)
+    elseif MELEE_TOME_CLASSES[classKey] then
+        add('Tome of ' .. bare); add('Tome: ' .. bare)
+    else
+        add('Spell: ' .. bare)
+        if HYBRID_TOME_CLASSES[classKey] then add('Tome of ' .. bare) end
+    end
+    return out
+end
+
+function M.scroll_query_count() return scroll_queries end
+function M.reset_scroll_query_count() scroll_queries = 0 end
 
 function M.spell_owned_count(info, runMode)
     runMode = runMode or 'roster'
@@ -468,7 +514,7 @@ function M.gather_spell_book(classKey, levels)
     local out = {}
     for norm, display in pairs(norms) do
         local rec = M.find_ini_recipe(classKey, display)
-        local inv = M.spell_inventory_info(display, rec and rec.iniRaw, nil)
+        local inv = M.spell_inventory_info(display, rec and rec.iniRaw, nil, nil, classKey)
         out[norm] = {
             name = display,
             norm = norm,
@@ -644,7 +690,7 @@ function M.build_manifest(opts)
             seenNorm[norm] = true
             local rec = iniByNorm[norm]
             local display = lazClass and laz_display_name(lazClass, laz.level, norm) or norm
-            local inv = M.spell_inventory_info(display, rec and rec.iniRaw, spellBook, liveInventory)
+            local inv = M.spell_inventory_info(display, rec and rec.iniRaw, spellBook, liveInventory, classKey)
             local have, need, haveLabel = M.spell_plan_from_inventory(inv, qty, runMode)
             local status = 'other'
             if inv.noData then
@@ -693,7 +739,7 @@ function M.build_manifest(opts)
 
     for norm, rec in pairs(iniByNorm) do
         if not seenNorm[norm] then
-            local inv = M.spell_inventory_info(rec.name, rec.iniRaw, spellBook, liveInventory)
+            local inv = M.spell_inventory_info(rec.name, rec.iniRaw, spellBook, liveInventory, classKey)
             local have, need, haveLabel = M.spell_plan_from_inventory(inv, qty, runMode)
             local status = have >= qty and 'satisfied' or 'craftable'
             if inv.noData then

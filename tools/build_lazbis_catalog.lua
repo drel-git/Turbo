@@ -4,8 +4,10 @@
 
 local in_path = "../lazbis/bis.lua"
 local out_path = "lua/turbogear/catalogs/lazbis.lua"
+package.path = "lua/turbogear/?.lua;" .. package.path
 
 local raw = dofile(in_path)
+local content_hash = require("catalog_content_hash")
 
 local EQ_CLASSES = {
     ["Bard"] = true, ["Beastlord"] = true, ["Berserker"] = true, ["Cleric"] = true,
@@ -201,6 +203,7 @@ for _, group_name in ipairs(raw.Groups or {}) do
     end
     catalog.groups[#catalog.groups+1] = group
 end
+catalog.content_hash = content_hash.compute(catalog)
 
 local function is_array(t)
     if type(t) ~= "table" then return false end

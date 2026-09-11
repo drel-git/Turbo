@@ -17,6 +17,9 @@ local snapshot_mod = require('snapshot')
 local Engine = require('engine').Engine
 local item_actions = require('item_actions')
 local spells_index = require('spells_index')
+local spells_don = require('tabs.spells_don')
+local spells_refresh = require('spells_refresh')
+local diag = require('diagnostics')
 
 local ok_catalog, Catalog = pcall(require, 'research_catalog')
 if not ok_catalog then Catalog = nil end
@@ -36,8 +39,9 @@ local SCOPE_OPTIONS = {
 local LEVEL_NUMS = { 70, 69, 68, 67, 66 }
 
 local COL_WIDTH = 248.0
-local COL_HEIGHT = 320.0
-local COL_HEADER_H = 48.0
+local COL_HEIGHT = 320.0 -- minimum; columns grow to the window's free height
+local col_height_now = COL_HEIGHT
+local COL_HEADER_H = 22.0 -- name only (Export moved to right-click)
 local LOC_COL_W = 108.0
 local BTN_ROLLUP = { 0.54, 0.36, 0.18, 1.0 }
 local BTN_EXPORTS_DIR = { 0.24, 0.46, 0.32, 1.0 }
@@ -51,6 +55,7 @@ local self_spell_book_ready
 local last_auto_refresh_at = 0
 local last_spell_cache_at = 0
 local pending_refresh = nil
+local refresh_stats = { rebuilds = 0, gathers = 0, spellsyncs = 0, publishes = 0 }
 
 local refresh = {
     active = false,
@@ -136,22 +141,29 @@ local function count_ready_peers(keys, started, now)
     return ready
 end
 
+local function current_engine_ok()
+    if type(Engine) == "table" and Engine.ok == true then return true end
+    return false
+end
+
 local function run_refresh_network()
-    -- Local spell book for the __self__ column (stays in the snapshot cache).
-    pcall(function() require('spell_cache').rebuild() end)
-    local snap = snapshot_mod.gather({ force = true, depth = "lite", includeSpells = true })
-    if Engine.ok then
+    if spells_refresh.local_rebuild_allowed(current_engine_ok()) then
+        refresh_stats.rebuilds = refresh_stats.rebuilds + 1
+        pcall(function() require('spell_cache').rebuild() end)
+        refresh_stats.gathers = refresh_stats.gathers + 1
+        local snap = snapshot_mod.gather({ force = true, depth = "lite", includeSpells = true })
         Engine.publish(true, "lite", { includeSpells = true })
+        refresh_stats.publishes = refresh_stats.publishes + 1
         Engine.request_all(true, { includeSpells = true, depth = "lite" })
         pcall(function()
             require('spell_cache').mark_published(snap and snap.spells_sig)
         end)
-    else
-        -- Static roles: the UI has no actor mailbox; the bg responder runs the
-        -- publish + peer request round trip. Peer books arrive via the shared
-        -- cache reload within a second or two.
-        mq.cmd('/squelch /tgearbg spellsync')
+        return
     end
+    -- Viewer: bg spellsync rebuilds, gathers, publishes, and requests peers.
+    -- Do not rebuild or force-gather on this process (especially not from draw).
+    refresh_stats.spellsyncs = refresh_stats.spellsyncs + 1
+    mq.cmd('/squelch /tgearbg spellsync')
 end
 
 local function start_spell_refresh(view_key, scoped_keys)
@@ -178,6 +190,7 @@ local function start_spell_refresh(view_key, scoped_keys)
     end
 
     if Catalog and Catalog.invalidate_want_cache then Catalog.invalidate_want_cache() end
+    if spells_index and spells_index.invalidate then spells_index.invalidate() end
     run_refresh_network()
     status_msg = string.format("Refreshing spell lists... 0/%d peers", #keys)
     return true
@@ -290,6 +303,7 @@ local function ensure_defaults()
     Settings.spellsRosterScope = Settings.spellsRosterScope or "online"
     Settings.spellsViewKey = Settings.spellsViewKey or "__all__"
     Settings.spellsLevelFilter = Settings.spellsLevelFilter or "all"
+    Settings.spellsTab = Settings.spellsTab or "research"
     if Settings.spellsResearchOnly == nil then Settings.spellsResearchOnly = true end
     if Settings.spellsHideNonResearch == nil then Settings.spellsHideNonResearch = false end
     if Settings.spellsHideOwned == nil then Settings.spellsHideOwned = false end
@@ -421,7 +435,7 @@ local function spell_data_tooltip(key)
     if kind == "live" then return "Live spell book from this game client." end
     if kind == "synced" then return "Synced spell book from a TurboGear peer snapshot." end
     if kind == "partial" then
-        return "Partial list from a ResearchLearn export only.\nAmber = unknown, red = exported missing.\nRefresh after the character is online with TurboGear."
+        return "Partial list from a ResearchLearn export only.\nGrey = unknown, red = exported missing.\nRefresh after the character is online with TurboGear."
     end
     return "No spell book synced yet.\nClick Refresh while this character is online with TurboGear."
 end
@@ -433,6 +447,24 @@ local function draw_spell_legend()
         { text = "amber = unknown (no spell book synced). ", color = Theme.amber },
         { text = "Non-research spells tagged separately.", color = Theme.dim },
     })
+end
+
+function M.draw_mode_chrome()
+    local cur = tostring(Settings.spellsTab or "research")
+    local tabs = {
+        { key = "research", label = "Research" },
+        { key = "don", label = "Dragons of Norrath" },
+    }
+    for i, tab in ipairs(tabs) do
+        if i > 1 then ImGui.SameLine() end
+        local active = cur == tab.key
+        if toggle_button(tab.label .. "##spells_mode_" .. tab.key, active, 0, 22.0) and not active then
+            cur = tab.key
+            Settings.spellsTab = tab.key
+            SaveSettings()
+        end
+    end
+    return cur
 end
 
 -- ===================== exports (planner path) =========================== --
@@ -585,69 +617,83 @@ local function spell_cache_refresh_due()
     return age >= (mins * 60)
 end
 
+-- One row, same shape as the DoN tab: Missing only, a small "..." menu
+-- (refresh / exports / cache age), then the legend. Level chips and
+-- "Hide non-research" are gone - the full roster always shows (saved values
+-- for those old filters are ignored in filter_opts / active_levels).
 local function draw_toolbar(view_key, scoped_keys)
     scoped_keys = scoped_keys or {}
-    local refresh_busy = refresh.active == true
-    if refresh_busy and ImGui.BeginDisabled then ImGui.BeginDisabled(true) end
-    if themed_button("Refresh##spells_refresh", Theme.gold) and not refresh_busy then
-        start_spell_refresh(view_key, scoped_keys)
-    end
-    if refresh_busy and ImGui.EndDisabled then ImGui.EndDisabled() end
-    if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
-        ImGui.SetTooltip("Request spell books from live peers; columns update as replies arrive.")
-    end
-    ImGui.SameLine()
-    col_text(Theme.dim, spell_cache_age_label())
-    if #scoped_keys > 1 and view_key == "__all__" then
-        ImGui.SameLine()
-        if themed_button("Export box rollup##spells_export_box", BTN_ROLLUP) then
-            export_box_rollup(scoped_keys)
+    if refresh.active == true then
+        if ImGui.TextDisabled then
+            ImGui.TextDisabled("Refreshing...")
+        else
+            col_text(Theme.dim, "Refreshing...")
         end
-    end
-    ImGui.SameLine()
-    if themed_button("Open Exports Folder##spells_open_exports", BTN_EXPORTS_DIR) then
-        open_exports_folder()
-    end
-    if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
-        ImGui.SetTooltip("Open MacroQuest/Config where ResearchLearn_want_<Character>.txt files are saved.")
-    end
-    ImGui.Spacing()
-    draw_level_chips()
-    ImGui.SameLine()
-    if toggle_button(Settings.spellsHideNonResearch and "Hide non-research: ON##sp_hide_ref" or "Hide non-research: OFF##sp_hide_ref", Settings.spellsHideNonResearch == true) then
-        Settings.spellsHideNonResearch = not (Settings.spellsHideNonResearch == true)
-        SaveSettings()
+    elseif themed_button("Refresh##sp_refresh_now", Theme.steel, 78, 0) then
+        queue_auto_refresh(view_key, scoped_keys)
+        if pending_refresh then pending_refresh.due_at = os.clock() end
     end
     if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
-        ImGui.SetTooltip("Hide drops, library, anguish, and other non-researchable spells from the roster.")
+        ImGui.SetTooltip("Refresh spellbooks after learning or memorizing spells. This is separate from inventory Sync Now.")
     end
     ImGui.SameLine()
     if toggle_button(Settings.spellsHideOwned and "Missing only: ON##sp_hide" or "Missing only: OFF##sp_hide", Settings.spellsHideOwned == true) then
         Settings.spellsHideOwned = not (Settings.spellsHideOwned == true)
         SaveSettings()
     end
+    ImGui.SameLine()
+    segmented_text({
+        { text = "Owned", color = Theme.online or Theme.green },
+        { text = " / ", color = Theme.dim },
+        { text = "Missing", color = Theme.missing or Theme.brick },
+        { text = " / ", color = Theme.dim },
+        { text = "Unknown", color = Theme.dim },
+    })
+    ImGui.SameLine()
+    if themed_button("...##spells_more", Theme.blue) and ImGui.OpenPopup then
+        ImGui.OpenPopup("##spells_more_menu")
+    end
+    if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
+        ImGui.SetTooltip("Refresh / exports.  Unknown = no spell data yet.  " .. spell_cache_age_label())
+    end
+    if ImGui.BeginPopup and ImGui.BeginPopup("##spells_more_menu") then
+        local refresh_busy = refresh.active == true
+        if refresh_busy then
+            if ImGui.TextDisabled then ImGui.TextDisabled("Refreshing...") end
+        elseif ImGui.MenuItem("Refresh now") then
+            queue_auto_refresh(view_key, scoped_keys)
+            if pending_refresh then pending_refresh.due_at = os.clock() end
+        end
+        if #scoped_keys > 1 and view_key == "__all__" then
+            if ImGui.MenuItem("Export box rollup") then export_box_rollup(scoped_keys) end
+        end
+        if ImGui.MenuItem("Open exports folder") then open_exports_folder() end
+        ImGui.Separator()
+        if ImGui.TextDisabled then
+            ImGui.TextDisabled(spell_cache_age_label())
+            ImGui.TextDisabled("Unknown = no spell data yet.")
+            ImGui.TextDisabled("Right-click a character name to export.")
+        end
+        ImGui.EndPopup()
+    end
 end
 
 -- ===================== columns ========================================== --
 
 local function active_levels()
-    local f = Settings.spellsLevelFilter or "all"
-    if f == "all" then return LEVEL_NUMS end
-    local n = tonumber(f)
-    if n then return { n } end
-    return LEVEL_NUMS
+    return LEVEL_NUMS -- level filter removed: always the full 66-70 roster
 end
 
 local function filter_opts()
     return {
-        level = Settings.spellsLevelFilter or "all",
-        hide_non_research = Settings.spellsHideNonResearch == true,
-        hide_owned = Settings.spellsHideOwned == true,
+        level = "all",               -- saved spellsLevelFilter ignored (UI removed)
+        hide_non_research = false,   -- saved spellsHideNonResearch ignored (UI removed)
+        hide_owned = Settings.spellsHideOwned == true, -- Missing only: keeps missing + unknown
     }
 end
 
 local function color_for_kind(kind)
-    if kind == "unknown" then return Theme.amber or { 0.85, 0.65, 0.25, 1.0 } end
+    if kind == "unknown" then return Theme.dim or { 0.55, 0.55, 0.58, 1.0 } end -- grey, same as DoN
     if kind == "owned" then return Theme.online or { 0.35, 0.85, 0.45, 1.0 } end
     return Theme.missing or { 0.95, 0.35, 0.35, 1.0 }
 end
@@ -700,7 +746,7 @@ local function draw_level_table(key, by_level, levels)
     if ImGuiTableFlags.NoSavedSettings then table_flags = table_flags + ImGuiTableFlags.NoSavedSettings end
 
     local table_id = "##spells_" .. tostring(key):gsub("[^%w_]", "_")
-    if not ImGui.BeginTable(table_id, 2, table_flags, COL_WIDTH - 8.0, COL_HEIGHT - COL_HEADER_H - 8.0) then
+    if not ImGui.BeginTable(table_id, 2, table_flags, COL_WIDTH - 8.0, col_height_now - COL_HEADER_H - 8.0) then
         return
     end
     if ImGui.TableSetupScrollFreeze then
@@ -764,11 +810,14 @@ local function draw_column_header(key)
     end
     if hdr_open then
         views.col_text_centered(hdr_color, label, COL_WIDTH - 12.0)
-        if themed_button("Export##sp_ex_" .. tostring(key):gsub("[^%w_]", "_"), Theme.blue, COL_WIDTH - 16.0, 20.0) then
-            export_for_key(key)
-        end
         if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
-            ImGui.SetTooltip("Export this character's missing research spells to Config/ResearchLearn_want_<Name>.txt")
+            ImGui.SetTooltip("Right-click: export missing research spells (ResearchLearn want list)")
+        end
+        local ctx_id = "##sp_hdr_ctx_" .. tostring(key):gsub("[^%w_]", "_")
+        if ImGui.BeginPopupContextItem and ImGui.BeginPopupContextItem(ctx_id) then
+            if ImGui.MenuItem("Export want list") then export_for_key(key) end
+            if ImGui.MenuItem("Open exports folder") then open_exports_folder() end
+            ImGui.EndPopup()
         end
     end
     if hdr_began and ImGui.EndChild then ImGui.EndChild() end
@@ -815,19 +864,27 @@ local function draw_spell_columns(column_keys)
         return
     end
 
-    if #column_keys > 1 then
-        draw_spell_legend()
-    end
 
     if #column_keys == 1 then
         center_cursor_block(COL_WIDTH)
+    end
+
+    -- Grow the spell boxes down to the free height of the window (never below
+    -- the old fixed size) so long rosters are not confined to a small box.
+    do
+        local avail_y = 0
+        pcall(function()
+            local a, b = ImGui.GetContentRegionAvail()
+            if type(a) == "table" then avail_y = tonumber(a.y or a[2]) or 0 else avail_y = tonumber(b) or 0 end
+        end)
+        col_height_now = math.max(COL_HEIGHT, avail_y - 8.0)
     end
 
     local scroll_began = false
     local scroll_open = true
     if #column_keys > 1 and ImGui.BeginChild then
         local avail = content_avail_x()
-        local body_h = COL_HEIGHT - COL_HEADER_H
+        local body_h = col_height_now - COL_HEADER_H
         local block_h = COL_HEADER_H + body_h + 4.0
         local scroll_flags = 0
         if ImGuiWindowFlags and ImGuiWindowFlags.HorizontalScrollbar then
@@ -861,7 +918,7 @@ local function draw_spell_columns(column_keys)
             local col_open = true
             if ImGui.BeginChild then
                 local child_id = "##spells_col_" .. tostring(key):gsub("[^%w_]", "_")
-                local body_h = COL_HEIGHT - COL_HEADER_H
+                local body_h = col_height_now - COL_HEADER_H
                 local ok, open = pcall(function()
                     if ImVec2 then
                         return ImGui.BeginChild(child_id, ImVec2(COL_WIDTH, body_h), true, 0)
@@ -887,12 +944,8 @@ end
 
 function M.draw()
     ensure_defaults()
-    if not Catalog then
-        col_text(Theme.amber, "Missing research_catalog.lua in turbogear folder.")
-        return
-    end
+    local spells_tab = tostring(Settings.spellsTab or "research")
 
-    tick_pending_refresh()
     tick_spell_refresh()
 
     local view_key, scoped_keys
@@ -904,7 +957,15 @@ function M.draw()
         ImGui.SameLine()
         view_key, scoped_keys = draw_view_picker()
     end
-    draw_toolbar(view_key, scoped_keys)
+    if spells_tab == "don" then
+        spells_don.draw_toolbar()
+    else
+        if not Catalog then
+            col_text(Theme.amber, "Missing research_catalog.lua in turbogear folder.")
+            return
+        end
+        draw_toolbar(view_key, scoped_keys)
+    end
 
     if (Settings.spellsRosterScope or "online") == "self" then
         view_key = "__self__"
@@ -920,9 +981,13 @@ function M.draw()
 
     ImGui.Spacing()
     local column_keys = column_keys_for_view(view_key, scoped_keys)
-    spells_index.ensure(column_keys, source_snap)
-    spells_index.tick(INDEX_BUDGET_MS, source_snap)
-    draw_spell_columns(column_keys)
+    if spells_tab == "don" then
+        spells_don.draw(column_keys)
+    else
+        spells_index.ensure(column_keys, source_snap)
+        spells_index.tick(INDEX_BUDGET_MS, source_snap)
+        draw_spell_columns(column_keys)
+    end
 end
 
 function M.on_tab_enter()
@@ -933,12 +998,57 @@ function M.on_tab_enter()
     if (Settings.spellsRosterScope or "online") == "self" then
         view_key = "__self__"
     end
-    spells_index.ensure(column_keys_for_view(view_key, scoped_keys), source_snap)
+    if tostring(Settings.spellsTab or "research") ~= "don" then
+        spells_index.ensure(column_keys_for_view(view_key, scoped_keys), source_snap)
+    end
     if refresh.active or pending_refresh then return end
-    local now = os.clock()
-    if spell_cache_refresh_due() and (now - last_auto_refresh_at) >= REFRESH_MIN_S then
+
+    local sc_ready, sc_sig = false, ""
+    pcall(function()
+        local SC = require('spell_cache')
+        sc_ready = SC.ready and SC.ready() == true
+        sc_sig = SC.signature and tostring(SC.signature() or "") or ""
+    end)
+    local snap = snapshot_mod.cached and snapshot_mod.cached() or nil
+    local plan = spells_refresh.plan_tab_enter({
+        spell_cache_ready = sc_ready,
+        spell_cache_sig = sc_sig,
+        snap = snap,
+        last_spell_cache_at = last_spell_cache_at,
+        now = os.time(),
+        interval_minutes = Settings.spellsAutoRefreshMinutes,
+    })
+    diag.event("spells.first_open", "source=" .. tostring(plan.source))
+    if plan.stamp then last_spell_cache_at = os.time() end
+    if plan.action == "schedule_refresh" then
         queue_auto_refresh(view_key, scoped_keys)
     end
+end
+
+--- Run-loop (not ImGui): start a queued refresh off the click/draw frame.
+function M.tick()
+    tick_pending_refresh()
+end
+
+function M._refresh_stats_for_tests()
+    return {
+        rebuilds = refresh_stats.rebuilds,
+        gathers = refresh_stats.gathers,
+        spellsyncs = refresh_stats.spellsyncs,
+        publishes = refresh_stats.publishes,
+        pending = pending_refresh ~= nil,
+        refresh_active = refresh.active == true,
+        last_spell_cache_at = last_spell_cache_at,
+    }
+end
+
+function M._reset_for_tests()
+    pending_refresh = nil
+    refresh.active = false
+    refresh.keys = {}
+    last_spell_cache_at = 0
+    last_auto_refresh_at = 0
+    refresh_stats = { rebuilds = 0, gathers = 0, spellsyncs = 0, publishes = 0 }
 end
 
 function M.export_current()

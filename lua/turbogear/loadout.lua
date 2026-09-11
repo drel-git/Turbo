@@ -1402,7 +1402,8 @@ function M.open_analyze_list(list_id, mode)
     local Settings = require('config').Settings
     local SaveSettings = require('config').SaveSettings
     Settings.bisSelectedList = list_id
-    Settings.mainTab = "inspect"
+    Settings.mainTab = "gear"
+    Settings.gearTab = "stats"
     Settings.inspectTab = "stats"
     Settings.statsViewMode = "plan"
     Settings.statsSourceScope = "loadout"
@@ -1474,12 +1475,14 @@ function M.open_for_list(list_id, tab)
     Settings.bisSelectedList = list_id
     tab = tostring(tab or "stats")
     if tab == "focus" then
-        Settings.mainTab = "inspect"
+        Settings.mainTab = "gear"
+        Settings.gearTab = "focus"
         Settings.inspectTab = "focus"
         Settings.focusSourceScope = "loadout"
         Settings.focusLoadoutList = list_id
     else
-        Settings.mainTab = "inspect"
+        Settings.mainTab = "gear"
+        Settings.gearTab = "stats"
         Settings.inspectTab = "stats"
         Settings.statsViewMode = "plan"
         Settings.statsSourceScope = "loadout"

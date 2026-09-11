@@ -155,6 +155,13 @@ check(hit[1] and hit[1].name == "Imbued Feather", 'ANNOUNCE name parsed')
 check(hit[1] and hit[1].id == 0, 'ANNOUNCE corpse id ignored')
 check(hit[1] and hit[1].corpse_id == 209, 'ANNOUNCE corpse_id attached')
 
+local dirty_announce = parse("Ghee tells the group, '[ANNOUNCE] Bloodstained Spring (ID: 8)'")
+check(#dirty_announce == 1, 'ANNOUNCE dirty corpse-id suffix still parses one item')
+check(dirty_announce[1] and dirty_announce[1].name == "Bloodstained Spring",
+    'ANNOUNCE dirty corpse-id suffix stripped from item name')
+check(dirty_announce[1] and dirty_announce[1].id == 0, 'ANNOUNCE dirty corpse id is not item id')
+check(dirty_announce[1] and dirty_announce[1].corpse_id == 8, 'ANNOUNCE dirty corpse id retained separately')
+
 local skip = parse("[01:54:29] Ahffrait tells the group, '[SKIP] Elemental Gauntlet Mold (ID: 148) - Already have'")
 check(#skip == 1, 'timestamp before SKIP does not consume payload')
 check(skip[1] and skip[1].name == "Elemental Gauntlet Mold", 'SKIP name parsed')
@@ -227,6 +234,14 @@ check(#hex_quote == 1, 'hex self-link with trailing quote-angle parses')
 check(hex_quote[1] and hex_quote[1].name == "Noxious Bloom of Ebbing Exertion",
     'trailing "> stripped from hex self-link name')
 
+-- A visible first word made only from A-F/a-f is still item text, not payload.
+-- The live failure swallowed "Beaded" and looked up only "Hoop of Demise".
+local beaded_hex = parse(
+    "You tell your party, '00B8B700000000000000000000000000000000000000000000000061F5D471Beaded Hoop of Demise '")
+check(#beaded_hex == 1, 'hex self-link with all-hex leading word parses once')
+check(beaded_hex[1] and beaded_hex[1].name == "Beaded Hoop of Demise",
+    'hex recovery preserves all-hex leading item word Beaded')
+
 -- Contaminated name shapes that previously painted as no-row while MQ pretty-printed the link.
 local framed = parse("You tell your party, '\x12ABCDEF0123456789ABCDEF0123456789ABCDEF01Desolate Black Sapphire\x12'>")
 -- Frame-only lines depend on ParseItemLink; without mq stubs just ensure no crash / no junk name.
@@ -264,6 +279,16 @@ check(#announce_links == 1, 'ANNOUNCE still parses as a link for announce path')
 
 local ignore_links = parse("Ghee tells the group, '[IGNORE] Imbued Feather (ID: 209)'")
 check(#ignore_links == 0, 'IGNORE control tag does not seed announce parse')
+
+-- Callback safety: parseable links enqueue for announcer.tick; they must not do
+-- BiS/text evaluation synchronously from try_process_chat.
+text_needs_calls = 0
+text_line_scan_calls = 0
+local queued_link = try_chat("You tell your party, '\x12RAWNOXIOUS\x12'", true, { self_event = true })
+check(queued_link == true, 'parseable linked chat enqueues for scheduled processing')
+check(runtime.last_chat_note == "queued links (1)", 'linked chat notes queued work')
+check(text_needs_calls == 0, 'linked chat callback does not run needs_index text scan')
+check(text_line_scan_calls == 0, 'linked chat callback does not run catalog text scan')
 
 -- lootseen / LOOT_LINK: Linked handoff only, never queues [TG] paint.
 local runtime = A._runtime_for_test

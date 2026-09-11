@@ -967,10 +967,6 @@ function M.setOpen(v)
     local open = v == true
     local was = rawget(_G, '__TurboFleetWalletOpen') == true
     rawset(_G, '__TurboFleetWalletOpen', open)
-    if open and not was then
-        -- Restore saved layout (or seed once under $ if never placed).
-        rawset(_G, '__TurboFleetWalletPlaceOnce', true)
-    end
     if was and not open and TG.saveSettings then
         pcall(TG.saveSettings)
     end
@@ -985,17 +981,11 @@ local function persistWindowPos()
     local wx, wy = ImGui.GetWindowPos()
     wx, wy = tonumber(wx), tonumber(wy)
     if not (wx and wy) then return end
-    local prev = TG.fleetWalletWindowPos
-    if prev and math.abs((tonumber(prev.x) or 0) - wx) < 0.5
-        and math.abs((tonumber(prev.y) or 0) - wy) < 0.5 then
+    if TG.observeWindowPos then
+        TG.observeWindowPos('fleetWalletWindowPos', wx, wy)
         return
     end
     TG.fleetWalletWindowPos = { x = wx, y = wy }
-    local now = (mq and mq.gettime and mq.gettime()) or (os.time() * 1000)
-    if (tonumber(TG._fwPosSaveAtMS) or 0) <= now then
-        TG._fwPosSaveAtMS = now + 800
-        if TG.saveSettings then pcall(TG.saveSettings) end
-    end
 end
 
 local function setScope(scope)
@@ -1626,7 +1616,6 @@ function M.drawChrome(btnW, btnH)
             armFastPoll(10000)
         end
     end
-    if TG.turboChromeDragAddLastItem then TG.turboChromeDragAddLastItem() end
     if ImGui.IsItemHovered and ImGui.IsItemHovered() then
         ImGui.BeginTooltip()
         ImGui.TextColored(0.88, 0.80, 0.35, 1.0, string.format('%12s pp', tostring(cachedWallet.plat)))
@@ -1654,19 +1643,17 @@ end
 --- Independent panel window (call from Mini and Full GUI paths).
 function M.drawWindow()
     if not M.isOpen() or not ImGui.Begin then return end
-    if rawget(_G, '__TurboFleetWalletPlaceOnce') and ImGui.SetNextWindowPos then
+    if ImGui.SetNextWindowPos then
         local pos = TG.fleetWalletWindowPos
         local x, y
         if pos and pos.x and pos.y then
             x, y = tonumber(pos.x), tonumber(pos.y)
         elseif TG._fwSeedX and TG._fwSeedY then
-            -- First open ever: start near $, then free-float + persist.
             x, y = tonumber(TG._fwSeedX), tonumber(TG._fwSeedY)
         end
         if x and y then
-            pcall(ImGui.SetNextWindowPos, x, y)
+            pcall(ImGui.SetNextWindowPos, x, y, ImGuiCond.Appearing)
         end
-        rawset(_G, '__TurboFleetWalletPlaceOnce', false)
     end
     -- Keep a usable minimum width so AlwaysAutoResize does not collapse left.
     if ImGui.SetNextWindowSizeConstraints then

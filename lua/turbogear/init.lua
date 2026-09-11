@@ -29,6 +29,8 @@
 ============================================================================ ]]
 
 local mq = require('mq')
+local PROCESS_STARTED_WALL_S = (mq.gettime and (tonumber(mq.gettime()) or 0) / 1000) or os.clock()
+local process_to_listener_ready_ms = nil
 
 local SCRIPT_ARGS = { ... }              -- must be captured at chunk top level
 
@@ -49,10 +51,9 @@ state.bg     = FORCE_BG
 state.show   = not state.bg
     and not (SCRIPT_ARGS[1] == 'mini' or (cfg.Settings.startMinimized == true and SCRIPT_ARGS[1] ~= 'ui'))
 
--- /lua run turbogear stock — open UI on Gear > Stock Up (starts bg via normal UI path).
+-- /lua run turbogear stock — open UI on Stock Up (starts bg via normal UI path).
 if not state.bg and tostring(SCRIPT_ARGS[1] or ''):lower() == 'stock' then
-    cfg.Settings.mainTab = 'gear'
-    cfg.Settings.gearTab = 'stock'
+    cfg.Settings.mainTab = 'stock'
     state.show = true
 end
 
@@ -60,12 +61,15 @@ local store  = require('store')
 local Store, my_key = store.Store, store.my_key
 local Engine = require('engine').Engine
 local announcer = require('announcer')
+local index_warm_policy = require('index_warm_policy')
 local inventory_watch = require('inventory_watch')
 local diag   = require('diagnostics')
 local peer_discovery = require('peer_discovery')
 
 -- ===================== ENTRY POINTS ===================================== --
-Store.load()
+if not state.bg then
+    Store.load()
+end
 
 local local_owner_guard = {
     next_at = 0,
@@ -97,7 +101,9 @@ local function init_engine_with_retry(attempts, gap_ms)
     return Engine.ok == true
 end
 
-announcer.register()
+if not state.bg then
+    announcer.register()
+end
 inventory_watch.register()
 inventory_watch.seed_signature()
 
@@ -178,20 +184,70 @@ local function status_lines(max_peers, colorize)
         lines[#lines + 1] = string.format("[TurboGear]   peers truncated: %d shown / %d total", shown, #keys)
     end
     local ast = announce_status_safe()
+    do
+        local lua_turbo = cfg.lua_turbo_status and cfg.lua_turbo_status() or nil
+        if lua_turbo and lua_turbo.known then
+            if lua_turbo.warning then
+                lines[#lines + 1] = string.format("[TurboGear] MQ2Lua Turbo Num: %d WARNING recommended=%d fix=/lua conf turboNum %d",
+                    tonumber(lua_turbo.value) or 0, tonumber(lua_turbo.recommended) or 1000,
+                    tonumber(lua_turbo.recommended) or 1000)
+            else
+                lines[#lines + 1] = string.format("[TurboGear] MQ2Lua Turbo Num: %d OK",
+                    tonumber(lua_turbo.value) or 0)
+            end
+        elseif lua_turbo then
+            lines[#lines + 1] = "[TurboGear] MQ2Lua Turbo Num: unavailable (" .. tostring(lua_turbo.reason or "unknown") .. ")"
+        end
+    end
     local actor_label = ast.passive and "passive" or (ast.actor and "ON" or "OFF")
     lines[#lines + 1] = string.format("[TurboGear] announce: %s | %s | actor=%s | pending=%d | lists %d/%d | channel=%s | coord=%s",
         ast.enabled and "ON" or "OFF", ast.index_label or (ast.ready and "ready" or "warming"),
         actor_label, ast.pending or 0, ast.lists_on or 0, ast.lists_total or 0, tostring(ast.channel or "?"),
         tostring(ast.coordinator or "?"))
+    do
+        local generated = type(ast.generated_index) == "table" and ast.generated_index or {}
+        local catalog_state = type(generated.catalog) == "table" and generated.catalog or {}
+        local index_state = type(generated.index) == "table" and generated.index or {}
+        lines[#lines + 1] = string.format(
+            "[TurboGear]   generated index: resident=%s origin=%s loadedAt=%s load=%.1fms/%.1fmsCPU validate=%.1fms/%.1fmsCPU",
+            tostring(index_state.ready == true),
+            tostring(index_state.load_origin or catalog_state.generated_load_origin or "none"),
+            index_state.loaded_at and string.format("%.3f", tonumber(index_state.loaded_at) or 0) or "never",
+            tonumber(index_state.load_wall_ms or catalog_state.generated_load_wall_ms) or 0,
+            tonumber(index_state.load_cpu_ms or catalog_state.generated_load_cpu_ms) or 0,
+            tonumber(index_state.validate_wall_ms or catalog_state.generated_validate_wall_ms) or 0,
+            tonumber(index_state.validate_cpu_ms or catalog_state.generated_validate_cpu_ms) or 0)
+        lines[#lines + 1] = string.format(
+            "[TurboGear]   catalog load: resident=%s origin=%s load=%.1fms/%.1fmsCPU | processToReady=%.1fms warmToReady=%.1fms/%.1fmsCPU frameSpan=n/a maxFrameCPU=n/a",
+            tostring(catalog_state.catalog_resident == true),
+            tostring(catalog_state.catalog_load_origin or "none"),
+            tonumber(catalog_state.catalog_load_wall_ms) or 0,
+            tonumber(catalog_state.catalog_load_cpu_ms) or 0,
+            tonumber(process_to_listener_ready_ms) or 0,
+            tonumber(generated.startup_ready_wall_ms) or 0,
+            tonumber(generated.startup_ready_cpu_ms) or 0)
+    end
     lines[#lines + 1] = string.format("[TurboGear]   announce roster: scope=%s | viewing=%s | chars=%d%s%s",
         tostring(ast.announce_scope or "?"),
         tostring(ast.announce_view or "?"),
         tonumber(ast.announce_roster_count) or 0,
         tostring(ast.announce_roster_names or "") ~= "" and (" | " .. tostring(ast.announce_roster_names or "")) or "",
         ast.announce_roster_truncated and ", ..." or "")
-    lines[#lines + 1] = string.format("[TurboGear]   pending: chat=%d actor=%d group=%d scan=%d target=%d outbox=%d | duplicate=%d | dropped pending=%d outbox=%d | replay rx=%d tx=%d checked=%d",
+    do
+        local vf = type(ast.validation_flags) == "table" and ast.validation_flags or {}
+        lines[#lines + 1] = string.format("[TurboGear]   announce validation: hybrid=%s generatedAuthority=%s legacyValidation=%s generatedShadow=%s shadow=%s runtimeShared=%s deepProfile=%s",
+            tostring(vf.announce_link_hybrid == true),
+            tostring(vf.generated_authority == true),
+            tostring(vf.legacy_validation == true),
+            tostring(vf.local_needs_generated_shadow == true),
+            tostring(vf.local_needs_shadow == true),
+            tostring(vf.local_needs_runtime_shared_shadow == true),
+            tostring(vf.local_needs_match_ref_deep_profile == true))
+    end
+    lines[#lines + 1] = string.format("[TurboGear]   pending: chat=%d actor=%d group=%d scan=%d legacyVal=%d target=%d outbox=%d | duplicate=%d | dropped pending=%d outbox=%d | replay rx=%d tx=%d checked=%d",
         ast.pending_chat or 0, ast.pending_actor or 0, ast.pending_group or 0,
-        ast.pending_link_scan or 0, ast.target_checks_pending or 0, ast.pending_outbox or 0,
+        ast.pending_link_scan or 0, ast.pending_legacy_validation or 0,
+        ast.target_checks_pending or 0, ast.pending_outbox or 0,
         ast.duplicate_suppressed or 0, ast.pending_dropped or 0, ast.outbox_dropped or 0,
         ast.replay_received or 0, ast.replay_sent or 0, ast.replay_checked or 0)
     if (ast.target_checks_pending or 0) > 0 or (ast.target_checks_completed or 0) > 0 then
@@ -223,6 +279,140 @@ local function status_lines(max_peers, colorize)
         lines[#lines + 1] = string.format("[TurboGear]   last pending: %s via %s - %s (%s)",
             ast.last_pending_item, ast.last_pending_source or "?",
             ast.last_pending_reason or "?", ast.last_pending_age or "?")
+    end
+    if type(ast.ownership_cache) == "table" then
+        local oc = ast.ownership_cache
+        local active = tostring(oc.active or "")
+        local active_detail = ""
+        if active ~= "" then
+            active_detail = string.format(" | active=%s%s%s age=%.0fms",
+                active,
+                tostring(oc.active_phase or "") ~= "" and (" phase=" .. tostring(oc.active_phase)) or "",
+                (tonumber(oc.active_units) or 0) > 0 and (" units=" .. tostring(math.floor(tonumber(oc.active_units) or 0))) or "",
+                tonumber(oc.active_age_ms) or 0)
+        end
+        lines[#lines + 1] = string.format("[TurboGear]   ownership cache: ready=%d/%d cold=%d warming=%d queue=%d%s",
+            tonumber(oc.ready) or 0, tonumber(oc.total) or 0,
+            tonumber(oc.cold) or 0, tonumber(oc.warming) or 0,
+            tonumber(oc.queue) or 0, active_detail)
+        if tostring(oc.ready_local_label or "") ~= "" or tostring(oc.ready_published_label or "") ~= "" then
+            lines[#lines + 1] = string.format("[TurboGear]   ownership ready detail: local=[%s] published=[%s]",
+                tostring(oc.ready_local_label or ""), tostring(oc.ready_published_label or ""))
+        end
+        lines[#lines + 1] = string.format("[TurboGear]   ownership work: units=%d last=%.2fms maxTick=%.2fms maxUnit=%.2fms budgetYields=%d staleRestarts=%d oldestBlocker=%.0fms",
+            tonumber(oc.last_tick_units) or 0,
+            tonumber(oc.last_tick_ms) or 0,
+            tonumber(oc.max_tick_ms) or 0,
+            tonumber(oc.max_unit_ms) or 0,
+            tonumber(oc.budget_yields) or 0,
+            tonumber(oc.stale_restarts) or 0,
+            tonumber(oc.oldest_blocking_age_ms) or 0)
+        local fp = type(oc.fingerprint) == "table" and oc.fingerprint or {}
+        lines[#lines + 1] = string.format(
+            "[TurboGear]   ownership fp: builds=%d hits=%d publishedHits=%d publishedWrites=%d seq=%d refEq=%d refBags=%d refBank=%d bankState=%d",
+            tonumber(fp.builds) or 0, tonumber(fp.hits) or 0,
+            tonumber(fp.published_hits) or 0, tonumber(fp.published_writes) or 0,
+            tonumber(fp.seq_changes) or 0, tonumber(fp.equipped_ref_changes) or 0,
+            tonumber(fp.bags_ref_changes) or 0, tonumber(fp.bank_ref_changes) or 0,
+            tonumber(fp.bank_state_changes) or 0)
+        if tostring(oc.cold_label or "") ~= "" or tostring(oc.warming_label or "") ~= "" then
+            lines[#lines + 1] = string.format("[TurboGear]   ownership detail: cold=[%s] warming=[%s]",
+                tostring(oc.cold_label or ""), tostring(oc.warming_label or ""))
+        end
+        for _, row in ipairs(type(oc.rows) == "table" and oc.rows or {}) do
+            lines[#lines + 1] = string.format("[TurboGear]   ownership row: key=%s snap=%s class=%s local=%s status=%s gearKeyHash=%s fullKeyHash=%s items=%s bank=%s spells=%s",
+                tostring(row.key or ""),
+                tostring(row.snap or ""),
+                tostring(row.class or "?"),
+                tostring(row.local_owner == true),
+                tostring(row.status or "?"),
+                tostring(row.hash or ""),
+                tostring(row.full_hash or ""),
+                tostring(row.items or ""),
+                tostring(row.bank or ""),
+                tostring(row.spells or ""))
+        end
+    end
+    local function add_a26_stage_lines(label, stage)
+        if type(stage) ~= "table" then return end
+        local function value(name, field)
+            return tonumber(stage[name] and stage[name][field]) or 0
+        end
+        lines[#lines + 1] = string.format(
+            "[TurboGear]   A2.6 %s wall: capture=%.1f chatEnq=%.1f chatWait=%.1f chatDrain=%.1f linkWait=%.1f driver=%.1f warmWait=%.1f finishSend=%.1f mqCmd=%.1f total=%.1fms",
+            label, value("chat_capture", "wall_ms"), value("chat_queue_enqueue", "wall_ms"),
+            value("chat_queue_wait", "wall_ms"), value("chat_queue_drain", "wall_ms"),
+            value("link_scan_queue_wait", "wall_ms"), value("driver", "wall_ms"),
+            value("pending_warm", "wall_ms"), value("finish_to_send", "wall_ms"),
+            value("mq_cmd_send", "wall_ms"), value("total", "wall_ms"))
+        lines[#lines + 1] = string.format(
+            "[TurboGear]   A2.6 %s cpu: capture=%.2f chatEnq=%.2f chatWait=%.2f chatDrain=%.2f linkWait=%.2f driver=%.2f warmWait=%.2f finishSend=%.2f mqCmd=%.2f total=%.2fms",
+            label, value("chat_capture", "cpu_ms"), value("chat_queue_enqueue", "cpu_ms"),
+            value("chat_queue_wait", "cpu_ms"), value("chat_queue_drain", "cpu_ms"),
+            value("link_scan_queue_wait", "cpu_ms"), value("driver", "cpu_ms"),
+            value("pending_warm", "cpu_ms"), value("finish_to_send", "cpu_ms"),
+            value("mq_cmd_send", "cpu_ms"), value("total", "cpu_ms"))
+        lines[#lines + 1] = string.format(
+            "[TurboGear]   A2.6 %s delivery: lineArrival=%s callbackUncertainty<=%.0fms renderCallback=%s instructions=deterministic-tests",
+            label, stage.line_arrival_known and "known" or "unknown",
+            tonumber(stage.event_delivery_uncertainty_ms) or 0,
+            tostring(stage.render_callback == true))
+        for _, row in ipairs(type(stage.rows) == "table" and stage.rows or {}) do
+            lines[#lines + 1] = string.format(
+                "[TurboGear]   A2.6 row: char=%s phase=%s state=%s reason=%s wall=%.1fms cpu=%.2fms instr=%s",
+                tostring(row.character or "?"), tostring(row.phase or "?"),
+                tostring(row.state or "?"), tostring(row.reason or ""),
+                tonumber(row.wall_ms) or 0, tonumber(row.cpu_ms) or 0,
+                row.instructions and tostring(row.instructions) or "test-only")
+        end
+    end
+    if type(ast.generated_current) == "table" then
+        local gc = ast.generated_current
+        lines[#lines + 1] = string.format("[TurboGear]   generated current: %s | stage=%s row=%d/%s rowAge=%.0fms residentAtStart=%s outcome=%s eligible=%d decided=%d age=%.0fms targeted=%d/%d warming=%d unresolved=%d maxTarget=%.2fms",
+            tostring(gc.item or "?"), tostring(gc.current_stage or "DRIVER_READY"),
+            tonumber(gc.current_row_index) or 0,
+            tostring(gc.current_row_character or "-"),
+            tonumber(gc.current_row_age_ms) or 0,
+            tostring(gc.generated_resident_at_start == true),
+            tostring(gc.outcome or "PENDING"),
+            tonumber(gc.eligible) or 0, tonumber(gc.decided) or 0,
+            tonumber(gc.age_ms) or 0, tonumber(gc.targeted_resolved) or 0,
+            tonumber(gc.targeted_attempted) or 0, #(gc.warming_rows or {}),
+            #(gc.unresolved_rows or {}),
+            tonumber(gc.targeted_max_unit_ms) or 0)
+        if #(gc.row_outcomes or {}) > 0 then
+            lines[#lines + 1] = "[TurboGear]   generated rows: " .. table.concat(gc.row_outcomes, " ")
+        end
+        lines[#lines + 1] = string.format("[TurboGear]   generated latency: enqueue=%.1fms decision=%.1fms decisionMax=%.1fms send=%s",
+            tonumber(gc.link_to_enqueue_ms) or 0,
+            tonumber(gc.decision_ms) or 0,
+            tonumber(gc.decision_max_ms) or 0,
+            gc.link_to_send_ms ~= nil and string.format("%.1fms", tonumber(gc.link_to_send_ms) or 0) or "pending")
+        add_a26_stage_lines("current", gc.stage_latency)
+    end
+    if type(ast.generated_scan) == "table" then
+        local gs = ast.generated_scan
+        lines[#lines + 1] = string.format("[TurboGear]   generated last: %s | outcome=%s age=%.0fms snaps=%d need=%d fallbackNeed=%d owned=%d noRow=%d warming=%d timeout=%d targeted=%d/%d unresolved=%d error=%d",
+            tostring(gs.item or "?"),
+            tostring(gs.outcome or "?"),
+            tonumber(gs.age_ms) or 0,
+            tonumber(gs.snaps) or 0,
+            tonumber(gs.need) or 0,
+            tonumber(gs.fallback_need) or 0,
+            tonumber(gs.owned) or 0,
+            tonumber(gs.no_row) or 0,
+            tonumber(gs.warming) or 0,
+            tonumber(gs.timeout) or 0,
+            tonumber(gs.targeted_resolved) or 0,
+            tonumber(gs.fallback_rows) or 0,
+            tonumber(gs.unresolved) or 0,
+            tonumber(gs.error) or 0)
+        lines[#lines + 1] = string.format("[TurboGear]   generated last latency: enqueue=%.1fms decision=%.1fms decisionMax=%.1fms send=%s",
+            tonumber(gs.link_to_enqueue_ms) or 0,
+            tonumber(gs.decision_ms) or 0,
+            tonumber(gs.decision_max_ms) or 0,
+            gs.link_to_send_ms ~= nil and string.format("%.1fms", tonumber(gs.link_to_send_ms) or 0) or "n/a")
+        add_a26_stage_lines("last", gs.stage_latency)
     end
     if type(ast.needs_index) == "table" then
         local ni = ast.needs_index
@@ -264,6 +454,33 @@ local function status_lines(max_peers, colorize)
                 tostring(ni.last_enqueue.key or "?"),
                 tostring(ni.last_enqueue.reason or "?"),
                 tostring(ni.last_enqueue.detail or ""))
+        end
+    end
+    do
+        local ok_ri, ri = pcall(require, 'rich_inventory')
+        if ok_ri and ri and ri.status then
+            local rs = ri.status()
+            if rs.warming then
+                local phase = tostring(rs.phase or "?")
+                if phase:find("recovery probe", 1, true) then
+                    lines[#lines + 1] = string.format("[TurboGear]   rich inventory: %s %d/%d elapsed=%.1fs",
+                        phase, tonumber(rs.item) or 0, tonumber(rs.total) or 0,
+                        tonumber(rs.elapsed) or 0)
+                else
+                    lines[#lines + 1] = string.format("[TurboGear]   rich inventory: warming phase=%s item=%d/%d elapsed=%.1fs sourceSig=%s",
+                        phase, tonumber(rs.item) or 0, tonumber(rs.total) or 0,
+                        tonumber(rs.elapsed) or 0, tostring(rs.sourceSig or ""))
+                end
+            else
+                local last = tostring(rs.lastAction or "")
+                if last ~= "" then
+                    lines[#lines + 1] = string.format("[TurboGear]   rich inventory: idle last=%s reason=%s depth=%s itemRich=%s",
+                        last, tostring(rs.reason or ""), tostring(rs.currentDepth or ""),
+                        tostring(rs.itemRich == true))
+                else
+                    lines[#lines + 1] = "[TurboGear]   rich inventory: idle"
+                end
+            end
         end
     end
     if type(ast.link_capture) == "table" then
@@ -375,6 +592,17 @@ local function build_perfdiag_lines(capture, reason)
         tonumber(CFG.announce_outbox_delay_ms) or 0)
     lines[#lines + 1] = string.format("announce role: passive=%s sharedSettings=%s",
         tostring(ast.passive == true), tostring(cfg.SharedSettingsFile or ""))
+    do
+        local vf = type(ast.validation_flags) == "table" and ast.validation_flags or {}
+        lines[#lines + 1] = string.format("announce validation: hybrid=%s generatedAuthority=%s legacyValidation=%s generatedShadow=%s shadow=%s runtimeShared=%s deepProfile=%s",
+            tostring(vf.announce_link_hybrid == true),
+            tostring(vf.generated_authority == true),
+            tostring(vf.legacy_validation == true),
+            tostring(vf.local_needs_generated_shadow == true),
+            tostring(vf.local_needs_shadow == true),
+            tostring(vf.local_needs_runtime_shared_shadow == true),
+            tostring(vf.local_needs_match_ref_deep_profile == true))
+    end
     lines[#lines + 1] = string.format("cache status: %s", tostring(cache_status.reason or ""))
     lines[#lines + 1] = string.format("cacheFile=%s", tostring(cfg.CacheFile or ""))
     lines[#lines + 1] = string.format("settingsFile=%s", tostring(cfg.SettingsFile or ""))
@@ -484,19 +712,34 @@ local function tick_perfdiag_capture()
     end
 end
 
-local function parse_item_name_id(text)
-    text = tostring(text or ""):match("^%s*(.-)%s*$") or ""
-    local item_id = 0
-    local name = text
-    local n1, id1 = text:match("^(.-)%s*%(%s*ID%s*:%s*(%d+)%s*%)%s*$")
-    if n1 and id1 then
-        name, item_id = n1, tonumber(id1) or 0
-    elseif text:match("%s(%d+)$") then
-        name, item_id = text:match("^(.-)%s(%d+)$")
-        item_id = tonumber(item_id) or 0
+local INDEX_TICK_MEANINGFUL_MS = 0.5
+local function record_index_tick_diag(label, budget_ms, active_before, tick_fn, active_after_fn)
+    if type(tick_fn) ~= "function" then return nil end
+    diag.count(label .. ".calls")
+    local t0 = os.clock()
+    local result = tick_fn()
+    local elapsed_ms = (os.clock() - t0) * 1000
+    diag.sample(label .. ".elapsed_ms", elapsed_ms)
+    local active_after = false
+    if type(active_after_fn) == "function" then
+        local ok_active, value = pcall(active_after_fn)
+        active_after = ok_active and value == true
     end
-    name = tostring(name or ""):match("^%s*(.-)%s*$") or ""
-    return name, item_id
+    if active_before == true or active_after == true or result == true then
+        diag.count(label .. ".active")
+    end
+    if elapsed_ms >= INDEX_TICK_MEANINGFUL_MS then
+        diag.count(label .. ".meaningful_elapsed")
+    end
+    budget_ms = tonumber(budget_ms) or 0
+    if budget_ms > 0 and elapsed_ms >= (budget_ms * 0.75) then
+        diag.count(label .. ".budget_pressure")
+    end
+    return result
+end
+
+local function parse_item_name_id(text)
+    return require('announce_rules').parse_item_name_id(text)
 end
 
 local function tgear_command(...)
@@ -566,8 +809,8 @@ local function tgear_command(...)
             -- Launch All Online (or UI-open group soft-wake) -- never rebroadcast
             -- turbogear_autostart from sync (launch-storm footgun).
             Engine.publish(true, "full", { reason = "manual_sync" })
-            Engine.request_all(true, { depth = "full", fastInventory = true })
-            if not quiet then print("[TurboGear] sync: full publish + requested peers") end
+            Engine.request_all(true, { depth = "lite", fastInventory = true })
+            if not quiet then print("[TurboGear] sync: lite publish + rich inventory job + requested peers") end
         end
     elseif arg == "syncbank" or arg == "banksync" then
         -- Bank-aware sync for viewer UIs: capture+save when BigBank is open on
@@ -582,7 +825,7 @@ local function tgear_command(...)
             local open = snap_mod.bank_window_open and snap_mod.bank_window_open() or false
             if open then
                 snap_mod.invalidate()
-                Engine.publish(true, "full", { reason = "manual_bank_sync", saveNow = true })
+                Engine.publish(true, "full", { reason = "manual_bank_sync", saveNow = true, allowBlockingFull = true })
                 if not quiet then print("[TurboGear] syncbank: bank captured and saved") end
             else
                 if not quiet then print("[TurboGear] syncbank: open the bank window on this character first") end
@@ -608,7 +851,7 @@ local function tgear_command(...)
             end
             if not key then
                 print("[TurboGear] requestsource: no Store row for " .. target)
-            elseif not Engine.request_source(key, true, { depth = "full" }) then
+            elseif not Engine.request_source(key, true, { depth = "full", fastInventory = true }) then
                 print("[TurboGear] requestsource: engine not ready")
             end
         end
@@ -622,7 +865,25 @@ local function tgear_command(...)
         else
             ok = Engine.publish(true, "full", { skipLockouts = true, skipLiveStats = true, reason = "manual_publish" })
         end
-        print(ok and "[TurboGear] publish: full local inventory sent" or "[TurboGear] publish: local inventory queued/cache updated")
+        print(ok and "[TurboGear] publish: lite sent; rich inventory enriching" or "[TurboGear] publish: local inventory queued/cache updated")
+    elseif arg == "richrefresh" or arg == "rich" then
+        -- Validation/manual: force cooperative rich rebuild. Never blocking full.
+        if not state.bg then
+            request_local_bg_start("richrefresh command")
+            mq.cmd('/timed 2 /squelch /tgearbg richrefresh')
+            print("[TurboGear] richrefresh: delegated to local bg responder")
+        else
+            local started = false
+            pcall(function()
+                started = require('rich_inventory').start({
+                    reason = "richrefresh",
+                    restart = true,
+                }) == true
+            end)
+            print(started
+                and "[TurboGear] richrefresh: cooperative rich job started (one item per slice)"
+                or "[TurboGear] richrefresh: job did not start (see /tgearbg diag)")
+        end
     elseif arg == "note" or arg == "dirty" or arg == "refresh" then
         -- Lightweight post-trade reconcile. UI prefers Store adopt (and may
         -- already show an optimistic give delta); bg walks bags + saves.
@@ -671,6 +932,21 @@ local function tgear_command(...)
                 require('spell_cache').mark_published(snap and snap.spells_sig)
             end)
             print("[TurboGear] spellsync: published spell book + requested peer spell books")
+        end
+    elseif arg == "donrefresh" then
+        -- DoN-tab entry freshness. Viewer UI never owns the actor mailbox, so
+        -- it sends /tgearbg donrefresh; the bg responder issues one lite
+        -- request_all (cooldown permitting). Quiet: tab switches must not chat.
+        if not state.bg then
+            request_local_bg_start("donrefresh command")
+            mq.cmd('/timed 1 /squelch /tgearbg donrefresh')
+        else
+            pcall(function()
+                local diag = require('diagnostics')
+                diag.count("don.tab_refresh_bg")
+                diag.event("don.tab_enter", "bg_request")
+            end)
+            Engine.request_all(false, { depth = "lite" })
         end
     elseif arg == "launch" or arg == "launchpeers" then
         if cfg.launch_peers() then
@@ -829,6 +1105,44 @@ local function tgear_command(...)
             .. " - click the pill; expect CLICK then popup OPEN lines.")
     elseif arg == "status" then
         for _, line in ipairs(status_lines(12, true)) do print(line) end
+    elseif arg == "lockoutdiag" then
+        -- Answers "what would THIS box publish?" -- the one thing an external
+        -- probe script cannot tell us, since it has its own module state.
+        local ok, lines = pcall(function() return require('lockouts').diagnose() end)
+        if ok and type(lines) == "table" then
+            for _, line in ipairs(lines) do print(line) end
+            local me = tostring(mq.TLO.Me and mq.TLO.Me.CleanName() or "char")
+            local path = string.format("%s/tg_lockoutdiag_%s.txt", mq.configDir, me)
+            local f = io.open(path, "w")
+            if f then
+                f:write(os.date("%Y-%m-%d %H:%M:%S"), "\n", table.concat(lines, "\n"), "\n")
+                f:close()
+                print("[TurboGear] lockoutdiag written: " .. path)
+            end
+        else
+            print("[TurboGear] lockoutdiag failed: " .. tostring(lines))
+        end
+    elseif arg == "dondiag" then
+        -- Shadow readout while the visible matrix still runs on the old path.
+        -- Reports per canonical row so acquisition, canonical mapping and the
+        -- resolver can be told apart from each other in a live test.
+        local ok, lines = pcall(function() return require('don_track').diagnose() end)
+        if ok and type(lines) == "table" then
+            for _, line in ipairs(lines) do print(line) end
+            local me = tostring(mq.TLO.Me and mq.TLO.Me.CleanName() or "char")
+            local path = string.format("%s/tg_dondiag_%s.txt", mq.configDir, me)
+            local f = io.open(path, "w")
+            if f then
+                f:write(os.date("%Y-%m-%d %H:%M:%S"), "\n", table.concat(lines, "\n"), "\n")
+                f:close()
+                print("[TurboGear] dondiag written: " .. path)
+            end
+        else
+            print("[TurboGear] dondiag failed: " .. tostring(lines))
+        end
+    elseif arg == "dontime" then
+        pcall(function() require('don_track').note_refresh_wanted() end)
+        print("[TurboGear] dontime: /tasktime reconciliation requested")
     elseif arg == "stop" then
         print("[TurboGear] stopping"); state.run = false
     elseif arg == "hide" or arg == "close" then
@@ -838,8 +1152,7 @@ local function tgear_command(...)
     elseif arg == "toggle" then
         state.show = not state.show
     elseif arg == "stock" or arg == "stockup" then
-        cfg.Settings.mainTab = "gear"
-        cfg.Settings.gearTab = "stock"
+        cfg.Settings.mainTab = "stock"
         state.show = true
         if not state.bg then request_local_bg_start("stock command") end
         print("[TurboGear] opening Stock Up")
@@ -886,6 +1199,7 @@ local function unbind_all(stop_peers)
     end
     inventory_watch.unregister()
     announcer.unregister()
+    pcall(function() cfg.flush_settings_save() end)
 end
 
 local peer_autostart = {
@@ -1037,14 +1351,31 @@ local function run_loop(inspect_tick, peer_refresh)
     local next_engine_retry = os.clock() + 5.0
     while state.run do
         local frame_t0 = os.clock()
-        if mq.doevents then mq.doevents() end
+        if mq.doevents then
+            diag.time("loop.mq_doevents", function()
+                mq.doevents()
+            end)
+        end
+        -- Zoning / charselect: keep yielding, but do not walk inventory, Task,
+        -- or DynamicZone TLOs. That is the crash-as-silent-disconnect path.
+        if not Engine.ingame() then
+            diag.sample("loop.frame_work", (os.clock() - frame_t0) * 1000)
+            mq.delay(announcer.loop_delay_ms())
+        else
         -- Bg self-heal: if the actor mailbox was busy at start, keep retrying so
         -- the responder comes alive once the mailbox frees.
         if state.bg and not Engine.ok and os.clock() >= next_engine_retry then
             Engine.init()
             next_engine_retry = os.clock() + 5.0
         end
-        Engine.heartbeat()
+        diag.time("loop.engine_heartbeat", function()
+            Engine.heartbeat()
+        end)
+        if not (state.bg == true and Engine.startup_settle_until
+            and os.clock() < Engine.startup_settle_until) then
+        -- Registers the replay-timer listener on first call, then only compares
+        -- two timestamps. Issues /tasktime solely when the UI has asked for it.
+        pcall(function() require('don_track').tick() end)
         tick_peer_autostart()
         if startup_bg_sync.pending then
             local age = cfg.bg_ready_age()
@@ -1062,7 +1393,7 @@ local function run_loop(inspect_tick, peer_refresh)
             end
         end
         if os.clock() >= announce_role_guard.next_at then
-            announce_role_guard.next_at = os.clock() + 1.0
+            announce_role_guard.next_at = os.clock() + (state.bg and 5.0 or 1.0)
             if state.bg then refresh_local_guard_state() end
             refresh_announce_role(false)
             -- The UI never receives actor snapshots; keep its Store fresh from
@@ -1106,56 +1437,98 @@ local function run_loop(inspect_tick, peer_refresh)
                 request_local_bg_start("bg responder missing")
             end
         end
-        Store.tick()
-        inventory_watch.tick()
-        if announcer.is_passive() then
-            -- UI owns [TG] emission while present, but the bg still advances the
-            -- peer needs index. Direct catalogs persist to disk (dcat_*), so the
-            -- UI driver's warm-up can load them instead of rebuilding from scratch.
-            if CFG.needs_index_enabled ~= false and CFG.needs_index_build_peers == true then
-                pcall(function()
-                    require('needs_index').tick(
-                        tonumber(CFG.needs_index_budget_bg_ms) or 25,
-                        { allow_peers = true })
-                end)
-            end
-        else
-            announcer.tick()
+        if not Engine._heavy_tlo then
+            diag.time("loop.store_tick", function()
+                Store.tick()
+            end)
         end
-        -- Always advance fleet item-index (Search / Stats / Focus). Do not leave
-        -- this only inside announcer.tick: once announce is ready that path
-        -- early-outs and never reaches item_index.tick, so Search stayed at
-        -- 0 inventory matches after get() stopped sync-rebuilding (1.2.89).
-        pcall(function()
-            local budget
-            if state.bg then
-                budget = tonumber(CFG.item_index_budget_bg_ms) or 20
-            elseif state.lean and state.lean() then
-                budget = tonumber(CFG.item_index_budget_lean_ms) or 2
-            elseif tostring(cfg.Settings.mainTab or "") == "upgrade"
-                and tostring(cfg.Settings.upgradeTab or "suggestions") == "suggestions" then
-                -- Only while looking at Upgrade > Suggestions: finish the fleet
-                -- index faster. Other tabs keep the tiny hitch-safe budget.
-                budget = tonumber(CFG.item_index_budget_suggest_ms) or 24
-            else
-                budget = tonumber(CFG.item_index_budget_ms) or 4
-            end
-            require('item_index').tick(budget)
+        pcall(function() cfg.tick_settings_save() end)
+        pcall(function() require('tabs.spells').tick() end)
+        if not state.bg then
+            pcall(function()
+                local inv = require('tabs.inventory')
+                if inv.tick then inv.tick() end
+            end)
+            pcall(function()
+                local suggest = require('tabs.suggestions')
+                if suggest.tick_cache_watch then suggest.tick_cache_watch() end
+            end)
+        end
+        diag.time("loop.inventory_watch_tick", function()
+            inventory_watch.tick()
         end)
+        if announcer.is_passive() then
+            diag.time("loop.announcer_passive", function()
+                -- Generated [TG] does not use needs_index. Only tick it when
+                -- generated authority is off (legacy enrichment).
+                if index_warm_policy.allow_needs_index_tick()
+                    and CFG.needs_index_enabled ~= false and CFG.needs_index_build_peers == true then
+                    pcall(function()
+                        local needs_index = require('needs_index')
+                        local budget = tonumber(CFG.needs_index_budget_bg_ms) or 25
+                        local opts = { allow_peers = true }
+                        local active_before = needs_index.needs_tick and needs_index.needs_tick(opts) == true
+                        record_index_tick_diag("index.needs.bg_passive", budget, active_before, function()
+                            return needs_index.tick(budget, opts)
+                        end, function()
+                            return needs_index.needs_tick and needs_index.needs_tick(opts) == true
+                        end)
+                    end)
+                end
+            end)
+        else
+            diag.time("loop.announcer_tick", function()
+                announcer.tick()
+            end)
+        end
+        -- item_index is Search/Upgrade only. Last-good rows stay published
+        -- while a requested cooperative rebuild runs; idle characters do not
+        -- tick it. [TG] never waits on this index.
+        if index_warm_policy.allow_item_index_tick() then
+            pcall(function()
+                local budget
+                if state.bg then
+                    budget = tonumber(CFG.item_index_budget_bg_ms) or 20
+                elseif state.lean and state.lean() then
+                    budget = tonumber(CFG.item_index_budget_lean_ms) or 2
+                elseif tostring(cfg.Settings.mainTab or "") == "upgrade"
+                    and tostring(cfg.Settings.upgradeTab or "suggestions") == "suggestions" then
+                    -- Only while looking at Upgrade > Suggestions: finish the fleet
+                    -- index faster. Other tabs keep the tiny hitch-safe budget.
+                    budget = tonumber(CFG.item_index_budget_suggest_ms) or 24
+                else
+                    budget = tonumber(CFG.item_index_budget_ms) or 4
+                end
+                local item_index = require('item_index')
+                local label = state.bg and "index.item.bg" or "index.item.ui"
+                local active_before = item_index.building and item_index.building() == true
+                record_index_tick_diag(label, budget, active_before, function()
+                    return item_index.tick(budget)
+                end, function()
+                    return item_index.building and item_index.building() == true
+                end)
+            end)
+        end
         -- Never let a go-loot tick error kill the bg/UI run loop (that left E3
         -- paused and the panel stuck on "sent"/"going" with no finish).
-        local okGo, goErr = pcall(function() require('go_loot').tick() end)
+        local okGo, goErr = pcall(function()
+            diag.time("loop.go_loot_tick", function()
+                require('go_loot').tick()
+            end)
+        end)
         if not okGo then
             print(string.format("\ar[TurboGear]\ax go-loot tick error: %s", tostring(goErr)))
         end
         if inspect_tick then inspect_tick() end
         tick_perfdiag_capture()
+        end
         -- Per-frame non-render work gauge (P5): total time this loop pass spent
         -- doing work, excluding the yield below. Visible in perfdiag as
         -- loop.frame_work (last/avg/max) so additive sub-tick budgets can be
         -- checked against real numbers.
         diag.sample("loop.frame_work", (os.clock() - frame_t0) * 1000)
         mq.delay(announcer.loop_delay_ms())
+        end
     end
 end
 
@@ -1184,7 +1557,16 @@ if not Engine.ok then
     end
 end
 
-local announce_ready = announcer.warm(state.bg)
+local announce_ready = false
+if state.bg then
+    announcer.set_passive(true)
+else
+    announce_ready = announcer.warm(false)
+    if announce_ready then
+        local ready_wall = (mq.gettime and (tonumber(mq.gettime()) or 0) / 1000) or os.clock()
+        process_to_listener_ready_ms = math.max(0, (ready_wall - PROCESS_STARTED_WALL_S) * 1000)
+    end
+end
 do
     local ast = announcer.status()
     print(string.format("\at[TurboGear]\ax \ag%s online:\ax \aw%s\ax | \atrole=%s\ax | engine=%s | announce=%s | %s  \aw(/tgear show|stop|status)\ax",
@@ -1201,6 +1583,12 @@ do
         end)
         if not catalog_loaded then
             print("\at[TurboGear]\ax \ayNOTICE:\ax BiS catalog not loaded yet - linked [TG] starts once catalog is resident")
+        end
+        local lua_turbo = cfg.lua_turbo_status and cfg.lua_turbo_status() or nil
+        if lua_turbo and lua_turbo.warning then
+            print(string.format("\at[TurboGear]\ax \ayNOTICE:\ax MQ2Lua Turbo Num is %d; %d is recommended for faster linked-needs warmup. Open Setup or run \ag/lua conf turboNum %d\ax.",
+                tonumber(lua_turbo.value) or 0, tonumber(lua_turbo.recommended) or 1000,
+                tonumber(lua_turbo.recommended) or 1000))
         end
     end
 end
@@ -1230,9 +1618,10 @@ if state.show then
     startup_bg_sync.pending = true
     startup_bg_sync.deadline = os.clock() + (tonumber(CFG.bg_sync_ack_deadline_s) or 5.0)
 elseif Engine.ok then
-    -- Background responder: publish our own inventory once up front; the
-    -- metadata keepalive keeps it visible. Inventory changes and requests publish fresh snapshots.
-    Engine.publish(true, "full", { skipLockouts = true, skipLiveStats = true, reason = "startup_bg_full" })
+    -- Mailbox only. Inventory / DynamicZone / catalog / sqlite at start are
+    -- how a sitting turbogear_bg silently disconnects. After settle, one
+    -- REQUEST drain may publish lite inventory.
+    Engine.startup_settle_until = os.clock() + 20.0
 end
 
 run_loop(function()

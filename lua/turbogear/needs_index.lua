@@ -12,6 +12,7 @@
 
 local M = { core = {} }
 local core = M.core
+local name_is_id_only = require('ownership_index').name_is_id_only
 
 -- ========================= pure core ==================================== --
 
@@ -160,7 +161,7 @@ function core.add_entry_needs(needs, seen_entry, rec, evaluator)
     if type(names) ~= "table" or #names == 0 then names = { entry.item } end
     for _, name in ipairs(names) do
         local alias = trim(name)
-        if alias ~= "" then
+        if alias ~= "" and not name_is_id_only(alias) then
             local need = { display = alias, entry = entry, list_id = rec.list_id }
             for _, key in ipairs({ core.norm_key(alias), core.strip_key(alias) }) do
                 if key ~= "" and not needs.by_name[key] then
@@ -169,6 +170,96 @@ function core.add_entry_needs(needs, seen_entry, rec, evaluator)
             end
         end
     end
+end
+
+--- Resumable one-entry evaluation. Match is one op; id/name commits are
+--- chunked so a 80-alias entry cannot finish in a single slice.
+function core.begin_entry_job(rec)
+    return {
+        rec = rec,
+        entry = rec and rec.entry,
+        phase = "match",
+        id_i = 1,
+        name_i = 1,
+        status = nil,
+        canonical = nil,
+        counted = false,
+    }
+end
+
+--- Advance one entry job. Returns done, ops_used, yield_reason.
+--- yield_reason is "op_limit" when max_ops stopped us, nil when the entry
+--- finished. Does not publish: caller owns the accumulator.
+function core.step_entry_job(job, evaluator, needs, seen_entry, max_ops)
+    max_ops = math.max(1, math.floor(tonumber(max_ops) or 4))
+    if type(job) ~= "table" or type(job.entry) ~= "table" then return true, 0, nil end
+    if type(needs) ~= "table" then return true, 0, nil end
+    seen_entry = type(seen_entry) == "table" and seen_entry or {}
+    local entry, rec = job.entry, job.rec
+    local ops = 0
+    if seen_entry[entry] and job.phase ~= "commit_ids" and job.phase ~= "commit_names" then
+        job.phase = "done"
+        return true, 0, nil
+    end
+    if job.phase == "match" then
+        job.status = evaluator and evaluator(entry) or "missing"
+        ops = ops + 1
+        if job.status ~= "missing" then
+            seen_entry[entry] = true
+            job.phase = "done"
+            return true, ops, nil
+        end
+        local canonical = trim(entry.item)
+        if canonical == "" then canonical = trim(rec and rec.item_name) end
+        job.canonical = canonical
+        job.phase = "commit_ids"
+        if ops >= max_ops then return false, ops, "op_limit" end
+    end
+    if job.phase == "commit_ids" then
+        local ids = entry.ids or {}
+        while job.id_i <= #ids do
+            if ops >= max_ops then return false, ops, "op_limit" end
+            local id = tonumber(ids[job.id_i])
+            job.id_i = job.id_i + 1
+            ops = ops + 1
+            if not job.counted then
+                needs.count = (tonumber(needs.count) or 0) + 1
+                job.counted = true
+            end
+            if id and id > 0 and not needs.by_id[id] then
+                needs.by_id[id] = { display = job.canonical, entry = entry, list_id = rec and rec.list_id }
+            end
+        end
+        job.phase = "commit_names"
+    end
+    if job.phase == "commit_names" then
+        local names = entry.names
+        if type(names) ~= "table" or #names == 0 then names = { entry.item } end
+        while job.name_i <= #names do
+            if ops >= max_ops then return false, ops, "op_limit" end
+            local alias = trim(names[job.name_i])
+            job.name_i = job.name_i + 1
+            ops = ops + 1
+            if not job.counted then
+                needs.count = (tonumber(needs.count) or 0) + 1
+                job.counted = true
+            end
+            if alias ~= "" and not name_is_id_only(alias) then
+                local need = { display = alias, entry = entry, list_id = rec and rec.list_id }
+                for _, key in ipairs({ core.norm_key(alias), core.strip_key(alias) }) do
+                    if key ~= "" and not needs.by_name[key] then
+                        needs.by_name[key] = need
+                    end
+                end
+            end
+        end
+        seen_entry[entry] = true
+        job.phase = "done"
+        return true, ops, nil
+    end
+    seen_entry[entry] = true
+    job.phase = "done"
+    return true, ops, nil
 end
 
 function core.build_char_needs(recs, evaluator)
@@ -419,8 +510,13 @@ local state_idx = {
     builds_started = 0,
     builds_finished = 0,
     eval_entries = 0,
+    eval_yield_budget = 0,
+    eval_yield_op_limit = 0,
+    list_yield_budget = 0,
+    list_yield_op_limit = 0,
     max_single_entry_ms = 0,
     last_build = nil,
+    paused = {},         -- char_key -> unpublished in-progress build
 }
 
 local function perf_needs_settle_on()
@@ -551,6 +647,7 @@ local function apply_settings_change(new_sig, new_parts)
         state_idx.queued = {}
         state_idx.queued_at = {}
         state_idx.building = nil
+        state_idx.paused = {}
     else
         -- Roster/visibility flap: keep already-built needs; present-prune +
         -- new_char enqueue below will catch adds/removes without restarting progress.
@@ -613,45 +710,28 @@ local function local_snapshot()
     return snapshot.cached()
 end
 
+local function needs_input_sig(snap)
+    if type(snap) ~= "table" then return "" end
+    local ok, oi = pcall(require, "ownership_index")
+    if ok and oi and oi.snapshot_cache_key then
+        local k = oi.snapshot_cache_key(snap)
+        if k ~= "" then return k end
+    end
+    return tostring(snap.spells_sig or snap.inventoryUpdated or snap.updated or "")
+end
+
 -- Resolve the snapshot + change signature for a character key.
--- CRITICAL: signatures can be 50-100KB strings (full content serializations).
--- Return them BY REFERENCE and compare with ==, which is a pointer compare on
--- interned Lua strings. Never concatenate onto them - `"store:" .. sig` was
--- re-interning ~100KB x 6 chars every scan (the steady 66-133ms scan cost in
--- Rydell's 16:37 log).
+-- Needs input is the gear ownership cache key (items/augs/bank flags),
+-- not Store.content_signatures (those include DoN / expedition lockouts / seq).
 local function char_state(char_key)
+    local snap
     if char_key == local_char_key() then
-        -- Prefer the bg-published Store snapshot + content signature: the sig
-        -- is reference-stable and free to compare, changes exactly when the
-        -- inventory really changes (delta/publish driven), and matches the
-        -- snapshot it describes. Recomputing lite_signature per fresh gather
-        -- table was Rydell's residual 133ms scan cost. The lite path remains
-        -- only as a cold-start fallback (bg not yet published).
-        local store_snap = Store.get(char_key)
-        local store_sig = Store.content_signatures and Store.content_signatures[char_key]
-        if store_snap and store_sig and store_sig ~= "" then
-            return store_snap, store_sig
-        end
-        local snap = local_snapshot() or store_snap
-        if not snap then return nil, nil end
-        local sig = local_sig_cache[snap]
-        if sig == nil then
-            local ok, computed = pcall(function()
-                return require('snapshot').lite_signature(snap)
-            end)
-            sig = ok and tostring(computed or "")
-                or tostring(snap.inventoryUpdated or snap.updated or "")
-            local_sig_cache[snap] = sig
-        end
-        return snap, sig
+        snap = Store.get(char_key) or local_snapshot()
+    else
+        snap = Store.get(char_key)
     end
-    local snap = Store.get(char_key)
     if not snap then return nil, nil end
-    local sig = Store.content_signatures and Store.content_signatures[char_key]
-    if sig == nil or sig == "" then
-        sig = tostring(snap.inventoryUpdated or snap.updated or "")
-    end
-    return snap, sig
+    return snap, needs_input_sig(snap)
 end
 
 local function visible_char_keys()
@@ -752,10 +832,136 @@ local function tombstone_char(char_key, sig)
 end
 
 -- Resumable rebuilds: starting a character captures its snapshot, signature,
--- and catalog recs; evaluation then proceeds in chunks across ticks, checking
--- the deadline every entry. The character is only committed (and only
--- becomes queryable) once fully evaluated.
-local EVAL_DEADLINE_CHECK = 1
+-- and catalog recs; evaluation then proceeds in chunks across ticks. One
+-- match/commit slice per tick (op-count + deadline). The character is only
+-- committed (and only becomes queryable) once fully evaluated.
+
+local function eval_ops_per_slice()
+    return math.max(1, math.floor(tonumber(CFG.needs_eval_ops_per_slice) or 4))
+end
+
+local function rotate_eval_slices()
+    return math.max(1, math.floor(tonumber(CFG.needs_rotate_eval_slices) or 32))
+end
+
+local function park_building()
+    local b = state_idx.building
+    if not b then return end
+    state_idx.paused = type(state_idx.paused) == "table" and state_idx.paused or {}
+    state_idx.paused[b.char_key] = b
+    state_idx.building = nil
+    local key = b.char_key
+    if not state_idx.queued[key] then
+        state_idx.queued[key] = true
+        state_idx.queued_at[key] = state_idx.queued_at[key] or b.started_at or os.clock()
+        state_idx.queue[#state_idx.queue + 1] = key
+    end
+end
+
+local function restore_paused(char_key)
+    local paused = state_idx.paused
+    if type(paused) ~= "table" then return false end
+    local b = paused[char_key]
+    if not b then return false end
+    paused[char_key] = nil
+    state_idx.building = b
+    return true
+end
+
+local function discard_stale_building(reason)
+    local b = state_idx.building
+    if not b then return false end
+    local snap, sig = char_state(b.char_key)
+    if snap and sig == b.sig then return false end
+    diag.count("needs_index.restart_new_semantic")
+    diag.event("needs_index.restart_new_semantic", tostring(b.char_key) .. " " .. tostring(reason or "stale"))
+    state_idx.building = nil
+    if snap and sig and sig ~= "" then
+        enqueue(b.char_key, "sig_change", reason or "stale_build")
+    end
+    return true
+end
+
+local function finish_char_build(b)
+    state_idx.chars[b.char_key] = {
+        name = tostring(b.snap.name or b.char_key),
+        sig = b.sig,
+        needs = b.needs,
+    }
+    state_idx.rebuilds = (state_idx.rebuilds or 0) + 1
+    state_idx.builds_finished = (state_idx.builds_finished or 0) + 1
+    local elapsed_ms = (os.clock() - (tonumber(b.started_at) or os.clock())) * 1000
+    state_idx.last_build = {
+        key = b.char_key,
+        recs = tonumber(b.rec_count) or #b.recs,
+        needs = tonumber(b.needs and b.needs.count) or 0,
+        elapsed_ms = elapsed_ms,
+    }
+    diag.sample("needs_index.build_total", elapsed_ms)
+    diag.event("needs_index.build_finish", string.format("%s recs=%d needs=%d elapsed=%.1fms",
+        tostring(b.char_key), tonumber(b.rec_count) or #b.recs,
+        tonumber(b.needs and b.needs.count) or 0, elapsed_ms))
+    state_idx.building = nil
+end
+
+local function continue_char_build(deadline)
+    local b = state_idx.building
+    if not b then return end
+    if discard_stale_building("ownership_change") then return 0 end
+    local max_ops = eval_ops_per_slice()
+    local processed = 0
+    diag.time("needs.unit.eval", function()
+    diag.time("needs_index.evaluate", function()
+        local recs, n = b.recs, #b.recs
+        if b.i > n then return end
+        local evaluator = function(entry)
+            if b.bis.snap_entry_status then
+                return b.bis.snap_entry_status(entry, b.snap)
+            end
+            local row = b.bis.evaluate_entry(entry, b.snap, { skip_live = true })
+            return row and row.status or "missing"
+        end
+        if not b.entry_job then
+            b.entry_job = core.begin_entry_job(recs[b.i])
+        end
+        local entry_t0 = os.clock()
+        local done, ops, yield_reason = core.step_entry_job(
+            b.entry_job, evaluator, b.needs, b.seen, max_ops)
+        local entry_ms = (os.clock() - entry_t0) * 1000
+        if entry_ms > (state_idx.max_single_entry_ms or 0) then
+            state_idx.max_single_entry_ms = entry_ms
+        end
+        if entry_ms >= 5 then
+            diag.sample("needs_index.entry_eval", entry_ms)
+        end
+        if ops and ops > 0 then processed = 1 end
+        if yield_reason == "op_limit" then
+            state_idx.eval_yield_op_limit = (state_idx.eval_yield_op_limit or 0) + 1
+            diag.count("needs.eval_yield_op_limit")
+        elseif deadline and os.clock() >= deadline then
+            state_idx.eval_yield_budget = (state_idx.eval_yield_budget or 0) + 1
+            diag.count("needs.eval_yield_budget")
+        end
+        if done then
+            b.entry_job = nil
+            b.i = b.i + 1
+        end
+    end)
+    end)
+    if processed > 0 then
+        state_idx.eval_entries = (state_idx.eval_entries or 0) + processed
+        diag.count("needs_index.eval_entries", processed)
+    end
+    b.slices = (tonumber(b.slices) or 0) + 1
+    if b.i > #b.recs and not b.entry_job then
+        finish_char_build(b)
+        return processed
+    end
+    if (b.slices or 0) >= rotate_eval_slices() and #(state_idx.queue or {}) > 0 then
+        park_building()
+    end
+    return processed
+end
 
 -- Returns "deferred" when the character's direct catalog is still being
 -- built asynchronously (the caller keeps the char queued and retries next
@@ -767,13 +973,36 @@ local function start_char_build(char_key, deadline)
         return tombstone_char(char_key, sig)
     end
     -- Advance the async catalog build within our budget; never build sync.
+    -- One catalog/list unit per start attempt: if the async builder was
+    -- already in progress and this call finished it, still yield so eval
+    -- does not chain onto a just-completed load/list step.
     local ok_cat, catalog = pcall(require, 'bis_catalog')
     if ok_cat and catalog and catalog.tick_direct_build then
+        local was_building = catalog.direct_build_in_progress and catalog.direct_build_in_progress()
         local idx
         diag.time("needs_index.catalog", function()
             idx = catalog.tick_direct_build(snap.class, snap.name, deadline)
         end)
         if not idx then
+            return "deferred"
+        end
+        if was_building then
+            return "deferred"
+        end
+    end
+    -- Ownership index: a cache miss used to sync-build the full snapshot
+    -- index inside this needs slice. Wait for the cooperative warmer instead.
+    local ok_own, ownership_index = pcall(require, 'ownership_index')
+    if ok_own and ownership_index and ownership_index.is_snapshot_index_cached then
+        if not ownership_index.is_snapshot_index_cached(snap) then
+            diag.time("needs.unit.snapshot_index_wait", function()
+                if ownership_index.tick_snapshot_warm then
+                    local remain_ms = (deadline - os.clock()) * 1000
+                    if remain_ms < 1 then remain_ms = 1 end
+                    if remain_ms > 8 then remain_ms = 8 end
+                    ownership_index.tick_snapshot_warm(snap, remain_ms, 2)
+                end
+            end)
             return "deferred"
         end
     end
@@ -786,13 +1015,6 @@ local function start_char_build(char_key, deadline)
     if not recs or not ok_bis or not bis then
         return tombstone_char(char_key, sig)
     end
-    -- Prewarm item/aug/spell ownership map once (same coverage as evaluate).
-    -- Avoids attributing a multi-second index build to the first entry_eval.
-    if bis.ensure_snapshot_index then
-        diag.time("needs_index.ownership_index", function()
-            bis.ensure_snapshot_index(snap)
-        end)
-    end
     state_idx.building = {
         char_key = char_key,
         snap = snap,
@@ -802,6 +1024,8 @@ local function start_char_build(char_key, deadline)
         bis = bis,
         needs = { by_id = {}, by_name = {}, count = 0 },
         seen = {},
+        entry_job = nil,
+        slices = 0,
         started_at = os.clock(),
         rec_count = #recs,
     }
@@ -810,71 +1034,6 @@ local function start_char_build(char_key, deadline)
     diag.event("needs_index.build_start", string.format("%s recs=%d%s",
         tostring(char_key), #recs, store_change_brief(char_key)))
     return true
-end
-
-local function continue_char_build(deadline)
-    local b = state_idx.building
-    if not b then return end
-    local processed = 0
-    diag.time("needs_index.evaluate", function()
-        local recs, n = b.recs, #b.recs
-        local i = b.i
-        -- snap_entry_status = evaluate_entry(skip_live) ownership rules via the
-        -- prewarmed snap index (never thinner than evaluate for owned).
-        local evaluator = function(entry)
-            if b.bis.snap_entry_status then
-                return b.bis.snap_entry_status(entry, b.snap)
-            end
-            local row = b.bis.evaluate_entry(entry, b.snap, { skip_live = true })
-            return row and row.status or "missing"
-        end
-        local diag_on = diag.is_enabled and diag.is_enabled() or false
-        while i <= n do
-            if diag_on then
-                local entry_t0 = os.clock()
-                core.add_entry_needs(b.needs, b.seen, recs[i], evaluator)
-                local entry_ms = (os.clock() - entry_t0) * 1000
-                if entry_ms > (state_idx.max_single_entry_ms or 0) then
-                    state_idx.max_single_entry_ms = entry_ms
-                end
-                if entry_ms >= 5 then
-                    diag.sample("needs_index.entry_eval", entry_ms)
-                end
-            else
-                core.add_entry_needs(b.needs, b.seen, recs[i], evaluator)
-            end
-            processed = processed + 1
-            i = i + 1
-            if i % EVAL_DEADLINE_CHECK == 0 and os.clock() >= deadline then break end
-        end
-        b.i = i
-    end)
-    if processed > 0 then
-        state_idx.eval_entries = (state_idx.eval_entries or 0) + processed
-        diag.count("needs_index.eval_entries", processed)
-    end
-    if b.i > #b.recs then
-        state_idx.chars[b.char_key] = {
-            name = tostring(b.snap.name or b.char_key),
-            sig = b.sig,
-            needs = b.needs,
-        }
-        state_idx.rebuilds = (state_idx.rebuilds or 0) + 1
-        state_idx.builds_finished = (state_idx.builds_finished or 0) + 1
-        local elapsed_ms = (os.clock() - (tonumber(b.started_at) or os.clock())) * 1000
-        state_idx.last_build = {
-            key = b.char_key,
-            recs = tonumber(b.rec_count) or #b.recs,
-            needs = tonumber(b.needs and b.needs.count) or 0,
-            elapsed_ms = elapsed_ms,
-        }
-        diag.sample("needs_index.build_total", elapsed_ms)
-        diag.event("needs_index.build_finish", string.format("%s recs=%d needs=%d elapsed=%.1fms",
-            tostring(b.char_key), tonumber(b.rec_count) or #b.recs,
-            tonumber(b.needs and b.needs.count) or 0, elapsed_ms))
-        state_idx.building = nil
-    end
-    return processed
 end
 
 local function prune_queue_to(present)
@@ -892,6 +1051,11 @@ local function prune_queue_to(present)
     state_idx.queued_at = kept_at
     if state_idx.building and not present[state_idx.building.char_key] then
         state_idx.building = nil
+    end
+    if type(state_idx.paused) == "table" then
+        for key, _ in pairs(state_idx.paused) do
+            if not present[key] then state_idx.paused[key] = nil end
+        end
     end
 end
 
@@ -956,13 +1120,22 @@ local function scan_for_changes(opts)
     end
 
     local building_key = state_idx.building and state_idx.building.char_key or nil
+    local paused = type(state_idx.paused) == "table" and state_idx.paused or {}
     local present = {}
     local keys = { local_char_key() }
     if allow_peers then keys = visible_char_keys() end
     for _, key in ipairs(keys) do
         present[key] = true
-        if key ~= building_key then
-            local _, csig = char_state(key)
+        local _, csig = char_state(key)
+        local parked = paused[key]
+        if parked then
+            if not csig or csig ~= parked.sig then
+                paused[key] = nil
+                if csig then
+                    enqueue(key, "sig_change", "paused_stale")
+                end
+            end
+        elseif key ~= building_key then
             local known = state_idx.chars[key]
             if csig and (not known or known.sig ~= csig) then
                 enqueue(key, known and "sig_change" or "new_char",
@@ -993,24 +1166,24 @@ function M.tick(budget_ms, opts)
         diag.time("needs_index.scan", function() scan_for_changes(opts) end)
         budget_ms = tonumber(budget_ms) or 6
         local deadline = os.clock() + math.max(1, budget_ms) / 1000
-        -- Budgeted, resumable work loop: continue an in-progress character
-        -- build first; start the next queued one only if budget remains.
-        -- "deferred" = that char's direct catalog is still building async;
-        -- keep it at the queue head and retry next tick.
-        while os.clock() < deadline do
-            if state_idx.building then
-                if not allow_peers and not is_local_key(state_idx.building.char_key) then break end
+        -- One heavy/uncertain unit per tick: catalog step, ownership wait,
+        -- recs capture, or one eval slice. Never chain them.
+        if state_idx.building then
+            if allow_peers or is_local_key(state_idx.building.char_key) then
                 continue_char_build(deadline)
-                if state_idx.building then break end -- budget hit mid-build
-            else
-                local char_key = pop_next_queued(allow_peers)
-                if not char_key then break end
-                local result = start_char_build(char_key, deadline)
-                if result == "deferred" then
-                    state_idx.queued[char_key] = true
-                    state_idx.queued_at[char_key] = state_idx.queued_at[char_key] or os.clock()
-                    table.insert(state_idx.queue, is_local_key(char_key) and 1 or (#state_idx.queue + 1), char_key)
-                    break
+            end
+        else
+            local char_key = pop_next_queued(allow_peers)
+            if char_key then
+                if restore_paused(char_key) then
+                    continue_char_build(deadline)
+                else
+                    local result = start_char_build(char_key, deadline)
+                    if result == "deferred" then
+                        state_idx.queued[char_key] = true
+                        state_idx.queued_at[char_key] = state_idx.queued_at[char_key] or os.clock()
+                        table.insert(state_idx.queue, is_local_key(char_key) and 1 or (#state_idx.queue + 1), char_key)
+                    end
                 end
             end
         end
@@ -1045,6 +1218,7 @@ end
 -- index cannot hide a peer's need.
 function M.ready()
     if #state_idx.queue > 0 or state_idx.building ~= nil then return false end
+    if type(state_idx.paused) == "table" and next(state_idx.paused) ~= nil then return false end
     local rec = state_idx.chars[local_char_key()]
     return rec ~= nil and rec.needs ~= nil
 end
@@ -1056,6 +1230,7 @@ end
 
 function M.group_ready()
     if #state_idx.queue > 0 or state_idx.building ~= nil then return false end
+    if type(state_idx.paused) == "table" and next(state_idx.paused) ~= nil then return false end
     return not visible_needs_work()
 end
 
@@ -1156,6 +1331,7 @@ function M.invalidate(reason)
     state_idx.queued = {}
     state_idx.queued_at = {}
     state_idx.building = nil
+    state_idx.paused = {}
     state_idx.built_at = 0
     state_idx.last_local_scan_at = 0
     state_idx.last_enqueue = nil
@@ -1199,6 +1375,10 @@ function M.status()
         builds_started = state_idx.builds_started or 0,
         builds_finished = state_idx.builds_finished or 0,
         eval_entries = state_idx.eval_entries or 0,
+        eval_yield_budget = state_idx.eval_yield_budget or 0,
+        eval_yield_op_limit = state_idx.eval_yield_op_limit or 0,
+        list_yield_budget = state_idx.list_yield_budget or 0,
+        list_yield_op_limit = state_idx.list_yield_op_limit or 0,
         max_single_entry_ms = state_idx.max_single_entry_ms or 0,
         oldest_queue_age_s = oldest_queue_age_s,
         building_key = state_idx.building and state_idx.building.char_key or nil,

@@ -323,31 +323,43 @@ function M.is_learn_item_id(item_id)
     return by_teach_id[item_id] == true or by_container_id[item_id] == true
 end
 
+-- Bags then bank, by item id (tome / scroll / pack). A tome parked in the
+-- bank still counts as "ready" (matches the snapshot path and LazBiS).
 local function live_has_item(item_id)
     item_id = tonumber(item_id)
     if not item_id or item_id <= 0 then return false end
-    local ok, cnt = pcall(function()
+    local ok, found = pcall(function()
         local mq = require('mq')
         local fi = mq.TLO.FindItem and mq.TLO.FindItem(item_id)
-        if fi and fi() then return tonumber(fi.Count()) or 0 end
-        return 0
+        if fi and fi() then return true end
+        local fb = mq.TLO.FindItemBank and mq.TLO.FindItemBank(item_id)
+        if fb and fb() then return true end
+        return false
     end)
-    return ok and (cnt or 0) > 0
+    return ok and found == true
 end
 
+-- Lean known check: display name via Book/CombatAbility first (the catalog
+-- names match the in-game names), then the learned spell id's own name only
+-- when it differs. The old path ran the full probe (Book, CombatAbility,
+-- Me.Spell, 13-query gem scan) for id AND name, then re-probed into
+-- spell_cache: ~50 TLO queries per missing row.
 local function live_knows(ability)
     local sid = tonumber(ability.learned_spell_id or ability.spell_id)
     local name = trim(ability.display_name or ability.ability or ability.name)
     local ok, mod = pcall(require, 'spell_known')
-    if not ok or not mod then return false end
-    local known = false
-    if sid and sid > 0 and mod.live_id and mod.live_id(sid) then known = true end
-    if not known and name ~= '' and mod.live and mod.live(name) then known = true end
+    if not ok or not mod or not mod.live_lean then return false end
+    local known = name ~= '' and mod.live_lean(name) or false
+    if not known and sid and sid > 0 and mod.spell_name_for_id then
+        local id_name = mod.spell_name_for_id(sid)
+        if id_name and norm(id_name) ~= norm(name) then
+            known = mod.live_lean(id_name)
+        end
+    end
     if known then
         pcall(function()
             local SC = require('spell_cache')
-            if sid and sid > 0 and SC.probe_id then SC.probe_id(sid) end
-            if name ~= '' and SC.probe_name then SC.probe_name(name) end
+            if SC.note_known then SC.note_known(name, sid) end
         end)
     end
     return known
@@ -362,17 +374,57 @@ local function live_has_teaching(ability)
     return false
 end
 
+-- Live-result memo. The DoN Spells tab and the self BiS column call
+-- try_live_match from draw code; without a memo that was a full live probe
+-- per ability per FRAME. Results live LIVE_TTL_S; expired rows re-probe at
+-- most LIVE_REFRESH_PER_WINDOW per LIVE_WINDOW_S so renewals spread across
+-- frames instead of all landing in one. opts.fresh (peer bis_search, already
+-- request-rate-limited) always probes and refreshes the memo.
+local LIVE_TTL_S = 3.0
+local LIVE_WINDOW_S = 0.05
+local LIVE_REFRESH_PER_WINDOW = 4
+local live_memo = {}
+local live_win_start, live_win_used = -1, 0
+local live_clock = os.clock
+
+function M.invalidate_live()
+    live_memo = {}
+end
+
+function M._set_live_clock_for_tests(fn)
+    live_clock = fn or os.clock
+    live_memo = {}
+    live_win_start, live_win_used = -1, 0
+end
+
 --- Live match (FindItem + Book/CombatAbility). Same return shape as try_match.
-function M.try_live_match(entry)
+function M.try_live_match(entry, opts)
     local hit = M.lookup_entry(entry)
     if not hit or hit.kind ~= 'ability' then return false, nil, nil end
     local ability = hit.row
+    local memo_key = norm(ability.display_name) .. "\31" .. tostring(ability.learned_spell_id or "")
+    local now = live_clock()
+    local memo = live_memo[memo_key]
+    if memo and not (opts and opts.fresh) then
+        if (now - memo.at) <= LIVE_TTL_S then return true, memo.match, memo.status end
+        if (now - live_win_start) > LIVE_WINDOW_S then
+            live_win_start, live_win_used = now, 0
+        end
+        if live_win_used >= LIVE_REFRESH_PER_WINDOW then
+            return true, memo.match, memo.status -- stale for a frame or two
+        end
+        live_win_used = live_win_used + 1
+    end
+    -- Short-circuit in status priority order: known -> ready -> pack.
     local known = live_knows(ability)
-    local teach = live_has_teaching(ability)
+    local teach = (not known) and live_has_teaching(ability) or false
     local pack = false
-    local cid = tonumber(ability.source_container_item_id)
-    if cid and cid > 0 and live_has_item(cid) then pack = true end
+    if not known and not teach then
+        local cid = tonumber(ability.source_container_item_id)
+        if cid and cid > 0 and live_has_item(cid) then pack = true end
+    end
     local match, status = resolve_status(ability, known, teach, pack)
+    live_memo[memo_key] = { at = now, match = match, status = status }
     return true, match, status
 end
 

@@ -7,8 +7,9 @@
 package.path = 'lua/turbogear/?.lua;lua/turbogear/?/init.lua;lua/tests/helpers/?.lua;' .. package.path
 package.preload['lsqlite3'] = function() return require('lsqlite3_ffi_shim') end
 
-local DB   = "/tmp/tg_sqlite_backend_test.db"
-local PICK = "/tmp/tg_sqlite_backend_test_pickle.lua"
+local tmpdir = require('tmpdir')
+local DB   = tmpdir.path("tg_sqlite_backend_test.db")
+local PICK = tmpdir.path("tg_sqlite_backend_test_pickle.lua")
 local function wipe() for _, p in ipairs({DB, DB.."-wal", DB.."-shm", PICK}) do os.remove(p) end end
 wipe()
 

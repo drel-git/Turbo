@@ -104,10 +104,6 @@ local function input_text_hint(id, hint, value)
     return ImGui.InputText(id, value or "") or ""
 end
 
-local function table_col_text_centered(color, text, col_w)
-    views.col_text_centered(color, text, col_w or column_width_now())
-end
-
 local function column_width_now()
     if ImGui.GetColumnWidth then
         local w = ImGui.GetColumnWidth()
@@ -115,6 +111,16 @@ local function column_width_now()
         return tonumber(w)
     end
     return nil
+end
+
+local function table_col_text_centered(color, text, col_w)
+    views.col_text_centered(color, text, col_w or column_width_now())
+end
+
+local function draw_open_icon()
+    if not theme.draw_unlock_icon(Theme.online or Theme.green, 12.0, true) then
+        table_col_text_centered(Theme.online or Theme.green, "Open", column_width_now())
+    end
 end
 
 local function draw_header_cell(snap, counts)
@@ -145,16 +151,16 @@ end
 
 local function draw_lockout_cell(snap, category, entry)
     if not snap then
-        ImGui.TextDisabled("-")
+        table_col_text_centered(Theme.dim, "-", column_width_now())
         return
     end
     if not lockouts.entry_applies_to(entry, snap.name) then
-        ImGui.TextDisabled("-")
+        table_col_text_centered(Theme.dim, "-", column_width_now())
         return
     end
     local data = lockouts.read_from_snap(snap)
     if not data then
-        col_text(Theme.amber, "?")
+        table_col_text_centered(Theme.amber, "?", column_width_now())
         if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
             ImGui.SetTooltip("No lockout data yet — Sync Now or wait for peer snapshot.")
         end
@@ -162,22 +168,22 @@ local function draw_lockout_cell(snap, category, entry)
     end
     local state = lockouts.cell_status(snap, category, entry.name)
     if state.locked then
-        col_text(Theme.missing or Theme.brick, "Locked")
+        table_col_text_centered(Theme.amber or Theme.gold, tostring(state.timer or "Locked"), column_width_now())
         if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
             ImGui.SetTooltip("Available in: " .. tostring(state.timer or "?"))
         end
     elseif state.status == "missing_custom" then
-        col_text(Theme.online or Theme.green, "Open")
+        draw_open_icon()
         if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
             ImGui.SetTooltip("No active lockout found — character hasn't done this yet or timer has expired.")
         end
     elseif state.status == "expired" then
-        col_text(Theme.online or Theme.green, "Open")
+        draw_open_icon()
         if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
             ImGui.SetTooltip("Cached timer expired.")
         end
     else
-        col_text(Theme.online or Theme.green, "Open")
+        draw_open_icon()
     end
 end
 
@@ -200,17 +206,17 @@ local function draw_lockout_cell_compact(snap, category, entry)
     end
     local state = lockouts.cell_status(snap, category, entry.name)
     if state.locked then
-        views.col_text_centered(Theme.missing or Theme.brick, "L", column_width_now())
+        views.col_text_centered(Theme.amber or Theme.gold, tostring(state.timer or "Locked"), column_width_now())
         if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
-            ImGui.SetTooltip("Locked\nAvailable in: " .. tostring(state.timer or "?"))
+            ImGui.SetTooltip("Available in: " .. tostring(state.timer or "?"))
         end
     elseif state.status == "missing_custom" then
-        views.col_text_centered(Theme.online or Theme.green, "O", column_width_now())
+        draw_open_icon()
         if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
             ImGui.SetTooltip("No active lockout found — character hasn't done this yet or timer has expired.")
         end
     else
-        views.col_text_centered(Theme.online or Theme.green, "O", column_width_now())
+        draw_open_icon()
     end
 end
 
@@ -248,7 +254,9 @@ local function aggregate_counts(counts_by_key)
 end
 
 local function draw_add_lockout_panel()
-    if toggle_button(show_add_panel and "Add Lockout: ON" or "Add Lockout: OFF", show_add_panel) then
+    local add_color = show_add_panel and (Theme.customizeActive or Theme.customize or Theme.steel)
+        or (Theme.customize or Theme.steel)
+    if themed_button("Add Your Own Custom Lockouts##lo_add_custom", add_color) then
         show_add_panel = not show_add_panel
     end
     if not show_add_panel then return end
@@ -540,17 +548,17 @@ function M.draw()
     ImGui.SameLine()
     if toggle_button(Settings.lockoutsLockedOnly and "Locked Only: ON##lo_locked_only" or "Locked Only: OFF##lo_locked_only", Settings.lockoutsLockedOnly == true) then
         Settings.lockoutsLockedOnly = not (Settings.lockoutsLockedOnly == true)
-        SaveSettings()
+        if cfg.MarkSettingsDirty then cfg.MarkSettingsDirty("lockouts_ui") else SaveSettings() end
     end
     ImGui.SameLine()
     if toggle_button(Settings.lockoutsCompact and "Compact: ON##lo_compact" or "Compact: OFF##lo_compact", Settings.lockoutsCompact == true) then
         Settings.lockoutsCompact = not (Settings.lockoutsCompact == true)
-        SaveSettings()
+        if cfg.MarkSettingsDirty then cfg.MarkSettingsDirty("lockouts_ui") else SaveSettings() end
     end
     ImGui.SameLine()
     if toggle_button(Settings.lockoutsShowHidden and "Show Hidden: ON##lo_showhidden" or "Show Hidden: OFF##lo_showhidden", Settings.lockoutsShowHidden == true) then
         Settings.lockoutsShowHidden = not (Settings.lockoutsShowHidden == true)
-        SaveSettings()
+        if cfg.MarkSettingsDirty then cfg.MarkSettingsDirty("lockouts_ui") else SaveSettings() end
     end
     ImGui.Spacing()
 
@@ -578,6 +586,7 @@ function M.draw()
     col_text(Theme.dim, string.format("%d locked / %d open across %d character%s%s",
         total_locked, total_open, #keys, #keys == 1 and "" or "s",
         missing_snaps > 0 and string.format(" | %d missing snapshot%s", missing_snaps, missing_snaps == 1 and "" or "s") or ""))
+    col_text(Theme.dim, "Tip: Click section headers to expand or collapse lockout groups.")
 
     local cols = 1 + #keys
     local extra = 0
@@ -607,7 +616,8 @@ function M.draw()
             for _, cat in ipairs(lockouts.categories_for_ui()) do
                 ImGui.TableNextRow()
                 ImGui.TableSetColumnIndex(0)
-                local label = (category_collapsed(cat) and "+ " or "- ") .. cat
+                local cat_label = lockout_ref.category_label and lockout_ref.category_label(cat) or cat
+                local label = (category_collapsed(cat) and "[+] " or "[-] ") .. cat_label
                 local pushed = false
                 if ImGui.PushStyleColor and ImGuiCol and ImGuiCol.Text then
                     local c = Theme.category or Theme.cyan
@@ -632,6 +642,9 @@ function M.draw()
                         col_text(Theme.dim, "(" .. row_label .. ")")
                     else
                         col_text(Theme.slot or Theme.dim, row_label)
+                    end
+                    if entry.zone and entry.zone ~= "" and ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
+                        ImGui.SetTooltip(tostring(entry.zone))
                     end
                     -- Right-click context menu for all entries
                     if ImGui.BeginPopupContextItem then

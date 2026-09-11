@@ -1,7 +1,9 @@
 -- TurboGear/snapshot.lua
 -- Builds this box's own snapshot (equipped + bags + bank, each item with augs).
--- Lite gathers skip stats/focus meta (heartbeat + bg default). Full gathers
--- run on Sync Now, startup, and Stats/Focus/Suggest tabs.
+-- Lite gathers skip stats/focus meta (heartbeat + bg default). Full item
+-- stats are filled by cooperative rich_inventory enrichment (one item per
+-- slice). Blocking depth=full walks remain only for bank-open capture and
+-- inventory_watch change publishes.
 
 local mq       = require('mq')
 local cfg      = require('config')
@@ -29,6 +31,36 @@ end
 
 local M = {}
 
+--- Give a shallow-copied snapshot a new seq so peer cache ingest (`is_newer`)
+--- will accept it. Lockout/DoN-only publishes reuse a cached inventory snap
+--- whose seq has not moved; without this the receiving bg persists the new
+--- lockout map and the viewer rejects the disk row as "not newer".
+function M.stamp_for_publish(snap)
+    if type(snap) ~= "table" then return snap end
+    snap.seq = next_seq()
+    snap.updated = os.time()
+    return snap
+end
+
+local function resolve_self_authority()
+    local snap = M.cached()
+    if type(snap) == "table" and snap.name and snap.name ~= "?" then
+        return snap, "cached"
+    end
+    pcall(function()
+        local store_mod = require('store')
+        local Store = store_mod and store_mod.Store
+        local key = store_mod and store_mod.my_key and store_mod.my_key()
+        if Store and Store.get and key then
+            snap = Store.get(key)
+        end
+    end)
+    if type(snap) == "table" and snap.name and snap.name ~= "?" then
+        return snap, "store"
+    end
+    return nil, nil
+end
+
 local FULL_TABS = { stats = true, focus = true, suggestions = true, live = true }
 
 local self_lite_snap, self_lite_time = nil, 0
@@ -54,6 +86,30 @@ local function shallow_copy_snap(src)
     return dst
 end
 
+-- Metadata-only publication: clone current inventory authority and overlay
+-- caller-owned fields. Never walks equipped/bags/cursor/bank. Does not bump
+-- inventoryUpdated — lockout/DoN changes are not a fresh inventory observation.
+function M.prepare_metadata_publish(updates, opts)
+    updates = type(updates) == "table" and updates or {}
+    opts = type(opts) == "table" and opts or {}
+    local src, source = resolve_self_authority()
+    if type(src) ~= "table" then return nil end
+    local out = shallow_copy_snap(src)
+    if updates.lockouts ~= nil then out.lockouts = updates.lockouts end
+    if updates.don ~= nil then out.don = updates.don end
+    M.stamp_for_publish(out)
+    local reason = tostring(opts.reason or "metadata")
+    diag.count("snapshot.metadata_publish")
+    diag.count("snapshot.inventory_carry_forward")
+    diag.event("snapshot.metadata_publish", string.format(
+        "reason=%s source=%s eq=%d bag=%d bank=%d bankPreserved=%s inventoryUpdated=%s",
+        reason, tostring(source or "?"),
+        #(out.equipped or {}), #(out.bags or {}), #(out.bank or {}),
+        tostring(out.bankPreserved == true),
+        tostring(out.inventoryUpdated or "-")))
+    return out
+end
+
 local function normalize_opts(arg)
     if type(arg) == "boolean" then
         return { force = arg, depth = arg and "full" or nil }
@@ -65,6 +121,12 @@ end
 function M.depth_for_settings()
     local tab = Settings.mainTab or "bis"
     if tab == "inspect" then tab = Settings.inspectTab or "stats" end
+    if tab == "gear" then
+        local gear = tostring(Settings.gearTab or "inventory")
+        if gear == "stats" then tab = "stats"
+        elseif gear == "focus" then tab = "focus"
+        elseif gear == "effects" then tab = "live" end
+    end
     if tab == "upgrade" then tab = Settings.upgradeTab or "suggestions" end
     if FULL_TABS[tab] then return "full" end
     return "lite"
@@ -73,6 +135,90 @@ end
 function M.cached()
     if self_full_snap then return self_full_snap end
     return self_lite_snap
+end
+
+-- Locate the live TLO for a lite snapshot row using already-known coordinates.
+-- Does not re-walk empty slots.
+function M.locate_inventory_tlo(row)
+    if type(row) ~= "table" then return nil end
+    local loc = tostring(row.location or "")
+    local slotid = row.slotid
+    local slotname = row.slotname
+    local function valid(it)
+        local ok, exists = pcall(function() return it and it() end)
+        return ok and exists and true or false
+    end
+    if loc == "Equipped" then
+        local item
+        if tonumber(slotid) == -101 then
+            item = mq.TLO.Me.Inventory("food")
+        elseif tonumber(slotid) == -102 then
+            item = mq.TLO.Me.Inventory("drink")
+        elseif slotid ~= nil then
+            item = mq.TLO.Me.Inventory(slotid)
+        end
+        if valid(item) then return item end
+        return nil
+    end
+    if loc == "Bags" then
+        if tostring(slotname) == "Cursor" then
+            local cur = mq.TLO.Cursor
+            if valid(cur) then return cur end
+            return nil
+        end
+        if tostring(slotname) == "Bag" and slotid ~= nil then
+            local pack = mq.TLO.Me.Inventory(slotid)
+            if valid(pack) then return pack end
+            return nil
+        end
+        if slotid ~= nil then
+            local pack = mq.TLO.Me.Inventory(slotid)
+            local idx = tonumber(slotname)
+            if pack and idx then
+                local it = pack.Item(idx)
+                if valid(it) then return it end
+            end
+        end
+    end
+    return nil
+end
+
+-- Cheap food/drink presence for cooperative full-equivalence (lite skips these).
+function M.food_drink_locator_rows()
+    local extra = {}
+    local slots = {
+        { key = "food", name = "Food", slotid = -101 },
+        { key = "drink", name = "Drink", slotid = -102 },
+    }
+    for _, slot in ipairs(slots) do
+        local item = mq.TLO.Me.Inventory(slot.key)
+        local ok, exists = pcall(function() return item and item() end)
+        if ok and exists then
+            local id, name = 0, slot.name
+            pcall(function() id = tonumber(item.ID() or 0) or 0 end)
+            pcall(function() name = tostring(item.Name() or slot.name) end)
+            extra[#extra + 1] = {
+                location = "Equipped",
+                where = slot.name,
+                slotid = slot.slotid,
+                slotname = slot.name,
+                id = id,
+                name = name,
+                depth = "lite",
+            }
+        end
+    end
+    return extra
+end
+
+-- Enrich one lite row via make_item(full) at its known slot. Reuses
+-- location/where/slotid/slotname so identity queries are not re-derived.
+function M.enrich_lite_row(row)
+    local item = M.locate_inventory_tlo(row)
+    if not item then return nil end
+    return diag.time("snapshot.item.full", function()
+        return make_item(item, row.location, row.where, row.slotid, row.slotname)
+    end)
 end
 
 -- Phase 2: worn-slot signature. ~23 Inventory(id).ID() reads — no make_item,
@@ -312,16 +458,98 @@ function M.invalidate()
     pcall(function() items.clear_meta_cache() end)
 end
 
---- Attach spells to snap: reuse module cache when spell_cache signature matches
---- (ID-level known-set); otherwise gather once and store.
+--- Seed in-memory spell maps from persisted/restored authority. Missing sig
+--- is not seeded (unknown, not empty).
+function M.seed_spell_authority(snap)
+    local okP, plan = pcall(require, 'spells_startup')
+    if not okP or not plan or not plan.snapshot_is_usable or not plan.snapshot_is_usable(snap) then
+        return false
+    end
+    spell_cache_store = {
+        class = snap.class,
+        spells = snap.spells,
+        ids = snap.spell_ids,
+        sig = snap.spells_sig,
+    }
+    return true
+end
+
+local function spell_authority_usable(src)
+    local okP, plan = pcall(require, 'spells_startup')
+    return okP and plan and plan.snapshot_is_usable and plan.snapshot_is_usable(src)
+end
+
+--- When this gather did not live-scan spells, copy persisted/cached maps onto
+--- the snap so ownership sees the same spells_sig. Never synthesizes empty.
+local function apply_cached_spell_authority(snap, cached)
+    if type(snap) ~= "table" then return snap end
+    if type(snap.spells_sig) == "string" and snap.spells_sig ~= "" then
+        return snap
+    end
+    local src = nil
+    if spell_authority_usable({
+        class = spell_cache_store.class,
+        spells = spell_cache_store.spells,
+        spell_ids = spell_cache_store.ids,
+        spells_sig = spell_cache_store.sig,
+    }) then
+        src = {
+            spells = spell_cache_store.spells,
+            spell_ids = spell_cache_store.ids,
+            spells_sig = spell_cache_store.sig,
+        }
+    elseif spell_authority_usable(cached) then
+        src = cached
+    else
+        pcall(function()
+            local okC, SC = pcall(require, 'spell_cache')
+            if okC and SC and SC.ready and SC.ready() and SC.last_maps then
+                local spells, ids, sig = SC.last_maps()
+                if type(sig) == "string" and sig ~= "" then
+                    src = { spells = spells, spell_ids = ids, spells_sig = sig }
+                end
+            end
+        end)
+        if not src then
+            pcall(function()
+                local store_mod = require('store')
+                local key = store_mod.my_key and store_mod.my_key() or nil
+                local s = key and store_mod.Store and store_mod.Store.get and store_mod.Store.get(key) or nil
+                if spell_authority_usable(s) then src = s end
+            end)
+        end
+    end
+    if not src then return snap end
+    snap.spells = src.spells
+    snap.spell_ids = src.spell_ids
+    snap.spells_sig = src.spells_sig
+    return snap
+end
+
+M._apply_cached_spell_authority = apply_cached_spell_authority
+
+--- Attach spells to snap: reuse module cache / restored spell_cache maps when
+--- the signature matches; live gather only when no usable authority exists.
 local function attach_spells(snap)
-    local spell_snap = require('spell_snapshot')
+    diag.time("snapshot.spells.prepare", function() end)
     local className = snap.class
+    local function adopt(spells, ids, sig, hit_kind)
+        snap.spells = spells
+        snap.spell_ids = ids
+        snap.spells_sig = sig
+        spell_cache_store = {
+            class = className,
+            spells = spells,
+            ids = ids,
+            sig = sig,
+        }
+        diag.count(hit_kind)
+        diag.time("snapshot.spells.finalize", function() end)
+    end
     if perf_snapshot_cache_on()
-        and spell_cache_store.spells
-        and spell_cache_store.class == className
         and type(spell_cache_store.sig) == "string"
-        and spell_cache_store.sig ~= "" then
+        and spell_cache_store.sig ~= ""
+        and (spell_cache_store.class == className or spell_cache_store.class == nil) then
         local reuse = false
         local okC, SC = pcall(require, 'spell_cache')
         if okC and SC and SC.ready and SC.ready() and SC.signature then
@@ -332,30 +560,131 @@ local function attach_spells(snap)
             reuse = true
         end
         if reuse then
-            snap.spells = spell_cache_store.spells
-            snap.spell_ids = spell_cache_store.ids
-            snap.spells_sig = spell_cache_store.sig
+            adopt(spell_cache_store.spells, spell_cache_store.ids, spell_cache_store.sig, "snapshot.spells.cache_hit")
             diag.count("snapshot.spells_cache_hit")
             return
         end
     end
+    do
+        local okC, SC = pcall(require, 'spell_cache')
+        if okC and SC and SC.ready and SC.ready() and SC.last_maps then
+            local spells, ids, sig = SC.last_maps()
+            if type(sig) == "string" and sig ~= "" then
+                adopt(spells, ids, sig, "snapshot.spells.cache_restore")
+                diag.count("snapshot.spells_cache_hit")
+                return
+            end
+        end
+    end
+    diag.count("snapshot.spells.live_refresh_started")
+    diag.event("snapshot.spells.live_refresh_started", "class=" .. tostring(className or ""))
+    local spell_snap = require('spell_snapshot')
     local spells, spell_ids = spell_snap.gather(className)
     local sig = spell_snap.signature(spells, spell_ids)
-    snap.spells = spells
-    snap.spell_ids = spell_ids
-    snap.spells_sig = sig
-    spell_cache_store = {
-        class = className,
-        spells = spells,
-        ids = spell_ids,
-        sig = sig,
-    }
+    adopt(spells, spell_ids, sig, "snapshot.spells.live_refresh_completed")
+    diag.event("snapshot.spells.live_refresh_completed", "class=" .. tostring(className or ""))
     diag.count("snapshot.spells_cache_miss")
 end
 
 local function append_item(snap, list_key, item, location, where, slotid, slotname, depth)
     local mk = depth == "full" and make_item or make_item_lite
-    snap[list_key][#snap[list_key] + 1] = mk(item, location, where, slotid, slotname)
+    local label = depth == "full" and "snapshot.item.full" or "snapshot.item.lite"
+    snap[list_key][#snap[list_key] + 1] = diag.time(label, function()
+        return mk(item, location, where, slotid, slotname)
+    end)
+end
+
+-- Cooperative lite equipped/bags/cursor walk. Matches build_snap(depth=lite)
+-- inventory loops exactly, except bank is never scanned. inventory_probe uses
+-- this so recovery cannot drift from canonical lite row semantics.
+function M.begin_lite_inventory_walk()
+    return { phase = "equipped", i = 1, inv = 23, inner = -1, bag_slots = 0, pack_name = "" }
+end
+
+local function tlo_exists(item)
+    local ok, exists = pcall(function() return item and item() end)
+    return ok and exists and true or false
+end
+
+-- One slot-check per call. Returns occupied lite row or nil, plus done.
+-- nil + not done = empty slot (caller may continue until occupied or budget).
+function M.step_lite_inventory_walk(st)
+    if type(st) ~= "table" then return nil, true end
+    if st.phase == "equipped" then
+        if st.i > #inventory_slots then
+            st.phase = "bags"
+            st.inv = 23
+            st.inner = -1
+            return nil, false
+        end
+        local slot = inventory_slots[st.i]
+        st.i = (tonumber(st.i) or 1) + 1
+        local item = mq.TLO.Me.Inventory(slot.id)
+        if tlo_exists(item) then
+            local row = nil
+            pcall(function()
+                row = make_item_lite(item, "Equipped", slot.name, slot.id, slot.name)
+            end)
+            if type(row) == "table" then return row, false end
+        end
+        return nil, false
+    end
+    if st.phase == "bags" then
+        if st.inv > 34 then
+            st.phase = "cursor"
+            return nil, false
+        end
+        if st.inner < 0 then
+            local pack = mq.TLO.Me.Inventory(st.inv)
+            if not tlo_exists(pack) then
+                st.inv = st.inv + 1
+                return nil, false
+            end
+            local bag_n = st.inv - 22
+            st.pack_name = tostring((pack.Name and pack.Name()) or ("Bag" .. bag_n))
+            st.bag_slots = tonumber(pack.Container and pack.Container()) or 0
+            st.inner = 0
+            local row = nil
+            pcall(function()
+                row = make_item_lite(pack, "Bags", "Inventory Bag " .. tostring(bag_n), st.inv, "Bag")
+            end)
+            if type(row) == "table" then return row, false end
+            return nil, false
+        end
+        if st.inner >= (tonumber(st.bag_slots) or 0) then
+            st.inv = st.inv + 1
+            st.inner = -1
+            return nil, false
+        end
+        st.inner = st.inner + 1
+        local pack = mq.TLO.Me.Inventory(st.inv)
+        local it = nil
+        if tlo_exists(pack) and pack.Item then
+            it = pack.Item(st.inner)
+        end
+        if tlo_exists(it) then
+            local row = nil
+            local where = tostring(st.pack_name or ("Bag" .. tostring(st.inv - 22))) .. " #" .. tostring(st.inner)
+            pcall(function()
+                row = make_item_lite(it, "Bags", where, st.inv, st.inner)
+            end)
+            if type(row) == "table" then return row, false end
+        end
+        return nil, false
+    end
+    if st.phase == "cursor" then
+        st.phase = "done"
+        local cur = mq.TLO.Cursor
+        if tlo_exists(cur) then
+            local row = nil
+            pcall(function()
+                row = make_item_lite(cur, "Bags", "Cursor", nil, "Cursor")
+            end)
+            if type(row) == "table" then return row, false end
+        end
+        return nil, false
+    end
+    return nil, true
 end
 
 local function try_tlo_value(fn)
@@ -659,6 +988,19 @@ function M.decode_wallet_e3(text)
     }
 end
 
+--- How a snapshot asks for lockouts.
+---
+--- Local Sync Now still bypasses the cache so a forced self-publish ships a
+--- fresh lockout map. Peer REQUEST must not: that drain already walks inventory,
+--- and re-reading DynamicZone on the same tick is the bg-only crash path.
+--- The lockout watcher still publishes when timers actually change.
+--- Window fallback stays off -- snapshots run on background boxes.
+local function lockout_gather_opts(opts)
+    local bypass = opts.force == true and opts.skipLockoutBypass ~= true
+    return { bypass_cache = bypass, allow_window_fallback = false }
+end
+M._lockout_gather_opts = lockout_gather_opts
+
 local function build_snap(depth, opts)
     opts = opts or {}
     local now = os.time()
@@ -684,7 +1026,9 @@ local function build_snap(depth, opts)
         bankReason = bank_open and "live" or "bank window closed; cached bank preserved if available",
     }
     -- Wallet extras (cheap TLOs + FindItemCount; not a bag walk).
-    fill_wallet_fields(snap)
+    diag.time("snapshot.wallet", function()
+        fill_wallet_fields(snap)
+    end)
     -- One pcall wraps the whole inventory walk. On failure the snap may be
     -- empty or only partially filled — mark incomplete so gather/Store keep
     -- prior equipped/bags instead of publishing a wipe.
@@ -692,61 +1036,65 @@ local function build_snap(depth, opts)
         diag.context("snapshot.inventory", string.format("depth=%s bankOpen=%s scanBank=%s",
             tostring(depth), tostring(bank_open == true), tostring(bank_open == true)))
         diag.time("snapshot.inventory", function()
-            for _, slot in ipairs(inventory_slots) do
-                local item = mq.TLO.Me.Inventory(slot.id)
-                if item and item() then
-                    append_item(snap, "equipped", item, "Equipped", slot.name, slot.id, slot.name, depth)
-                end
-            end
-            if depth == "full" then
-                local extra_slots = {
-                    { key = "food", name = "Food", slotid = -101 },
-                    { key = "drink", name = "Drink", slotid = -102 },
-                }
-                for _, slot in ipairs(extra_slots) do
-                    local item = mq.TLO.Me.Inventory(slot.key)
+            diag.time("snapshot.inventory.equipped", function()
+                for _, slot in ipairs(inventory_slots) do
+                    local item = mq.TLO.Me.Inventory(slot.id)
                     if item and item() then
-                        append_item(snap, "equipped", item, "Equipped", slot.name, slot.slotid, slot.name, depth)
+                        append_item(snap, "equipped", item, "Equipped", slot.name, slot.id, slot.name, depth)
                     end
                 end
-            end
-            for inv = 23, 34 do
-                local pack = mq.TLO.Me.Inventory(inv)
-                if pack and pack() then
-                    append_item(snap, "bags", pack, "Bags", "Inventory Bag " .. tostring(inv - 22), inv, "Bag", depth)
-                    local slots = tonumber(pack.Container()) or 0
-                    for i = 1, slots do
-                        local it = pack.Item(i)
-                        if it and it() then
-                            append_item(snap, "bags", it, "Bags", (pack.Name() or ("Bag" .. (inv - 22))) .. " #" .. i, inv, i, depth)
+                if depth == "full" then
+                    local extra_slots = {
+                        { key = "food", name = "Food", slotid = -101 },
+                        { key = "drink", name = "Drink", slotid = -102 },
+                    }
+                    for _, slot in ipairs(extra_slots) do
+                        local item = mq.TLO.Me.Inventory(slot.key)
+                        if item and item() then
+                            append_item(snap, "equipped", item, "Equipped", slot.name, slot.slotid, slot.name, depth)
                         end
                     end
                 end
-            end
-            -- Item on cursor is owned (carried) — peer_request mid-swap was
-            -- publishing eq/bags without Face Guard and BiS went red.
-            do
+            end)
+            diag.time("snapshot.inventory.bags", function()
+                for inv = 23, 34 do
+                    local pack = mq.TLO.Me.Inventory(inv)
+                    if pack and pack() then
+                        append_item(snap, "bags", pack, "Bags", "Inventory Bag " .. tostring(inv - 22), inv, "Bag", depth)
+                        local slots = tonumber(pack.Container()) or 0
+                        for i = 1, slots do
+                            local it = pack.Item(i)
+                            if it and it() then
+                                append_item(snap, "bags", it, "Bags", (pack.Name() or ("Bag" .. (inv - 22))) .. " #" .. i, inv, i, depth)
+                            end
+                        end
+                    end
+                end
+            end)
+            diag.time("snapshot.inventory.cursor", function()
                 local cur = mq.TLO.Cursor
                 if cur and cur() then
                     append_item(snap, "bags", cur, "Bags", "Cursor", nil, "Cursor", depth)
                     diag.count("snapshot.cursor_carried")
                 end
-            end
+            end)
             if bank_open then
-                for b = 1, CFG.max_bank do
-                    local bk = mq.TLO.Me.Bank(b)
-                    if bk and bk() then
-                        append_item(snap, "bank", bk, "Bank", "Bank " .. b, b, 0, depth)
-                        if (bk.Container() or 0) > 0 then
-                            for i = 1, bk.Container() do
-                                local it = bk.Item(i)
-                                if it and it() then
-                                    append_item(snap, "bank", it, "Bank", (bk.Name() or ("Bank" .. b)) .. " #" .. i, b, i, depth)
+                diag.time("snapshot.inventory.bank", function()
+                    for b = 1, CFG.max_bank do
+                        local bk = mq.TLO.Me.Bank(b)
+                        if bk and bk() then
+                            append_item(snap, "bank", bk, "Bank", "Bank " .. b, b, 0, depth)
+                            if (bk.Container() or 0) > 0 then
+                                for i = 1, bk.Container() do
+                                    local it = bk.Item(i)
+                                    if it and it() then
+                                        append_item(snap, "bank", it, "Bank", (bk.Name() or ("Bank" .. b)) .. " #" .. i, b, i, depth)
+                                    end
                                 end
                             end
                         end
                     end
-                end
+                end)
             end
         end)
     end)
@@ -766,11 +1114,11 @@ local function build_snap(depth, opts)
     if opts.skipLockouts ~= true then
         pcall(function()
             diag.time("snapshot.lockouts", function()
-                snap.lockouts = require('lockouts').gather_local(false)
+                snap.lockouts = require('lockouts').gather_local(lockout_gather_opts(opts))
             end)
         end)
     end
-    if depth == "full" and opts.skipLiveStats ~= true then
+    if opts.skipLiveStats ~= true and (depth == "full" or opts.includeLiveStats == true) then
         pcall(function()
             diag.time("snapshot.live_stats", function()
                 snap.liveStats = gather_live_stats()
@@ -813,6 +1161,29 @@ local function preserve_cached_bank(snap, cached)
     snap.bankReason = "cached; bank window closed"
     return snap
 end
+
+--- Carry forward fields that this gather was told to skip.
+---
+--- Only live stats. A skipLiveStats gather would otherwise blank Inspect >
+--- Effects on the next tab visit, because something reads liveStats off the
+--- snapshot directly.
+---
+--- Lockouts are deliberately NOT carried forward, and re-adding them is a
+--- mistake worth naming. Store already resolves `snap.lockouts or
+--- existing.lockouts`, so leaving the field nil correctly means "not
+--- collected". Copying the cached map instead republishes it as freshly read,
+--- and when that cached map predates the lockout every peer briefly renders an
+--- open padlock -- asserting "not locked" from data we never actually read.
+local function carry_forward_skipped(snap, cached, opts)
+    if type(snap) ~= "table" or type(cached) ~= "table" or type(opts) ~= "table" then return snap end
+    if opts.skipLiveStats == true and type(cached.liveStats) == "table"
+        and type(snap.liveStats) ~= "table" then
+        snap.liveStats = cached.liveStats
+    end
+    return snap
+end
+
+M._carry_forward_skipped = carry_forward_skipped
 
 local function resolve_inventory_cache(snap, cached)
     if type(cached) == "table"
@@ -927,8 +1298,9 @@ local function remember_bank(snap)
     }
 end
 
-function M.lite_signature(snap)
-    if type(snap) ~= "table" then return "" end
+local function lite_signature_parts(snap, opts)
+    if type(snap) ~= "table" then return {} end
+    opts = type(opts) == "table" and opts or {}
     local parts = {}
     local function add_list(list, prefix)
         for _, item in ipairs(list or {}) do
@@ -956,10 +1328,120 @@ function M.lite_signature(snap)
     add_list(snap.bags, "bg")
     add_list(snap.bank, "bn")
     table.sort(parts)
-    if snap.spells_sig and snap.spells_sig ~= "" then
+    if opts.skipSpells ~= true and snap.spells_sig and snap.spells_sig ~= "" then
         parts[#parts + 1] = "sp:" .. snap.spells_sig
     end
-    return table.concat(parts, "\31")
+    return parts
+end
+
+function M.lite_signature(snap, opts)
+    if type(snap) ~= "table" then return "" end
+    opts = type(opts) == "table" and opts or {}
+    return table.concat(lite_signature_parts(snap, opts), "\31")
+end
+
+-- Inventory identity for rich-job cancellation. Ignores spells_sig, DoN,
+-- lockouts, seq, and publication stamps. Bank rows stay: bank is inventory.
+function M.inventory_identity(snap)
+    return M.lite_signature(snap, { skipSpells = true })
+end
+
+-- Diagnose why two inventory_identity values differ. Uses the same sorted
+-- lite_signature tokens (skipSpells); does not invent a second fingerprint.
+function M.inventory_identity_diff(snap_a, snap_b)
+    local opts = { skipSpells = true }
+    local parts_a = lite_signature_parts(snap_a, opts)
+    local parts_b = lite_signature_parts(snap_b, opts)
+    local function classify(part)
+        part = tostring(part or "")
+        if part:sub(1, 3) == "eq:" then return "equipped" end
+        if part:sub(1, 3) == "bn:" then return "bank" end
+        if part:sub(1, 3) == "bg:" then
+            local bits = {}
+            for field in (part .. ":"):gmatch("(.-):") do
+                bits[#bits + 1] = field
+            end
+            -- prefix, id, name..., location, where, slotid, qty
+            local where = bits[#bits - 2] or ""
+            local location = bits[#bits - 3] or ""
+            local slotid = bits[#bits - 1] or ""
+            if where == "Cursor" or location == "Cursor" or slotid == "Cursor" then
+                return "cursor"
+            end
+            return "bags"
+        end
+        return "other"
+    end
+    local function slot_key(part)
+        part = tostring(part or "")
+        if part:sub(1, 3) == "eq:" or part:sub(1, 3) == "bg:" or part:sub(1, 3) == "bn:" then
+            local bits = {}
+            for field in (part .. ":"):gmatch("(.-):") do
+                bits[#bits + 1] = field
+            end
+            local location = bits[#bits - 3] or ""
+            local where = bits[#bits - 2] or ""
+            local slotid = bits[#bits - 1] or ""
+            return location .. "/" .. where .. "/" .. slotid
+        end
+        return part
+    end
+    local function cursor_count(snap)
+        local n = 0
+        for _, it in ipairs((type(snap) == "table" and snap.bags) or {}) do
+            if tostring(it.where or "") == "Cursor" or tostring(it.slotname or "") == "Cursor" then
+                n = n + 1
+            end
+        end
+        return n
+    end
+    local function counts(snap)
+        snap = type(snap) == "table" and snap or {}
+        return {
+            equipped = #(snap.equipped or {}),
+            bags = #(snap.bags or {}),
+            cursor = cursor_count(snap),
+            bank = #(snap.bank or {}),
+        }
+    end
+    local function bank_flags(snap)
+        snap = type(snap) == "table" and snap or {}
+        return {
+            bankValid = snap.bankValid == true,
+            bankLive = snap.bankLive == true,
+            bankPreserved = snap.bankPreserved == true,
+            bankOpen = snap.bankOpen == true,
+            bankCapturedAt = tonumber(snap.bankCapturedAt),
+        }
+    end
+    local n = math.max(#parts_a, #parts_b)
+    local idx = nil
+    for i = 1, n do
+        if parts_a[i] ~= parts_b[i] then
+            idx = i
+            break
+        end
+    end
+    local token_a = idx and parts_a[idx] or nil
+    local token_b = idx and parts_b[idx] or nil
+    local section = "other"
+    local key = "none"
+    if token_a or token_b then
+        section = classify(token_a or token_b)
+        key = slot_key(token_a or token_b)
+    elseif #parts_a ~= #parts_b then
+        key = "count"
+    end
+    return {
+        section = section,
+        key = key,
+        a = token_a or "",
+        b = token_b or "",
+        counts_a = counts(snap_a),
+        counts_b = counts(snap_b),
+        bank_a = bank_flags(snap_a),
+        bank_b = bank_flags(snap_b),
+    }
 end
 
 -- Adopt an externally-built snap (e.g. fresher Store self from bg cache) into
@@ -1195,15 +1677,14 @@ function M.gather(arg)
         return out
     end
 
+    diag.count("snapshot.inventory_live_refresh")
     local snap = diag.time("snapshot.gather", function() return build_snap(depth, opts) end)
     snap = preserve_incomplete_inventory(snap, cache_snap)
     snap = preserve_cached_equipped(snap, cache_snap)
     snap = preserve_cached_bank(snap, cache_snap)
-    -- skipLiveStats gathers must not blank Inspect > Effects on the next tab visit.
-    if opts.skipLiveStats == true and type(cache_snap) == "table" and type(cache_snap.liveStats) == "table" then
-        if type(snap.liveStats) ~= "table" then
-            snap.liveStats = cache_snap.liveStats
-        end
+    carry_forward_skipped(snap, cache_snap, opts)
+    if not include_spells then
+        apply_cached_spell_authority(snap, cache_snap)
     end
     remember_bank(snap)
     diag.event("snapshot.gather", string.format(
@@ -1235,12 +1716,26 @@ function M.ensure_full()
     if snap and snap.depth == "full" and (now - self_full_time) < cache_s then
         return snap
     end
-    return M.gather({ force = true, depth = "full" })
+    -- Never blocking-walk the whole inventory for Inspect/Stats/Search.
+    -- Cooperative rich_inventory fills stats across ticks; UI uses last
+    -- complete rich cache, or lite as limited/warming state.
+    pcall(function()
+        require('rich_inventory').request({ reason = "ensure_full" })
+    end)
+    return M.cached()
 end
 
 function M.lite_age()
     if not self_lite_snap or not self_lite_time or self_lite_time <= 0 then return nil end
     return os.clock() - self_lite_time
+end
+
+-- Same freshness stamps a successful lite inventory capture uses: updated,
+-- inventoryUpdated, seq. Does not touch bankCapturedAt / bank flags.
+function M.stamp_inventory(snap)
+    if type(snap) ~= "table" then return snap end
+    stamp_snap_inventory(snap)
+    return snap
 end
 
 return M

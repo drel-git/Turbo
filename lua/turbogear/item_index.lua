@@ -25,6 +25,12 @@ local M = {
 -- In-progress rebuild. Never assigned to M.rows until complete.
 local job = nil
 
+-- Budget deadlines are measured through this indirection so tests can drive
+-- time explicitly. os.clock() only advances in ~1ms granules on Windows, which
+-- is coarser than the 0.25ms floor in M.tick, so a real clock cannot express
+-- "this budget expired mid-peer" reliably enough to assert on.
+local clock = os.clock
+
 -- Sync Store flatten for Suggestions while the budgeted fleet index is empty
 -- or rebuilding. Cached on Store.content_version so Upgrade tab is instant on
 -- launch without hitching every frame.
@@ -473,7 +479,7 @@ local function start_job()
         item_i = 1,
         target_payload_sig = target_payload_sig,
         target_cv = Store.content_version or 0,
-        started_at = os.clock(),
+        started_at = clock(),
     }
     return job
 end
@@ -564,7 +570,7 @@ local function advance_peer_chunk(j, deadline)
     while j.phase <= PHASE_BANK do
         local list = phase_list(snap, j.phase)
         while j.item_i <= #list do
-            if n > 0 and (n % ITEM_CHUNK) == 0 and os.clock() >= deadline then
+            if n > 0 and (n % ITEM_CHUNK) == 0 and clock() >= deadline then
                 return false
             end
             local item = list[j.item_i]
@@ -587,7 +593,7 @@ local function advance_peer_chunk(j, deadline)
             else
                 add_storage_item(j.rows, snap, item, "bank")
             end
-            if os.clock() >= deadline and n > 0 then return false end
+            if clock() >= deadline and n > 0 then return false end
         end
         j.phase = j.phase + 1
         j.item_i = 1
@@ -604,7 +610,7 @@ function M.rebuild()
     while j and j.peer_i <= #(j.peers or {}) do
         guard = guard + 1
         if guard > 100000 then break end
-        if advance_peer_chunk(j, os.clock() + 3600) then
+        if advance_peer_chunk(j, clock() + 3600) then
             j.peer_i = j.peer_i + 1
             j.phase = PHASE_EQUIPPED
             j.item_i = 1
@@ -626,10 +632,10 @@ function M.tick(budget_ms)
 
     budget_ms = tonumber(budget_ms) or 4
     if budget_ms < 0.25 then budget_ms = 0.25 end
-    local deadline = os.clock() + budget_ms / 1000
+    local deadline = clock() + budget_ms / 1000
 
     while j.peer_i <= #(j.peers or {}) do
-        if os.clock() >= deadline then break end
+        if clock() >= deadline then break end
         if advance_peer_chunk(j, deadline) then
             j.peer_i = j.peer_i + 1
             j.phase = PHASE_EQUIPPED
@@ -650,16 +656,28 @@ function M.building()
     return job ~= nil
 end
 
+local function item_index_requested()
+    local ok, policy = pcall(require, 'index_warm_policy')
+    return ok and policy and policy.item_index_requested and policy.item_index_requested() == true
+end
+
 function M.get(force)
     force = force == true
-    -- Never synchronous-rebuild here: cold start used to call M.rebuild() and
-    -- freeze the game thread for multi-second fleet walks (6s in captures).
-    -- Serve last-good (or empty) and let M.tick fill/swap.
-    ensure_job(force or is_stale())
+    -- Never synchronous-rebuild here. Only start a cooperative job when a
+    -- demand consumer requested ticks (Search/Upgrade/Stats/Focus) or the
+    -- caller forced refresh. Serve last-good (or empty) otherwise.
+    if force then
+        ensure_job(true)
+    elseif item_index_requested() then
+        ensure_job(is_stale())
+    end
     return M.rows, M.version
 end
 
 function M.refresh()
+    pcall(function()
+        require('index_warm_policy').request_item_index("refresh", 3.0)
+    end)
     ensure_job(true)
     return M.rows, M.version
 end
@@ -670,7 +688,14 @@ function M.get_summary()
 end
 
 --- Test helper: drop in-flight job and published index.
+--- Tests only: drive budget deadlines from a supplied clock (seconds, monotonic).
+--- Pass nil to restore os.clock.
+function M._set_clock_for_tests(fn)
+    clock = type(fn) == "function" and fn or os.clock
+end
+
 function M._reset_for_tests()
+    clock = os.clock
     job = nil
     M.rows = {}
     M.version = 0

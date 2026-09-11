@@ -42,9 +42,14 @@ end
 package.preload['state'] = function()
     return { bg = false, show = true, engine_claim_disabled = true, lean = function() return false end }
 end
+-- Records the opts each publish gathers with, so we can assert what a REQUEST
+-- asks the responder to collect.
+local last_gather_opts = nil
 package.preload['snapshot'] = function()
     local s = {}
-    function s.gather() return { name = "Me", server = "Srv", class = "War", level = 70,
+    function s.gather(opts)
+        last_gather_opts = opts
+        return { name = "Me", server = "Srv", class = "War", level = 70,
         depth = "full", equipped = {}, bags = {}, bank = {}, updated = 1 } end
     function s.depth_for_settings() return "lite" end
     function s.lite_signature() return "SIG" end
@@ -59,7 +64,9 @@ local Engine = engine_mod.Engine
 local Store = require('store').Store
 local diag = require('diagnostics')
 local dispatch = engine_mod._on_message
+local apply_pending = engine_mod._apply_pending_request
 assert(type(dispatch) == "function", "engine exposes _on_message test seam")
+assert(type(apply_pending) == "function", "engine exposes _apply_pending_request test seam")
 
 -- helper: wrap a table as an actor message (called as message() in on_message)
 local function msg(t) return function() return t end end
@@ -137,6 +144,49 @@ do
     check(rec and rec.last:find("simulated bus failure"), "recorded error keeps the failure detail")
     Engine.ok = false
     Engine.mailbox = nil
+end
+
+-- ---- 8. a fastInventory REQUEST still gathers lockouts ---------------------
+-- Sync Now sends fastInventory=true. While that also skipped lockouts, a peer
+-- answering Sync Now published a snapshot with no lockout map, Store fell back
+-- to `existing.lockouts`, and the peer's column froze at whatever it published
+-- first -- an all-open map from before the lockout was earned.
+--
+-- The gather must NOT run inside the actor callback (that path disconnects
+-- boxes). Drain the queued request on the run-loop seam instead.
+do
+    Engine.ok = true
+    Engine.mailbox = { send = function() end }
+    Engine.last_publish_sig = nil
+    Engine.pending_request = nil
+
+    last_gather_opts = nil
+    dispatch(msg({ type = "request", proto = 1, force = true, depth = "full", fastInventory = true }))
+    check(last_gather_opts == nil, "request does not gather inside the actor callback")
+    apply_pending()
+    check(type(last_gather_opts) == "table", "fastInventory request reached a gather after drain")
+    check(last_gather_opts and last_gather_opts.skipLockouts ~= true,
+        "fastInventory must not skip lockouts, or Sync Now can never refresh a peer")
+    check(last_gather_opts and last_gather_opts.skipLockoutBypass == true,
+        "peer REQUEST drain uses cached lockouts instead of DynamicZone on the inventory tick")
+
+    -- The point of fastInventory was never to drop live stats: 1.2.106 did that
+    -- and left Inspect > Effects empty.
+    check(last_gather_opts and last_gather_opts.skipLiveStats ~= true,
+        "fastInventory still keeps live stats")
+
+    -- A plain request is unaffected.
+    last_gather_opts = nil
+    Engine.last_publish_sig = nil
+    Engine.pending_request = nil
+    dispatch(msg({ type = "request", proto = 1, force = true, depth = "full" }))
+    check(last_gather_opts == nil, "plain request also waits for drain")
+    apply_pending()
+    check(last_gather_opts and last_gather_opts.skipLockouts ~= true, "plain request gathers lockouts")
+
+    Engine.ok = false
+    Engine.mailbox = nil
+    Engine.pending_request = nil
 end
 
 print(string.format("engine dispatch: %d passed, %d failed", pass, fail))

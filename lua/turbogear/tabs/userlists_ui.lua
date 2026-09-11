@@ -61,15 +61,11 @@ local function draw_howto_create()
     col_text(Theme.dim, "Build an editable wishlist or loadout plan:")
     col_text(Theme.dim, "  1) Create Empty List or Create from Worn")
     col_text(Theme.dim, "  2) Add items here or right-click items in BiS Catalog")
-    col_text(Theme.dim, "  3) Custom Lists can analyze, compare, export, share, and drive linked needs")
+    col_text(Theme.dim, "  3) Custom Lists can analyze, compare, export, and share")
 end
 
 local function draw_howto_announce()
-    col_text(Theme.dim, "To announce when you still NEED an item:")
-    col_text(Theme.dim, "  1) Add items to your list (names or item IDs both work)")
-    col_text(Theme.dim, "  2) Click Use for Linked Needs on the list")
-    col_text(Theme.dim, "  3) Select it from the Custom Lists dropdown")
-    col_text(Theme.dim, "  4) Keep Linked needs ON - chat announces when a linked drop is still missing")
+    col_text(Theme.dim, "Custom lists are for planning and comparison. [TG] linked-needs uses built-in TurboGear BiS.")
 end
 
 local function draw_share_recipe()
@@ -214,13 +210,6 @@ function M.draw_compact_actions(opts)
             local l = rec.list or {}
             col_text(Theme.item, string.format("%s  (%d entries%s)",
                 rec.name, #(l.entries or {}), (l.class and l.class ~= "") and (", " .. l.class) or ""))
-            ImGui.SameLine()
-            if themed_button("Use for Linked Needs##ul_ann_" .. rec.id, Theme.sync) then
-                local ok, detail = userlists.prepare_for_announces(rec.id)
-                ul_status = ok
-                    and string.format("'%s' is active for linked-needs announces. Select it on TurboBiS.", tostring(detail or rec.name))
-                    or tostring(detail or "Could not enable announces.")
-            end
             ImGui.SameLine()
             if themed_button("Export##ul_exp_compact_" .. rec.id, Theme.blue) then
                 local path, err = userlists.export(rec.id)

@@ -31,7 +31,10 @@ ffi.cdef[[
 ]]
 
 local C
-for _, name in ipairs({ "sqlite3", "/lib/x86_64-linux-gnu/libsqlite3.so.0",
+-- winsqlite3 is the copy Windows ships in System32, so the offline harness needs
+-- no sqlite install there. It only exports the older core API, which is all the
+-- bindings above use.
+for _, name in ipairs({ "sqlite3", "winsqlite3", "/lib/x86_64-linux-gnu/libsqlite3.so.0",
                         "/usr/lib/x86_64-linux-gnu/libsqlite3.so.0", "libsqlite3.so.0" }) do
     local ok, lib = pcall(ffi.load, name)
     if ok then C = lib; break end

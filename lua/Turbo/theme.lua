@@ -29,7 +29,7 @@ M.layout = {
     fullTargetW  = 480,
     slimTargetW  = 280,
     -- +24px clears the hairline outer scrollbar on Actions/Review/Setup/More
-    -- (shell height is applied every frame via SetWindowSize).
+    -- (shell height is constrained; ImGui owns live size).
     fullTargetH  = 704,
     slimTargetH  = 700,
     actionsFullW = 480,

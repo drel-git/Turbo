@@ -125,6 +125,72 @@ function M.live_id(spell_id)
     return known
 end
 
+-- Lean probe for per-row checks (DoN rows, peer bis_search). Book + combat
+-- ability only: a memorized gem or Me.Spell hit implies a Book hit, so the
+-- 13-query gem scan and Me.Spell add cost, not accuracy. Apostrophe variants
+-- are only tried when the name actually contains an apostrophe.
+-- ~1-2 TLO queries when known, 2 (4 with apostrophes) when not.
+local lookups = 0
+function M.lookup_count() return lookups end
+function M.reset_lookup_count() lookups = 0 end
+
+local function lean_one(name)
+    lookups = lookups + 1
+    if tlo_number(mq.TLO.Me.Book(name)) > 0 then return true end
+    lookups = lookups + 1
+    if tlo_number(mq.TLO.Me.CombatAbility(name)) > 0 then return true end
+    return false
+end
+
+function M.live_lean(name)
+    name = trim(name)
+    if name == '' then return false end
+    local known = false
+    pcall(function()
+        if not name:find("['`\226]") then
+            known = lean_one(name)
+            return
+        end
+        for _, variant in ipairs(apostrophe_variants(name)) do
+            if lean_one(variant) then known = true; return end
+        end
+    end)
+    return known
+end
+
+--- Spell id -> base spell name (one query). nil when unresolved.
+function M.spell_name_for_id(spell_id)
+    spell_id = tonumber(spell_id)
+    if not spell_id or spell_id <= 0 then return nil end
+    local out = nil
+    pcall(function()
+        lookups = lookups + 1
+        local s = mq.TLO.Spell(spell_id)
+        local n = s and s.Name and s.Name() or nil
+        if n and trim(n) ~= '' then out = trim(n) end
+    end)
+    return out
+end
+
+--- Lean known-by-id: the id's base name, then its rank name only if that
+--- differs. ~2-4 queries (the full live_id ran the whole probe per name).
+function M.live_lean_id(spell_id)
+    spell_id = tonumber(spell_id)
+    if not spell_id or spell_id <= 0 then return false end
+    local base = M.spell_name_for_id(spell_id)
+    if base and M.live_lean(base) then return true end
+    local rank = nil
+    pcall(function()
+        lookups = lookups + 1
+        local s = mq.TLO.Spell(spell_id)
+        local r = s and s.RankName or nil
+        local rn = r and r.Name and r.Name() or nil
+        if rn and trim(rn) ~= '' then rank = trim(rn) end
+    end)
+    if rank and rank ~= base then return M.live_lean(rank) end
+    return false
+end
+
 --- True if any listed spell name or spell id is known.
 function M.live_any(names, ids)
     for _, id in ipairs(ids or {}) do

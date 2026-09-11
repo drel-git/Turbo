@@ -35,7 +35,7 @@ M.CFG = {
     script_name  = 'TurboGear',    -- display/settings/cache name
     lua_name     = 'turbogear',     -- folder/module name used by /lua run and /lua stop
     bg_lua_name  = 'turbogear_bg',  -- wrapper responder name; leaves /lua run turbogear free for UI
-    version      = '1.2.138',
+    version      = '1.2.139',
     mailbox      = 'turbogear',     -- shared actor mailbox name across all boxes
     proto        = 1,              -- snapshot protocol version (guards mismatched boxes)
     frame_round  = 5.0,
@@ -60,6 +60,11 @@ M.CFG = {
     -- route through a full snapshot.gather (bag walk).
     perf_equip_poll = true,
     perf_equip_poll_interval_s = 1.0,
+    -- Idle bg-only: 0 = no worn-slot timer. Equip/loot events still open the
+    -- fast window. A periodic Inventory TLO walk was enough to drop some clients.
+    perf_equip_poll_bg_idle_interval_s = 0,
+    perf_equip_poll_bg_fast_interval_s = 1.0,
+    perf_equip_poll_bg_fast_window_s = 15.0,
     -- BiS-shaped: local BiS colors use live FindItem; worn→Store persist is
     -- debounced (never saveNow on the UI thread per equip).
     perf_live_self_bis = true,
@@ -67,6 +72,7 @@ M.CFG = {
     -- Persist rows without stats/focus blobs (store.persist_row). Keep true.
     perf_persist_slim = true,
     save_every_s = 15.0,           -- debounce cache writes (UI open)
+    ui_settings_save_debounce_s = 0.8, -- persist Settings after UI clicks/geom settle; never pickle while dragging
     age_sweep_interval_s = 1.0,    -- P3: throttle source online/stale/offline aging sweep (status is second-granular)
     cache_tmp_validate_s = 30.0,   -- P1 interim: re-validate the temp cache file at most this often (not every save)
     bg_sync_ack_deadline_s = 5.0,  -- R5: viewer waits this long for the bg readiness ack before syncing anyway
@@ -105,6 +111,7 @@ M.CFG = {
     publish_every_bg_s = 30.0,     -- bg responder heartbeat
     publish_every_lean_s = 60.0,   -- metadata heartbeat only in auto-lean mode
     publish_jitter_s = 2.0,
+    lockout_check_s = 60.0,        -- gap between lockout-change checks; a change publishes, no change costs a cached read
     peer_soft_sync_delay_s = 3.0,   -- wait for bg script to register before requesting snapshots
     peer_autostart_settle_s = 1.5,  -- coalesce staggered group-roster repopulation (zone-ins) before soft-launch
     peer_discovery_empty_hold_s = 20.0, -- ignore empty ConnectedClients polls this long (flap guard)
@@ -142,9 +149,22 @@ M.CFG = {
     announce_confirm_refresh_cooldown_s = 30.0,
     -- Hybrid: peers may still LOOT_NEED as enrichment; driver does not wait on it.
     announce_link_hybrid = true,
+    local_needs_shadow = false, -- internal: validation-only compact-state shadow comparison
+    local_needs_match_ref_deep_profile = false, -- internal: verbose per-phase shared match-ref builder profiling
+    local_needs_generated_shadow = true, -- internal: generated built-in index shadow when local_needs_shadow is enabled
+    local_needs_runtime_shared_shadow = false, -- internal: old runtime shared match-ref builder fallback
+    generated_authority_enabled = true, -- internal: generated compact path is visible [TG] authority
+    generated_authority_legacy_validation = false, -- internal: optional slow legacy-paint validation, off by default
+    generated_authority_cold_fallback = true, -- targeted one-item/one-character decision while compact ownership warms
+    generated_authority_cold_fallback_budget_ms = 2, -- per-tick driver work budget; one atomic decision may report an overrun
+    generated_authority_cold_fallback_max_rows = 4, -- per linked item, cap targeted cold row checks during ownership churn
+    generated_authority_ready_fast_path = true, -- when every roster row is ownership-ready, finish the link in one logical pass
+    generated_authority_work_budget_ms = 2, -- hitch-safe generated driver slice; separate from overall job lifetime
+    core_ownership_warm_budget_ms = 2, -- measured elapsed compact-ownership work per tick
+    core_ownership_emit_wait_s = 2.0, -- [TG] may wait this long for compact ownership; never emit a guessed needer
     announce_peer_report_wait_s = 0.5, -- short hold only for rare actor-bucket coalescing
     announce_peer_report_short_s = 0.15,
-    needs_index_enabled = true,  -- Search/Stats enrichment only — never gates linked [TG]
+    needs_index_enabled = true,  -- legacy enrichment only; idle when generated [TG] authority is on
     needs_index_build_peers = true,
     needs_index_budget_ms = 4,     -- inverted needs-index rebuild budget per tick (UI)
     needs_index_budget_lean_ms = 2, -- minimized/lean should yield quickly while zoning/running
@@ -152,6 +172,17 @@ M.CFG = {
     needs_index_budget_stale_ms = 20, -- lean/UI boost when oldest queued rebuild exceeds stale age
     needs_index_stale_queue_s = 60,   -- oldestQueue age that starts the stale budget ramp
     needs_index_stale_ramp_s = 60,    -- seconds after stale_queue_s to reach full stale frame budget
+    lua_turbo_recommended = 1000, -- MQ2Lua instruction budget recommended for large TurboGear fleets
+    needs_eval_ops_per_slice = 4,    -- match + commit keys per needs eval slice (clock is quantized)
+    needs_list_steps_per_slice = 1,  -- one catalog list/slot step per tick_direct_build call
+    -- Cooperative rich inventory: one make_item(full) per slice, then yield.
+    -- Live baseline was ~192ms avg / ~702ms max per full item; do not chain them.
+    rich_inventory_items_per_slice = 1,
+    -- Rich-recovery lite probe only. 1 guaranteed occupied row, at most 2,
+    -- yield after every occupied row once elapsed >= budget.
+    inventory_probe_items_per_slice = 2,
+    inventory_probe_budget_ms = 22,
+    needs_rotate_eval_slices = 32,   -- park an unpublished char build and rotate the queue
     item_index_budget_ms = 4,      -- fleet item-index rebuild budget per tick (UI)
     item_index_budget_lean_ms = 2, -- minimized/lean item-index tick
     item_index_budget_bg_ms = 20,  -- bg responder item-index tick
@@ -252,6 +283,8 @@ M.Settings = {
     gearTab         = "inventory",
     inspectTab      = "stats",
     upgradeTab      = "suggestions",
+    lockoutsTab     = "expeditions",
+    setupTab        = "status",
     bisListsTab     = "catalog",
     augsSubTab      = "equipped",
     compareKey1     = "__self__",
@@ -337,6 +370,8 @@ M.Settings = {
     spellsViewKey = "__all__",
     spellsViewSelectedChars = {},
     spellsLevelFilter = "all",
+    spellsTab = "research",
+    spellsDonMissingOnly = false,
     spellsHideNonResearch = false,
     spellsHideOwned = false,
     spellsExportCopies = 1,
@@ -347,7 +382,8 @@ M.Settings = {
     bisCompactFullNames = false,   -- compact mode: wider columns + longer truncated names
     bisCompactRows = true,         -- legacy; migrated to bisViewDensity on load
     bisShowElsewhere = false,      -- opt-in: scan cache for missing BiS items owned by other characters
-    bisHiddenLists = {},           -- list id -> true when hidden from TurboBiS tab bar
+    bisHiddenLists = { focusitems = true }, -- list id -> true when hidden from TurboBiS tab bar
+    bisType12DefaultHiddenApplied = true, -- migration guard for Type 12 moving to a main tab
     bisShowUserLists = true,       -- show Custom Lists nav button on TurboBiS tab
     bisCollapsedCategories = {},
     suggestTargetKey = "__self__",
@@ -370,6 +406,8 @@ M.Settings = {
     suggestAugSocketType = 0,
     suggestAugSlotId = 2,
     miniWindowPos = nil,           -- { x, y } last mini-icon position (persisted)
+    mainWindowPos = nil,           -- { x, y } last main window position
+    mainWindowSize = nil,          -- { w, h } last main window size
     miniIconSmall = false,         -- mini TG icon at 28px instead of 48px
     miniHideWhenTurboMini = false, -- hide TG mini while the Turbo hub runs (use its TG chip instead)
     inspectDockEnabled = false,    -- reposition native inspect beside TG (off: less window weirdness)
@@ -489,19 +527,28 @@ function M.sanitize_ui_settings()
         M.Settings.mainTab = "upgrade"
         M.Settings.upgradeTab = "compare"
     elseif raw_main == "stats" then
-        M.Settings.mainTab = "inspect"
+        M.Settings.mainTab = "gear"
+        M.Settings.gearTab = "stats"
         M.Settings.inspectTab = "stats"
     elseif raw_main == "focus" then
-        M.Settings.mainTab = "inspect"
+        M.Settings.mainTab = "gear"
+        M.Settings.gearTab = "focus"
         M.Settings.inspectTab = "focus"
     elseif raw_main == "suggestions" then
         M.Settings.mainTab = "upgrade"
         M.Settings.upgradeTab = "suggestions"
+    elseif raw_main == "inspect" then
+        local inspect = tostring(M.Settings.inspectTab or "stats")
+        M.Settings.mainTab = "gear"
+        M.Settings.gearTab = (inspect == "live" and "effects") or inspect
+    elseif raw_main == "don" then
+        M.Settings.mainTab = "lockouts"
+        M.Settings.lockoutsTab = "don"
     end
 
     local valid_main = {
-        gear = true, inspect = true, upgrade = true, bis = true,
-        spells = true, lockouts = true, setup = true,
+        gear = true, upgrade = true, bis = true, type12 = true,
+        spells = true, lockouts = true, stock = true, setup = true,
     }
     if not valid_main[tostring(M.Settings.mainTab or "")] then
         M.Settings.mainTab = "bis"
@@ -511,11 +558,11 @@ function M.sanitize_ui_settings()
         M.Settings.upgradeTab = "empty"
         M.Settings.gearTab = "inventory"
     end
-    local valid_gear = { inventory = true, worn = true, stored = true, stock = true }
+    local valid_gear = { inventory = true, worn = true, stored = true, stats = true, effects = true, focus = true }
     if not valid_gear[tostring(M.Settings.gearTab or "")] then M.Settings.gearTab = "inventory" end
     -- Migrate nested Inventory > Stock into Gear > Stock Up.
     if tostring(M.Settings.inventoryViewMode or "") == "stock" then
-        M.Settings.gearTab = "stock"
+        M.Settings.mainTab = "stock"
         M.Settings.inventoryViewMode = "table"
     end
     local stock_roster = tostring(M.Settings.stockRosterScope or "online")
@@ -532,6 +579,17 @@ function M.sanitize_ui_settings()
     end
     local valid_inspect = { stats = true, focus = true, live = true }
     if not valid_inspect[tostring(M.Settings.inspectTab or "")] then M.Settings.inspectTab = "stats" end
+    if tostring(M.Settings.gearTab or "") == "stats" then
+        M.Settings.inspectTab = "stats"
+    elseif tostring(M.Settings.gearTab or "") == "effects" then
+        M.Settings.inspectTab = "live"
+    elseif tostring(M.Settings.gearTab or "") == "focus" then
+        M.Settings.inspectTab = "focus"
+    end
+    local valid_lockouts = { expeditions = true, don = true }
+    if not valid_lockouts[tostring(M.Settings.lockoutsTab or "")] then M.Settings.lockoutsTab = "expeditions" end
+    local valid_setup = { status = true, announcements = true, advanced = true }
+    if not valid_setup[tostring(M.Settings.setupTab or "")] then M.Settings.setupTab = "status" end
     local valid_upgrade = { suggestions = true, compare = true, empty = true }
     if not valid_upgrade[tostring(M.Settings.upgradeTab or "")] then M.Settings.upgradeTab = "suggestions" end
     local valid_bis_lists = { catalog = true, my = true, edit = true }
@@ -585,6 +643,9 @@ function M.sanitize_ui_settings()
     local sp_lvl = tostring(M.Settings.spellsLevelFilter or "all")
     if sp_lvl ~= "all" and not tonumber(sp_lvl) then M.Settings.spellsLevelFilter = "all" end
     if M.Settings.spellsResearchOnly == nil then M.Settings.spellsResearchOnly = true end
+    local valid_spells_tab = { research = true, don = true }
+    if not valid_spells_tab[tostring(M.Settings.spellsTab or "")] then M.Settings.spellsTab = "research" end
+    M.Settings.spellsDonMissingOnly = M.Settings.spellsDonMissingOnly == true
     if M.Settings.spellsHideNonResearch == nil then M.Settings.spellsHideNonResearch = false end
     if M.Settings.spellsHideOwned == nil then M.Settings.spellsHideOwned = false end
     M.Settings.spellsExportCopies = math.max(1, math.floor(tonumber(M.Settings.spellsExportCopies) or 1))
@@ -654,6 +715,11 @@ function M.sanitize_ui_settings()
     M.Settings.inventoryTableCompact = inv_compact
     if M.Settings.lockoutsLockedOnly == nil then M.Settings.lockoutsLockedOnly = false end
     if M.Settings.lockoutsCompact == nil then M.Settings.lockoutsCompact = false end
+    if M.Settings.donLockedOnly == nil then M.Settings.donLockedOnly = false end
+    if M.Settings.donCompact == nil then M.Settings.donCompact = false end
+    if type(M.Settings.donCollapsedSections) ~= "table" then
+        M.Settings.donCollapsedSections = {}
+    end
     if type(M.Settings.lockoutsCollapsedCategories) ~= "table" then
         M.Settings.lockoutsCollapsedCategories = {}
     end
@@ -668,6 +734,10 @@ function M.sanitize_ui_settings()
     end
     if type(M.Settings.bisHiddenLists) ~= "table" then
         M.Settings.bisHiddenLists = {}
+    end
+    if M.Settings.bisType12DefaultHiddenApplied ~= true then
+        M.Settings.bisHiddenLists.focusitems = true
+        M.Settings.bisType12DefaultHiddenApplied = true
     end
     M.Settings.bisShowElsewhere = M.Settings.bisShowElsewhere == true
     if M.Settings.bisShowUserLists == nil then
@@ -763,6 +833,8 @@ function M.reset_ui_settings()
     M.Settings.gearTab = "inventory"
     M.Settings.inspectTab = "stats"
     M.Settings.upgradeTab = "suggestions"
+    M.Settings.lockoutsTab = "expeditions"
+    M.Settings.setupTab = "status"
     M.Settings.bisListsTab = "catalog"
     M.Settings.globalSearch = ""
     M.Settings.bisViewDensity = "compact"
@@ -777,6 +849,9 @@ function M.reset_ui_settings()
     M.Settings.lockoutsViewSelectedChars = {}
     M.Settings.lockoutsLockedOnly = false
     M.Settings.lockoutsCompact = false
+    M.Settings.donLockedOnly = false
+    M.Settings.donCompact = false
+    M.Settings.donCollapsedSections = {}
     M.Settings.lockoutsCollapsedCategories = {}
     M.Settings.inventoryViewKey = "__self__"
     M.Settings.inventoryViewMode = "table"
@@ -801,6 +876,8 @@ function M.reset_ui_settings()
     M.Settings.inventoryRowLimit = 200
     M.Settings.inventoryTableCompact = "auto"
     M.Settings.inventoryCompactAutoDefaulted = true
+    M.Settings.spellsTab = "research"
+    M.Settings.spellsDonMissingOnly = false
     M.Settings.autoPeerRefresh = false
     M.Settings.syncRosterScopeAcrossTabs = false
     M.Settings.showCharactersPill = true
@@ -830,7 +907,69 @@ function M.LoadSettings()
 end
 
 function M.SaveSettings()
+    if type(M._pickle) == "function" then
+        M._pickle(M.SettingsFile, M.Settings)
+        return
+    end
     pcall(function() mq.pickle(M.SettingsFile, M.Settings) end)
+end
+
+-- Tab clicks update Settings in memory immediately; disk write is coalesced
+-- on the run loop so mq.pickle never runs on the ImGui click frame.
+local settings_dirty = false
+local settings_dirty_reason = ""
+local settings_dirty_at = 0
+
+function M.MarkSettingsDirty(reason)
+    settings_dirty = true
+    settings_dirty_reason = tostring(reason or "")
+    settings_dirty_at = os.clock()
+    pcall(function()
+        local diag = require('diagnostics')
+        diag.count("settings.dirty")
+        diag.event("settings.dirty", "reason=" .. settings_dirty_reason)
+    end)
+end
+
+function M.settings_are_dirty()
+    return settings_dirty == true
+end
+
+function M.settings_dirty_reason()
+    return settings_dirty_reason
+end
+
+function M.flush_settings_save()
+    if not settings_dirty then return false end
+    settings_dirty = false
+    local diag = nil
+    pcall(function() diag = require('diagnostics') end)
+    local function do_save()
+        M.SaveSettings()
+    end
+    if diag and diag.time then
+        diag.time("ui.settings_save", do_save)
+        pcall(function()
+            diag.count("settings.save_debounced")
+            diag.event("settings.save_debounced", settings_dirty_reason)
+        end)
+    else
+        do_save()
+    end
+    return true
+end
+
+function M.tick_settings_save(now)
+    if not settings_dirty then return false end
+    now = tonumber(now) or os.clock()
+    local wait = tonumber(M.CFG and M.CFG.ui_settings_save_debounce_s) or 0.35
+    if (now - settings_dirty_at) < wait then return false end
+    return M.flush_settings_save()
+end
+
+function M._reset_settings_dirty_for_tests()
+    settings_dirty, settings_dirty_reason, settings_dirty_at = false, "", 0
+    M._pickle = nil
 end
 
 -- ============================ LAUNCH HELPERS ============================= --
@@ -1042,6 +1181,51 @@ function M.apply_bis_announcing_defaults()
     M.SharedSettings.bisAnnounceListenOoc = false
     M.SaveSettings()
     M.SaveSharedSettings()
+end
+
+function M.lua_turbo_status()
+    local rec = math.max(1, math.floor(tonumber(M.CFG.lua_turbo_recommended) or 1000))
+    local value
+    local ok, err = pcall(function()
+        if mq and mq.TLO and mq.TLO.Lua and mq.TLO.Lua.Turbo then
+            value = tonumber(mq.TLO.Lua.Turbo())
+        end
+    end)
+    if not ok then
+        return {
+            known = false,
+            ok = false,
+            warning = false,
+            value = nil,
+            recommended = rec,
+            reason = tostring(err or "read failed"),
+        }
+    end
+    if not value then
+        return {
+            known = false,
+            ok = false,
+            warning = false,
+            value = nil,
+            recommended = rec,
+            reason = "Lua.Turbo unavailable",
+        }
+    end
+    value = math.floor(value)
+    return {
+        known = true,
+        ok = value >= rec,
+        warning = value < rec,
+        value = value,
+        recommended = rec,
+        reason = value < rec and "below recommended" or "ok",
+    }
+end
+
+function M.set_recommended_lua_turbo()
+    local rec = math.max(1, math.floor(tonumber(M.CFG.lua_turbo_recommended) or 1000))
+    mq.cmd("/lua conf turboNum " .. tostring(rec))
+    return rec
 end
 
 -- R5: bg-responder readiness ack. The bg writes this marker (a unix time) once

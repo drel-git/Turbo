@@ -31,6 +31,8 @@ local Engine = {
     request_seq = 0,
     last_source_request = nil,
     last_source_reply = nil,
+    pending_request = nil,
+    pending_bis_search = nil,
 }
 local MSG = {
     REQUEST = 'request',
@@ -68,8 +70,11 @@ end
 -- Surfaced in perfdiag via diagnostics.error_lines(). Behavior is otherwise
 -- identical to the previous pcall(function() ... end) wrappers.
 local function send_mail(kind, payload)
-    return diag.protect("engine.send." .. tostring(kind), function()
-        Engine.mailbox:send({ mailbox = CFG.mailbox }, payload)
+    kind = tostring(kind)
+    return diag.time("engine.send_mail." .. kind, function()
+        return diag.protect("engine.send." .. kind, function()
+            Engine.mailbox:send({ mailbox = CFG.mailbox }, payload)
+        end)
     end)
 end
 
@@ -171,6 +176,7 @@ local function write_local_cache_snapshot(force, depth, opts)
         includeSpells = opts.includeSpells == true,
         skipLockouts = opts.skipLockouts == true,
         skipLiveStats = opts.skipLiveStats == true,
+        skipLockoutBypass = opts.skipLockoutBypass == true,
     })
     if not snap or not snap.name or snap.name == "?" then return false end
     Store.put(snap, 'cache')
@@ -238,11 +244,157 @@ local function send_metadata_heartbeat(reason)
     end)
 end
 
+function Engine.ingame()
+    local ok, gs = pcall(function() return mq.TLO.EverQuest.GameState() end)
+    return ok and gs == "INGAME"
+end
+
+function Engine.enqueue_peer_request(c)
+    c = type(c) == "table" and c or {}
+    local prev = Engine.pending_request
+    local depth = (c.depth == "full" or c.depth == "lite") and c.depth or nil
+    if prev and prev.depth == "full" then depth = "full" end
+    if depth ~= "full" and depth ~= "lite" then
+        depth = ((prev and prev.force) or c.force == true) and "full" or "lite"
+    end
+    Engine.pending_request = {
+        force = (prev and prev.force) or c.force == true,
+        depth = depth,
+        includeSpells = (prev and prev.includeSpells) or c.includeSpells == true,
+        replyTo = c.requestId or (prev and prev.replyTo),
+        requester = c.from or (prev and prev.requester),
+    }
+end
+
+function Engine.apply_pending_request()
+    local work = Engine.pending_request
+    if not work then return false end
+    if not Engine.ingame() then return false end
+    if Engine.startup_settle_until and os.clock() < Engine.startup_settle_until then
+        return false
+    end
+    Engine.pending_request = nil
+    -- Inventory TLO belongs on the run loop, never in the actor mailbox
+    -- callback. Do not also force a Task journal walk or DynamicZone re-read
+    -- on this same drain: UI-open REQUEST is what hits bg-only alts, and
+    -- stacking those native reads crashes eqgame with no Lua message.
+    -- note_refresh_wanted queues /tasktime on don_track.tick after this yield.
+    pcall(function()
+        require('don_track').note_refresh_wanted()
+    end)
+    Engine.publish(work.force, work.depth, {
+        includeSpells = work.includeSpells == true,
+        reason = "peer_request",
+        replyTo = work.replyTo,
+        requester = work.requester,
+        skipLockoutBypass = true,
+    })
+    return true
+end
+
+function Engine.enqueue_bis_search(c)
+    c = type(c) == "table" and c or {}
+    local list_id = tostring(c.list_id or c.list or "")
+    if list_id == "" then return end
+    Engine.pending_bis_search = { list_id = list_id } -- replaces a queued push: answer now
+end
+
+--- Unsolicited refresh of this box's own list answer (e.g. after scribing a
+--- DoN ability). Reuses the search-reply path on a later tick; a real peer
+--- request arriving meanwhile replaces it and answers immediately.
+function Engine.queue_bis_push(list_id, delay_s)
+    list_id = tostring(list_id or "")
+    if list_id == "" then return false end
+    local not_before = os.clock() + math.max(0, tonumber(delay_s) or 0)
+    local cur = Engine.pending_bis_search
+    if type(cur) == "table" and cur.list_id == list_id then
+        -- Coalesce a scribe burst into one push after the LAST scribe.
+        if cur.not_before then cur.not_before = math.max(cur.not_before, not_before) end
+        return true
+    end
+    if type(cur) == "table" then return false end -- a real request is pending; leave it
+    Engine.pending_bis_search = { list_id = list_id, not_before = not_before, push = true }
+    diag.count("engine.bis_push_queued")
+    return true
+end
+
+function Engine.apply_pending_bis_search()
+    local work = Engine.pending_bis_search
+    if not work then return false end
+    if work.not_before and os.clock() < work.not_before then return false end
+    if not Engine.ingame() then return false end
+    if Engine.startup_settle_until and os.clock() < Engine.startup_settle_until then
+        return false
+    end
+    Engine.pending_bis_search = nil
+    local list_id = tostring(work.list_id or "")
+    if list_id == "" then return false end
+    diag.count("engine.bis_search_rx")
+    local ok_bs, bis_search = pcall(require, 'bis_search')
+    if not ok_bs or not bis_search or not bis_search.search_local then return false end
+    local result = diag.time("engine.bis_search_local", function()
+        return bis_search.search_local(list_id)
+    end)
+    if type(result) ~= "table" then return false end
+    pcall(function()
+        bis_search.apply_result(result)
+        diag.time("engine.bis_search_rx_save", function()
+            bis_search.save()
+        end)
+    end)
+    send_mail("bis_result", {
+        type = MSG.BIS_RESULT,
+        proto = CFG.proto,
+        kind = 'client',
+        name = result.name,
+        server = result.server,
+        class = result.class,
+        list_id = list_id,
+        updated = result.updated,
+        slots = result.slots,
+    })
+    diag.event("engine.bis_search", string.format("replied list=%s slots=%d",
+        list_id, (function()
+            local n = 0
+            for _ in pairs(result.slots or {}) do n = n + 1 end
+            return n
+        end)()))
+    return true
+end
+
+function Engine.apply_pending_announce()
+    if not Engine.ingame() then return false end
+    if Engine.startup_settle_until and os.clock() < Engine.startup_settle_until then
+        return false
+    end
+    if Engine._heavy_tlo then return false end
+    local ran = false
+    if Engine.pending_loot_link then
+        local c = Engine.pending_loot_link
+        Engine.pending_loot_link = nil
+        pcall(function() require('announcer').on_loot_link(c) end)
+        ran = true
+    end
+    if Engine.pending_loot_need then
+        local c = Engine.pending_loot_need
+        Engine.pending_loot_need = nil
+        pcall(function() require('announcer').on_loot_need(c) end)
+        ran = true
+    end
+    if Engine.pending_need_confirm then
+        local c = Engine.pending_need_confirm
+        Engine.pending_need_confirm = nil
+        pcall(function() require('announcer').on_need_confirm(c) end)
+        ran = true
+        Engine._heavy_tlo = "need_confirm"
+    end
+    return ran
+end
+
 -- Cheap zone freshness for same-zone handoff guards. Inventory does not change
 -- on zone; peers only need updated zoneShortName/zoneName via Store.touch.
 local function tick_zone_meta()
-    local gs = mq.TLO.EverQuest.GameState()
-    if gs and gs ~= "INGAME" then return end
+    if not Engine.ingame() then return end
     local zoneShort = zone_fields()
     if zoneShort == "" then return end
     if last_zone_short == nil then
@@ -251,6 +403,10 @@ local function tick_zone_meta()
     end
     if last_zone_short == zoneShort then return end
     last_zone_short = zoneShort
+    -- Zone-in is when DynamicZone actually changes. Idle sitting must not
+    -- poll that TLO on a timer -- it silently disconnects some clients.
+    Engine.lockout_watch_wanted = true
+    lockout_watch.next_at = 0
     send_metadata_heartbeat("zone_change")
     schedule_next_keepalive()
 end
@@ -262,22 +418,13 @@ local function on_message(message)
     if c.type == MSG.REQUEST then
         Engine.stats.rx_req = Engine.stats.rx_req + 1
         if not request_targets_this_box(c) then return end
-        dprint("rx REQUEST -> publishing")
+        dprint("rx REQUEST -> queued")
         if type(c.customLockouts) == "table" then
             pcall(function() require('lockouts').set_synced_custom(c.customLockouts) end)
         end
-        local force = c.force == true
-        local depth = (c.depth == "full" or c.depth == "lite") and c.depth or (force and "full" or "lite")
-        local publish_opts = { includeSpells = c.includeSpells == true }
-        if c.fastInventory == true then
-            -- Skip lockouts only. Live stats are required for Inspect > Effects
-            -- after Sync Now (1.2.106 had skipLiveStats here and left Effects empty).
-            publish_opts.skipLockouts = true
-        end
-        publish_opts.reason = "peer_request"
-        publish_opts.replyTo = c.requestId
-        publish_opts.requester = c.from
-        Engine.publish(force, depth, publish_opts)
+        -- Queue only. Inventory, DynamicZone, and Task journal reads must run
+        -- on the script loop. Doing them here stalls/crashes the client.
+        Engine.enqueue_peer_request(c)
     elseif c.type == MSG.SNAPSHOT and c.snap then
         Engine.stats.rx_snap = Engine.stats.rx_snap + 1
         dprint("rx SNAPSHOT from %s/%s", tostring(c.snap.name), tostring(c.snap.server))
@@ -292,11 +439,12 @@ local function on_message(message)
             }
             diag.event("engine.request_reply", string.format("id=%s from=%s depth=%s",
                 tostring(c.replyTo), tostring(c.snap.name or "?"), tostring(c.snap.depth or "?")))
-            -- Explicit inventory requests (need-confirm / go-loot) should reach
-            -- the announce UI promptly; bg normally debounce-saves for ~30s.
-            -- Owner-only disk writes otherwise: peer boxes must not save each
-            -- other's rows into the shared DB (lost-update vs merge-by-newer).
-            pcall(function() Store.save() end)
+            -- Do not Store.save() here: a blocking persist inside the actor
+            -- callback hitches the client. Store.put already dirtied the row;
+            -- ask the run-loop persist job to flush on the next tick.
+            pcall(function()
+                if Store.request_flush then Store.request_flush() end
+            end)
         end
     elseif c.type == MSG.SNAPSHOT_DELTA and c.delta then
         Engine.stats.rx_delta = (Engine.stats.rx_delta or 0) + 1
@@ -332,40 +480,17 @@ local function on_message(message)
         Store.touch(c.snap, c.kind)
     elseif c.type == MSG.BIS_SEARCH then
         if not request_targets_this_box(c) then return end
-        local list_id = tostring(c.list_id or c.list or "")
-        if list_id == "" then return end
-        diag.count("engine.bis_search_rx")
-        local ok_bs, bis_search = pcall(require, 'bis_search')
-        if not ok_bs or not bis_search or not bis_search.search_local then return end
-        local result = diag.time("engine.bis_search_local", function()
-            return bis_search.search_local(list_id)
-        end)
-        if type(result) ~= "table" then return end
-        -- Keep our own map warm even if nobody is listening.
-        pcall(function() bis_search.apply_result(result); bis_search.save() end)
-        send_mail("bis_result", {
-            type = MSG.BIS_RESULT,
-            proto = CFG.proto,
-            kind = 'client',
-            name = result.name,
-            server = result.server,
-            class = result.class,
-            list_id = list_id,
-            updated = result.updated,
-            slots = result.slots,
-        })
-        diag.event("engine.bis_search", string.format("replied list=%s slots=%d",
-            list_id, (function()
-                local n = 0
-                for _ in pairs(result.slots or {}) do n = n + 1 end
-                return n
-            end)()))
+        Engine.enqueue_bis_search(c)
     elseif c.type == MSG.BIS_RESULT then
         diag.count("engine.bis_result_rx")
         local ok_bs, bis_search = pcall(require, 'bis_search')
         if ok_bs and bis_search and bis_search.apply_result then
             if bis_search.apply_result(c) then
-                pcall(function() bis_search.save() end)
+                pcall(function()
+                    diag.time("engine.bis_result_save", function()
+                        bis_search.save()
+                    end)
+                end)
                 diag.event("engine.bis_result", string.format("from=%s list=%s",
                     tostring(c.name or "?"), tostring(c.list_id or c.list or "?")))
             end
@@ -376,16 +501,16 @@ local function on_message(message)
         local target = tostring(c.target or "")
         if target ~= "" and clean_text(target) ~= clean_text(this_name()) then return end
         Engine.stats.rx_loot = (Engine.stats.rx_loot or 0) + 1
-        pcall(function() require('announcer').on_loot_link(c) end)
+        Engine.pending_loot_link = c
     elseif c.type == MSG.LOOT_NEED then
         local target = tostring(c.target or "")
         if target ~= "" and clean_text(target) ~= clean_text(this_name()) then return end
         Engine.stats.rx_need = (Engine.stats.rx_need or 0) + 1
-        pcall(function() require('announcer').on_loot_need(c) end)
+        Engine.pending_loot_need = c
     elseif c.type == MSG.NEED_CONFIRM then
         local target = tostring(c.target or "")
         if target ~= "" and clean_text(target) ~= clean_text(this_name()) then return end
-        pcall(function() require('announcer').on_need_confirm(c) end)
+        Engine.pending_need_confirm = c
     elseif c.type == MSG.NEED_CONFIRM_REPLY then
         local target = tostring(c.target or "")
         if target ~= "" and clean_text(target) ~= clean_text(this_name()) then return end
@@ -638,6 +763,34 @@ function Engine.publish(force, depth, opts)
     depth = depth or default_publish_depth(force)
     if depth ~= "full" then depth = "lite" end
     local publish_reason = tostring(opts.reason or (force and "forced" or "scheduled"))
+
+    -- Blocking depth=full remains only for bank-open capture and inventory_watch
+    -- change publishes. Everything else (startup, Sync Now, Inspect, peer
+    -- REQUEST) publishes lite immediately and enriches cooperatively.
+    if depth == "full" and opts.allowBlockingFull ~= true then
+        diag.event("engine.publish", string.format(
+            "cooperative full reason=%s -> lite + rich_inventory", publish_reason))
+        local lite_ok = Engine.publish(force, "lite", {
+            skipLockouts = opts.skipLockouts,
+            skipLiveStats = opts.skipLiveStats,
+            includeSpells = opts.includeSpells,
+            includeLiveStats = opts.skipLiveStats ~= true,
+            skipLockoutBypass = opts.skipLockoutBypass,
+            reason = publish_reason,
+            replyTo = opts.replyTo,
+            requester = opts.requester,
+            saveNow = opts.saveNow,
+        })
+        pcall(function()
+            require('rich_inventory').start({
+                reason = publish_reason,
+                replyTo = opts.replyTo,
+                requester = opts.requester,
+            })
+        end)
+        return lite_ok
+    end
+
     diag.context("engine.publish", string.format("reason=%s force=%s depth=%s includeSpells=%s skipLockouts=%s skipLiveStats=%s bg=%s lean=%s",
         publish_reason, tostring(force), tostring(depth), tostring(opts.includeSpells == true),
         tostring(opts.skipLockouts == true), tostring(opts.skipLiveStats == true),
@@ -647,13 +800,17 @@ function Engine.publish(force, depth, opts)
         set_sync_hint("Syncing full inventory...", 3.0)
     end
 
-    local snap = snapshot.gather({
-        force = force,
-        depth = depth,
-        includeSpells = opts.includeSpells == true,
-        skipLockouts = opts.skipLockouts == true,
-        skipLiveStats = opts.skipLiveStats == true,
-    })
+    local snap = diag.time("engine.publish.gather", function()
+        return snapshot.gather({
+            force = force,
+            depth = depth,
+            includeSpells = opts.includeSpells == true,
+            skipLockouts = opts.skipLockouts == true,
+            skipLiveStats = opts.skipLiveStats == true,
+            includeLiveStats = opts.includeLiveStats == true,
+            skipLockoutBypass = opts.skipLockoutBypass == true,
+        })
+    end)
     if not snap or not snap.name or snap.name == "?" then
         dprint("publish skipped - no valid name (zoning?)")
         return false
@@ -662,7 +819,9 @@ function Engine.publish(force, depth, opts)
     -- preserve, but do not broadcast a partial/empty wipe to peers.
     if snap.inventoryIncomplete == true then
         dprint("publish skipped - inventory walk incomplete")
-        Store.put(snap, 'client')
+        diag.time("engine.publish.store_put", function()
+            Store.put(snap, 'client')
+        end)
         Engine.last_publish = os.clock()
         schedule_next_publish(Engine.last_publish)
         diag.event("engine.publish", string.format(
@@ -692,7 +851,9 @@ function Engine.publish(force, depth, opts)
             level = snap.level,
             updated = snap.updated,
         } })
-        Store.touch(snap, 'client')
+        diag.time("engine.publish.store_touch", function()
+            Store.touch(snap, 'client')
+        end)
         diag.event("engine.publish", string.format("skipped unchanged reason=%s force=%s depth=%s eq=%d bag=%d bank=%d",
             publish_reason, tostring(force), tostring(depth), #(snap.equipped or {}), #(snap.bags or {}), #(snap.bank or {})))
         return false
@@ -712,14 +873,22 @@ function Engine.publish(force, depth, opts)
         replyTo = opts.replyTo,
         requester = opts.requester,
     })
-    Store.put(snap, 'client')
+    diag.time("engine.publish.store_put", function()
+        Store.put(snap, 'client')
+    end)
     -- Keep the delta baseline aligned with what peers now have, so subsequent
     -- deltas are computed against the last published state.
     pcall(function() require('inventory_watch').note_published_snapshot(snap) end)
     if opts.saveNow == true then
-        Store.save({ only_self = true })
+        diag.time("engine.publish.store_save", function()
+            Store.save({ only_self = true })
+        end)
     else
-        pcall(function() Store.flush_wallet_sidecar() end)
+        pcall(function()
+            diag.time("engine.publish.wallet_sidecar", function()
+                Store.flush_wallet_sidecar()
+            end)
+        end)
     end
     diag.event("engine.publish", string.format("sent reason=%s force=%s depth=%s eq=%d bag=%d bank=%d save=%s",
         publish_reason, tostring(force), tostring(depth), #(snap.equipped or {}), #(snap.bags or {}), #(snap.bank or {}),
@@ -785,8 +954,12 @@ function Engine.publish_snapshot(snap, opts)
                 tostring(opts.reason or "prebuilt"), tostring(snap.depth or "")))
             return false
         end
-        Store.put(snap, 'cache')
-        Store.save({ only_self = true })
+        diag.time("engine.publish_snapshot.store_put", function()
+            Store.put(snap, 'cache')
+        end)
+        diag.time("engine.publish_snapshot.store_save", function()
+            Store.save({ only_self = true })
+        end)
         return true
     end
     return diag.time("engine.publish_snapshot", function()
@@ -814,7 +987,9 @@ function Engine.publish_snapshot(snap, opts)
                 level = snap.level,
                 updated = snap.updated,
             } })
-            Store.touch(snap, 'client')
+            diag.time("engine.publish_snapshot.store_touch", function()
+                Store.touch(snap, 'client')
+            end)
             diag.event("engine.publish_snapshot", string.format("skipped unchanged reason=%s depth=%s eq=%d bag=%d bank=%d",
                 publish_reason, tostring(snap.depth or ""), #(snap.equipped or {}), #(snap.bags or {}), #(snap.bank or {})))
             return false
@@ -833,14 +1008,22 @@ function Engine.publish_snapshot(snap, opts)
             replyTo = opts.replyTo,
             requester = opts.requester,
         })
-        Store.put(snap, 'client')
+        diag.time("engine.publish_snapshot.store_put", function()
+            Store.put(snap, 'client')
+        end)
         pcall(function() require('inventory_watch').note_published_snapshot(snap) end)
         if opts.saveNow == true then
             -- Hot path (worn_persist / urgent inventory): only this box's row.
             -- Full-fleet serialize was freezing Discord bg for minutes.
-            Store.save({ only_self = true })
+            diag.time("engine.publish_snapshot.store_save", function()
+                Store.save({ only_self = true })
+            end)
         else
-            pcall(function() Store.flush_wallet_sidecar() end)
+            pcall(function()
+                diag.time("engine.publish_snapshot.wallet_sidecar", function()
+                    Store.flush_wallet_sidecar()
+                end)
+            end)
         end
         diag.event("engine.publish_snapshot", string.format("sent reason=%s depth=%s eq=%d bag=%d bank=%d save=%s",
             publish_reason, tostring(snap.depth or ""), #(snap.equipped or {}), #(snap.bags or {}), #(snap.bank or {}),
@@ -908,17 +1091,25 @@ function Engine.request_bis_search(list_id, opts)
     opts = type(opts) == "table" and opts or {}
     list_id = tostring(list_id or "")
     if list_id == "" then return false end
+    diag.count("engine.bis_search_request")
     local ok_bs, bis_search = pcall(require, 'bis_search')
     if ok_bs and bis_search then
         if opts.force ~= true and bis_search.should_request and not bis_search.should_request(list_id) then
+            diag.count("engine.bis_search_request_skipped")
             return false
         end
         if bis_search.mark_requested then bis_search.mark_requested(list_id) end
         -- Answer locally first so the UI host paints without waiting on the bus.
-        local local_result = bis_search.search_local and bis_search.search_local(list_id)
+        local local_result = bis_search.search_local and diag.time("engine.bis_search_tx_local", function()
+            return bis_search.search_local(list_id)
+        end)
         if type(local_result) == "table" then
             bis_search.apply_result(local_result)
-            pcall(function() bis_search.save() end)
+            pcall(function()
+                diag.time("engine.bis_search_save", function()
+                    bis_search.save()
+                end)
+            end)
         end
     end
     diag.count("engine.bis_search_tx")
@@ -976,7 +1167,12 @@ function Engine.request_source(source_key, force, opts)
 end
 
 function Engine.publish_inventory_change()
-    return Engine.publish(true, "full", { skipLockouts = true, skipLiveStats = true, reason = "inventory_change" })
+    return Engine.publish(true, "full", {
+        skipLockouts = true,
+        skipLiveStats = true,
+        reason = "inventory_change",
+        allowBlockingFull = true,
+    })
 end
 
 function Engine.sync_bank_now()
@@ -985,7 +1181,7 @@ function Engine.sync_bank_now()
         return false
     end
     snapshot.invalidate()
-    local ok = Engine.publish(true, "full", { reason = "manual_bank_sync", saveNow = true })
+    local ok = Engine.publish(true, "full", { reason = "manual_bank_sync", saveNow = true, allowBlockingFull = true })
     Engine.last_bank_capture = os.clock()
     set_sync_hint(ok and "Bank contents synced." or "Bank sync requested.", 3.0)
     return ok
@@ -995,7 +1191,7 @@ function Engine.sync_banks_network()
     local local_open = snapshot.bank_window_open and snapshot.bank_window_open() or false
     if local_open then
         snapshot.invalidate()
-        Engine.publish(true, "full", { reason = "network_bank_sync", saveNow = true })
+        Engine.publish(true, "full", { reason = "network_bank_sync", saveNow = true, allowBlockingFull = true })
         Engine.last_bank_capture = os.clock()
     end
     Engine.request_all(true, { depth = "full" })
@@ -1012,6 +1208,7 @@ local function capture_open_bank(reason, hint_seconds)
         skipLiveStats = true,
         reason = reason or "bank_capture",
         saveNow = true,
+        allowBlockingFull = true,
     })
     Engine.last_bank_capture = os.clock()
     if reason and reason ~= "" then
@@ -1056,6 +1253,148 @@ local function prune_dedupe_maps()
     end
 end
 
+local lockout_watch = { next_at = 0, sig = nil, don = nil }
+
+--- Names a lockout map holds, for the diagnostic trail. A snapshot that goes
+--- out with the wrong set here is the difference between "the peer never told
+--- us" and "it told us and the cell is wrong".
+local function locked_names(map)
+    local names = {}
+    for cat, entries in pairs(map or {}) do
+        if type(entries) == "table" and cat ~= "DoNState" then
+            for name, rec in pairs(entries) do
+                if type(rec) == "table" and rec.found == true then names[#names + 1] = name end
+            end
+        end
+    end
+    table.sort(names)
+    return #names > 0 and table.concat(names, ", ") or "nothing"
+end
+
+--- The second source the watcher below checks.
+---
+--- DoN missions are tasks, not dynamic zones, so none of their state reaches
+--- timer_signature. It moves on chat capture, on a /tasktime sweep settling,
+--- and on the journal read noticing a mission accepted or completed -- none of
+--- which touch inventory either, so without a check here a peer's DoN state
+--- would ship only when something unrelated happened to publish.
+local function don_signature()
+    local ok, dt = pcall(require, 'don_track')
+    if not ok or type(dt) ~= "table" or type(dt.signature) ~= "function" then return nil end
+    -- Digest only. A Task journal walk on the same tick as DynamicZone is the
+    -- idle bg-only crash path. don_track.tick refreshes Active on its own TTL.
+    local got, sig = pcall(dt.signature)
+    if not got or type(sig) ~= "string" then return nil end
+    return sig
+end
+
+--- Ship a lockout change that no other path would notice.
+---
+--- lite_signature is built from equipped/bags/bank/spells, so gaining or losing
+--- a lockout leaves it byte-identical and publish drops the send as "inventory
+--- unchanged". With autoPeerRefresh off the scheduled tick only heartbeats, so
+--- nothing ships at all. Peers therefore learned lockouts only from a request
+--- -- startup or Sync Now -- which is why a box that earned one while idle
+--- never volunteered it.
+---
+--- Detection reads the raw DynamicZone rows rather than the matched map.
+--- gather_local caches for 300s on a responder, so polling it would re-read the
+--- same stale answer four checks out of five and miss a new lockout for
+--- minutes; forcing it instead risks opening the Expedition window on a box
+--- where the TLO cannot be read. timer_signature has neither problem, and it
+--- skips the per-entry matching on the common no-change path.
+---
+--- Two independent sources, one publish: either can trigger it, and each is
+--- baselined only if it was the one that moved.
+local function tick_lockout_change()
+    local now = os.clock()
+    if now < lockout_watch.next_at then return false end
+    lockout_watch.next_at = now + (tonumber(CFG.lockout_check_s) or 60.0)
+
+    local ok, lo = pcall(require, 'lockouts')
+    if not ok or type(lo) ~= "table" or type(lo.timer_signature) ~= "function" then return false end
+
+    local got, sig = pcall(lo.timer_signature)
+    -- nil means the TLO could not be read. Unknown is not a change.
+    if not got or type(sig) ~= "string" then sig = nil end
+
+    local don_sig = don_signature()
+    local don_changed = false
+    if don_sig ~= nil then
+        if lockout_watch.don == nil then
+            -- "C0" is a box that knows nothing and holds nothing: there is
+            -- genuinely nothing to announce, so baseline quietly. Anything else
+            -- is state a viewer may not have, and the startup publish skips
+            -- lockouts entirely, so say it once.
+            if don_sig == "C0" then
+                lockout_watch.don = don_sig
+            else
+                don_changed = true
+            end
+        elseif don_sig ~= lockout_watch.don then
+            don_changed = true
+        end
+    end
+
+    -- nil means unreadable, which is not a change: leave the baseline alone.
+    local expedition_changed = false
+    if sig ~= nil then
+        if lockout_watch.sig == nil then
+            -- Reconcile rather than blindly trusting the first sample. The
+            -- startup publish can go out before the client has populated
+            -- DynamicZone, so a silent baseline would adopt the correct timers,
+            -- say nothing, and leave the viewer stale until some unrelated
+            -- change. Compare against the raw state the cached map was actually
+            -- built from -- which is what we last published -- and only stay
+            -- quiet if they agree.
+            local built = type(lo.last_built_signature) == "function" and lo.last_built_signature() or nil
+            if built == sig or (built == nil and sig == "") then
+                lockout_watch.sig = sig
+                diag.event("engine.lockout_change", "baseline matches last gather; nothing to correct")
+            else
+                expedition_changed = true
+                diag.event("engine.lockout_change", string.format(
+                    "startup correction: published state was %s, timers now %s",
+                    built == nil and "never gathered" or (built == "" and "no timers" or "different"),
+                    sig == "" and "none" or "present"))
+            end
+        elseif sig ~= lockout_watch.sig then
+            expedition_changed = true
+        end
+    end
+
+    if not expedition_changed and not don_changed then return true end
+
+    -- The timer set really moved, so pay for a matched read now. Bypass the
+    -- cache, but never let this open the Expedition window: we only got here
+    -- because the structured TLO answered, and this runs on background boxes.
+    local gotmap, map = pcall(function()
+        return lo.gather_local({ bypass_cache = true, allow_window_fallback = false })
+    end)
+    if not gotmap or type(map) ~= "table" then return true end
+
+    -- Inventory is not an input to this publish. Carry the latest authoritative
+    -- equipped/bags/bank forward; only lockouts/DoNState change.
+    local publish_reason = "lockout_change"
+    if don_changed and not expedition_changed then publish_reason = "don_change" end
+    local out = nil
+    pcall(function()
+        out = snapshot.prepare_metadata_publish({ lockouts = map }, { reason = publish_reason })
+    end)
+    if type(out) ~= "table" or not out.name or out.name == "?" then return true end
+    diag.event("engine.lockout_change", string.format("publishing locked: %s%s",
+        locked_names(map), don_changed and " (+DoN state changed)" or ""))
+    -- Only accept the new state once it has actually gone out. Committing it up
+    -- front meant a transient failure below -- a failed gather, a snapshot taken
+    -- mid-zone -- silently adopted the change as the new baseline and never
+    -- announced it. Every early return above leaves both signatures in place so
+    -- the next interval tries again.
+    if not Engine.publish_snapshot(out, { force = true, reason = publish_reason }) then return true end
+    if expedition_changed then lockout_watch.sig = sig end
+    if don_changed then lockout_watch.don = don_sig end
+    return true
+end
+
 function Engine.heartbeat()
     if not Engine.ok then return end
     -- R5: keep the readiness marker fresh while we own the mailbox (throttled).
@@ -1063,9 +1402,24 @@ function Engine.heartbeat()
         Engine.next_ready_write = os.clock() + (tonumber(CFG.bg_ready_write_every_s) or 20.0)
         pcall(function() if cfg.write_bg_ready then cfg.write_bg_ready() end end)
     end
+    if not Engine.ingame() then return end
+    -- One native TLO family per heartbeat. Idle bg-only crashes were
+    -- inventory + DynamicZone + Task + worn poll landing on the same tick.
+    Engine._heavy_tlo = nil
+    if Engine.apply_pending_request() then
+        Engine._heavy_tlo = "inventory"
+    end
+    Engine.apply_pending_bis_search()
+    Engine.apply_pending_announce()
     tick_bank_capture()
     prune_dedupe_maps()
     tick_zone_meta()
+    if Engine._heavy_tlo == nil
+        and Engine.lockout_watch_wanted
+        and tick_lockout_change() then
+        Engine.lockout_watch_wanted = nil
+        Engine._heavy_tlo = "dz"
+    end
     if not Engine.next_publish then schedule_next_publish(Engine.last_publish > 0 and Engine.last_publish or os.clock()) end
     if os.clock() >= Engine.next_publish then
         if (state.lean and state.lean()) or cfg.Settings.autoPeerRefresh ~= true then
@@ -1096,4 +1450,10 @@ M.MSG    = MSG
 -- offline dispatch test (tests/turbogear_engine_dispatch_test.lua) can drive
 -- on_message with a fake actor message and assert Store side effects.
 M._on_message = on_message
+M._apply_pending_request = Engine.apply_pending_request
+-- Same reason: the lockout watcher is driven from heartbeat, which a test
+-- cannot run without a live actor mailbox. The watch table is exposed so a test
+-- can rewind the interval and clear the baseline between cases.
+M._tick_lockout_change = tick_lockout_change
+M._lockout_watch = lockout_watch
 return M

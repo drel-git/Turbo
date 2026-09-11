@@ -380,18 +380,7 @@ end
 function M.prepare_for_announces(list_or_id)
     local list = type(list_or_id) == "table" and list_or_id or bis.get(list_or_id)
     if not list then return false, "List not found." end
-    cfg.Settings.bisListMode = "user"
-    cfg.Settings.bisSelectedList = list.id
-    pcall(cfg.SaveSettings)
-    local okCat, catalog = pcall(require, 'bis_catalog')
-    if okCat and catalog and catalog.set_list_announce_enabled then
-        catalog.set_list_announce_enabled(list.id, true)
-    end
-    if cfg.SharedSettings then
-        cfg.SharedSettings.bisAnnounceEnabled = true
-        pcall(cfg.SaveSharedSettings)
-    end
-    return true, list.name
+    return false, "Custom lists are for planning only; [TG] linked-needs uses built-in TurboGear BiS."
 end
 
 function M.delete(id)

@@ -1,16 +1,36 @@
 -- Run from repo root:  luajit lua/tests/turbogear_config_bgready_test.lua
 -- Loads the REAL config.lua under an mq stub and exercises the R5 bg-ready
 -- marker helpers (write / age / clear) against a temp file.
-package.path = 'lua/turbogear/?.lua;lua/turbogear/?/init.lua;' .. package.path
+package.path = 'lua/turbogear/?.lua;lua/turbogear/?/init.lua;lua/tests/helpers/?.lua;' .. package.path
+local tmpdir = require('tmpdir')
+local lua_turbo_value = 500
+local last_cmd = nil
 package.preload['mq'] = function()
-    return { configDir = "/tmp",
+    return { configDir = tmpdir.dir(),
+        cmd = function(s) last_cmd = s end,
         TLO = { Me = { CleanName = function() return "MarkerTest" end },
+            Lua = { Turbo = function() return lua_turbo_value end },
             MacroQuest = { Server = function() return "Srv" end } } }
 end
 
 local cfg = require('config')
 local pass, fail = 0, 0
 local function ck(c, m) if c then pass = pass + 1 else fail = fail + 1; print("  FAIL: " .. m) end end
+
+do
+    lua_turbo_value = 500
+    local st = cfg.lua_turbo_status()
+    ck(st.known == true and st.warning == true and st.value == 500 and st.recommended == 1000,
+        "Lua Turbo below recommendation warns")
+    lua_turbo_value = 1000
+    st = cfg.lua_turbo_status()
+    ck(st.known == true and st.ok == true and st.warning == false and st.value == 1000,
+        "Lua Turbo at recommendation is OK")
+    last_cmd = nil
+    local applied = cfg.set_recommended_lua_turbo()
+    ck(applied == 1000 and last_cmd == "/lua conf turboNum 1000",
+        "Lua Turbo setter sends /lua conf turboNum 1000")
+end
 
 os.remove(cfg.BgReadyFile)
 ck(cfg.bg_ready_age() == nil, "no marker -> age nil")

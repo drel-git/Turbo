@@ -13,6 +13,17 @@ local function check(cond, label)
     end
 end
 
+do
+    local n0, id0 = R.parse_item_name_id("Hanvar's Hoop")
+    local n1, id1 = R.parse_item_name_id("Hanvar's Hoop 47286")
+    local n2, id2 = R.parse_item_name_id("Hanvar's Hoop [47286]")
+    local n3, id3 = R.parse_item_name_id("Hanvar's Hoop (ID: 47286)")
+    check(n0 == "Hanvar's Hoop" and id0 == 0, 'cli identity: name only')
+    check(n1 == "Hanvar's Hoop" and id1 == 47286, 'cli identity: trailing numeric id')
+    check(n2 == "Hanvar's Hoop" and id2 == 47286, 'cli identity: bracketed optional id')
+    check(n3 == "Hanvar's Hoop" and id3 == 47286, 'cli identity: labeled id')
+end
+
 -- should_skip_line
 check(R.should_skip_line("", "Hez") == true, 'skip: empty line')
 check(R.should_skip_line("Drel tells the group, '[TG] - Sword - Hez'", "Hez") == true, 'skip: own TG output')
@@ -67,6 +78,12 @@ check(R.is_other_player_chat_line("You say, 'Sword'") == false, 'other line: sel
 -- normalize_item_name
 check(R.normalize_item_name("  Blade  OF   War ") == "blade of war", 'normalize: trim/lower/collapse')
 check(R.normalize_item_name(nil) == "", 'normalize: nil safe')
+check(R.normalize_item_name("Bloodstained Spring (ID: 8)") == "bloodstained spring",
+    'normalize: strips trailing corpse id')
+check(R.normalize_item_name("Bloodstained Spring ( id : 8 )") == "bloodstained spring",
+    'normalize: strips loose trailing corpse id')
+check(R.strip_trailing_corpse_id("Bloodstained Spring (ID: 8)") == "Bloodstained Spring",
+    'strip corpse id: preserves display case')
 
 -- dedupe_key
 check(R.dedupe_key("Srv", "Hez", "anguish", "Blade of War", 101)
@@ -100,6 +117,8 @@ check(R.prefer_announce_item_name("Forefinger Proximal Phalanx", "Jonas Dagmire'
     == "Jonas Dagmire's Forefinger Proximal Phalanx", 'jonas: prefer full display name')
 check(R.prefer_announce_item_name("Jonas Dagmire's Forefinger Proximal Phalanx", "Forefinger Proximal Phalanx")
     == "Jonas Dagmire's Forefinger Proximal Phalanx", 'jonas: keep full when short arrives late')
+check(R.prefer_announce_item_name("Bloodstained Spring", "Bloodstained Spring (ID: 8)")
+    == "Bloodstained Spring", 'prefer display: dirty corpse id suffix never wins')
 check(R.dedupe_key("Srv", "Hez", "jonas", "Jonas Dagmire's Capitate", 0)
     == R.dedupe_key("Srv", "Hez", "jonas", "Capitate", 0),
     'jonas: dedupe key collapses alias pair')
@@ -122,6 +141,45 @@ check(R.parse_tg_line("You tell your party, '[TG] - \18linkdata\18Noxious Bloom\
 check(R.parse_tg_line("Drel tells the group, 'grats on the sword'") == nil, 'tg parse: non-TG line is nil')
 check(R.parse_tg_line("") == nil, 'tg parse: empty line is nil')
 check(R.parse_tg_line("[TG] - Solo Item") == "Solo Item", 'tg parse: payload without names segment')
+
+local five = {
+    "Forgotten Leather Leash",
+    "Hanvar's Hoop",
+    "Noxious Bloom of Corporeal Calamity",
+    "Duality of Desire",
+    "Jonas Dagmire's Scaphoid",
+}
+do
+    local keys = {}
+    for _, name in ipairs(five) do
+        local k = R.grouped_item_key(name, 0, "", is_link)
+        check(keys[k] == nil, 'five-item burst keys do not collide: ' .. name)
+        keys[k] = name
+    end
+    check(R.jonas_canonical_name("Jonas Dagmire's Scaphoid")
+        == R.jonas_canonical_name("Scaphoid"), 'jonas alias: Scaphoid collapses to same canonical')
+    check(R.jonas_canonical_name("Duality of Desire")
+        ~= R.jonas_canonical_name("Jonas Dagmire's Scaphoid"), 'jonas alias does not collide with Duality')
+end
+
+do
+    local a = R.parse_tg_announce("[TG] - Forgotten Leather Leash - Discord | Drel | Sketti")
+    check(a and a.item_name == "Forgotten Leather Leash", 'tg announce: plaintext item')
+    check(a and #a.needers == 3 and a.needers[1] == "Discord" and a.needers[3] == "Sketti",
+        'tg announce: pipe needers preserve order')
+    check(R.parse_tg_announce("Drel tells the group, 'grats on the sword'") == nil,
+        'tg announce: non-TG is nil')
+    check(R.parse_tg_announce("[TG] - Solo Item") == nil,
+        'tg announce: payload without needers is not a complete announce')
+    local hex = R.parse_tg_announce(
+        "You tell your party, '[TG] -  0138300000000000000000000000000000000000000000002F8181D1Jonas Dagmire's Scaphoid  - Discord | Sketti'")
+    check(hex and hex.item_name == "Jonas Dagmire's Scaphoid",
+        'tg announce: strips leading item-link hex from payload')
+    check(hex and #hex.needers == 2 and hex.needers[1] == "Discord",
+        'tg announce: needers after hex payload')
+    local framed = R.parse_tg_announce("You tell your party, '[TG] - \18linkdata\18Noxious Bloom\18 - Drel'")
+    check(framed and framed.item_name == "Noxious Bloom", 'tg announce: framed link display name')
+end
 
 -- confirmable_needers: cache-derived peer needers only (skip self + live sources)
 do

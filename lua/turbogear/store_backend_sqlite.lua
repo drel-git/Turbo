@@ -171,7 +171,9 @@ function M.new(opts)
     local db = sqlite3.open(path)
     if not db then self.unavailable_reason = "open failed"; return self end
     self.db = db
-    pcall(function() db:busy_timeout(3000) end)
+    -- 3s waits froze bg-only clients on the shared fleet DB (AV / WAL lock)
+    -- and the server dropped them with no crash dialog. Fail fast and skip.
+    pcall(function() db:busy_timeout(150) end)
     db:exec("PRAGMA journal_mode=WAL")
     db:exec("PRAGMA synchronous=NORMAL")
     db:exec([[CREATE TABLE IF NOT EXISTS sources(

@@ -48,6 +48,7 @@ local ul_found = nil
 local ul_confirm_delete = nil
 local ul_show_slot_layout = false
 local draw_user_lists           -- legacy compact list section, retained as fallback
+local lua_turbo_status_msg = ""
 
 local function trim(s)
     -- gsub returns (string, count); tonumber(trim(x)) must not see the count as base.
@@ -72,7 +73,7 @@ local function bank_label(snap)
     if snap.bankValid == true then
         return string.format("Bank: cached %s (%d item%s)", age_label(snap.bankCapturedAt or snap.inventoryUpdated or snap.updated), count, count == 1 and "" or "s"), Theme.dim
     end
-    return "Bank: not synced yet - open a bank and use Sync Bank.", Theme.amber
+    return "Bank: not synced yet - open a bank.", Theme.amber
 end
 
 local function parse_id_list(text, item_field)
@@ -239,7 +240,7 @@ local function draw_bis_list_visibility()
 end
 
 local function draw_bis_announce_visibility()
-    col_text(Theme.dim, "Announce linked needs from these lists (off = still visible on tab, won't chat announce). All ON by default.")
+    col_text(Theme.dim, "Announce linked needs from built-in TurboGear BiS lists. Custom lists are planning-only.")
     local specs = catalog.announce_list_specs()
     local x0, y0 = 0, 0
     if ImGui.GetCursorPos then x0, y0 = ImGui.GetCursorPos(); x0, y0 = tonumber(x0) or 0, tonumber(y0) or 0 end
@@ -248,8 +249,7 @@ local function draw_bis_announce_visibility()
     local row_h = 24.0
     for idx, spec in ipairs(specs) do
         local enabled = catalog.list_announce_enabled(spec.id)
-        local prefix = spec.user and "Custom: " or ""
-        local label = string.format("%s%s: %s", prefix, spec.label, enabled and "Announce ON" or "Announce OFF")
+        local label = string.format("%s: %s", spec.label, enabled and "Announce ON" or "Announce OFF")
         local est_w = setup_button_text_width(label)
         if idx > 1 and (row_x + est_w > x0 + line_w + 0.5) then
             row_x, row_y = x0, row_y + row_h + 4
@@ -266,7 +266,7 @@ end
 local function draw_bis_list_matrix()
     col_text(Theme.section or Theme.header, "TurboBiS Lists")
     col_text(Theme.dim, "Tab visibility moved to the List picker on the BiS + Lists tab.")
-    col_text(Theme.dim, "Announce controls linked-needs chat for that list (display is unchanged).")
+    col_text(Theme.dim, "Announce controls linked-needs chat for built-in lists only; custom lists remain planning-only.")
     local announce_specs = catalog.announce_list_specs()
     if views.begin_scroll_table("SetupTurboBiSListMatrix", 2, views.scroll_table_flags(), 92.0, 260.0) then
         ImGui.TableSetupColumn("List", ImGuiTableColumnFlags.WidthStretch, 1.6)
@@ -276,8 +276,7 @@ local function draw_bis_list_matrix()
             local enabled = catalog.list_announce_enabled(spec.id)
             ImGui.TableNextRow()
             ImGui.TableSetColumnIndex(0)
-            local prefix = spec.user and "Custom: " or ""
-            col_text(spec.user and (Theme.purple or Theme.item) or Theme.item, prefix .. tostring(spec.label or spec.id or "?"))
+            col_text(Theme.item, tostring(spec.label or spec.id or "?"))
             ImGui.TableSetColumnIndex(1)
             if toggle_button((enabled and "ON" or "OFF") .. "##setup_bis_matrix_ann_" .. tostring(spec.id), enabled, 64, 0) then
                 catalog.set_list_announce_enabled(spec.id, not enabled)
@@ -290,6 +289,28 @@ end
 local function draw_announce_status()
     local st = announcer.status()
     col_text(Theme.section or Theme.header, "Linked-needs status")
+    local lua_turbo = cfg.lua_turbo_status and cfg.lua_turbo_status() or nil
+    if lua_turbo and lua_turbo.known then
+        if lua_turbo.warning then
+            col_text(Theme.amber, string.format(
+                "MQ2Lua Turbo Num: %d (recommended %d for fast linked-needs warmup)",
+                tonumber(lua_turbo.value) or 0, tonumber(lua_turbo.recommended) or 1000))
+            if themed_button("Set Lua Turbo Num to " .. tostring(lua_turbo.recommended) .. "##setup_lua_turbo", Theme.purple) then
+                local applied = cfg.set_recommended_lua_turbo and cfg.set_recommended_lua_turbo()
+                lua_turbo_status_msg = "Set command sent for Lua Turbo Num " .. tostring(applied or lua_turbo.recommended) .. ". Rechecking..."
+            end
+            if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
+                ImGui.SetTooltip("Runs /lua conf turboNum " .. tostring(lua_turbo.recommended) .. ". If the warning does not clear, reload MQ2Lua or relog.")
+            end
+        else
+            col_text(Theme.online, string.format("MQ2Lua Turbo Num: %d OK", tonumber(lua_turbo.value) or 0))
+        end
+    elseif lua_turbo then
+        col_text(Theme.dim, "MQ2Lua Turbo Num: unavailable (" .. tostring(lua_turbo.reason or "unknown") .. ")")
+    end
+    if lua_turbo_status_msg ~= "" then
+        col_text(Theme.dim, lua_turbo_status_msg)
+    end
     local ready_col = st.ready and Theme.online or Theme.amber
     col_text(ready_col, string.format("Index: %s  |  Pending: %d  |  Lists announcing: %d/%d",
         st.index_label or (st.ready and "ready" or "warming"), st.pending or 0, st.lists_on or 0, st.lists_total or 0))
@@ -517,13 +538,6 @@ local function draw_editor_header(names, edit_list)
 
     if edit_list then
         local list_id = edit_list.id or ul_edit_list_id
-        if themed_button("Announce Needs##ul_editor_ann", Theme.sync) then
-            local ok, detail = userlists.prepare_for_announces(list_id)
-            ul_status = ok
-                and string.format("'%s' is active for linked-needs announces.", tostring(detail or edit_list.name))
-                or tostring(detail or "Could not enable announces.")
-        end
-        ImGui.SameLine()
         if themed_button("Analyze##ul_editor_analyze", Theme.blue) then
             local ok_lo, loadout = pcall(require, 'loadout')
             if ok_lo and loadout and loadout.open_analyze_list then
@@ -1011,11 +1025,38 @@ draw_user_lists = function()
     if msg and msg ~= "" then ul_status = msg end
 end
 
+local function mark_settings_dirty(reason)
+    if cfg.MarkSettingsDirty then cfg.MarkSettingsDirty(reason)
+    else SaveSettings() end
+end
+
+local function draw_setup_tabs()
+    local cur = tostring(Settings.setupTab or "status")
+    local tabs = {
+        { key = "status", label = "Status" },
+        { key = "announcements", label = "Announcements" },
+        { key = "advanced", label = "Advanced" },
+    }
+    for i, tab in ipairs(tabs) do
+        if i > 1 then ImGui.SameLine() end
+        local active = cur == tab.key
+        if toggle_button(tab.label .. "##setup_tab_" .. tab.key, active, 0, 22.0) and not active then
+            cur = tab.key
+            Settings.setupTab = tab.key
+            mark_settings_dirty("setup_tab")
+        end
+    end
+    ImGui.Separator()
+    return cur
+end
+
 function M.draw_user_lists_editor()
     draw_list_editor_page()
 end
 
 function M.draw()
+    local setup_tab = draw_setup_tabs()
+    if setup_tab == "status" then
     if collapsing_section("Sync / Online Peers", true) then
     local on, st, off = Store.counts()
     local invalid = Store.invalid_peer_keys and Store.invalid_peer_keys() or {}
@@ -1140,7 +1181,9 @@ function M.draw()
         end
     end
     end
+    end
 
+    if setup_tab == "advanced" then
     if collapsing_section("Broadcast / Launch", false) then
         ImGui.TextWrapped("How other boxes are told to run in the background. Pick the broadcast system your MQ setup uses; EQBC usually needs /bccmd connect first.")
         local active = cfg.transport_profile()
@@ -1178,6 +1221,7 @@ function M.draw()
         if not cfg.can_safely_launch_peers() then
             col_text(Theme.amber, "Group launch needs a supported group template and an active group; use Launch All Online for out-of-group clients.")
         end
+        col_text(Theme.section or Theme.header, "Transport tests")
         if themed_button("Test All", Theme.blue) then
             local cmd = cfg.transport_command("all", "echo TurboGear reachable", target_name)
             if cmd ~= "" then mq.cmd(cmd) end
@@ -1192,7 +1236,8 @@ function M.draw()
             local cmd = cfg.transport_command("target", "echo TurboGear reachable", target_name)
             if cmd ~= "" then mq.cmd(cmd) else ul_status = "Enter a target name and choose a target-capable transport." end
         end
-        ImGui.SameLine()
+
+        col_text(Theme.section or Theme.header, "Launch automation")
         if toggle_button(Settings.autoLaunch and "Auto-launch peers: ON" or "Auto-launch peers: OFF", Settings.autoLaunch) then
             Settings.autoLaunch = not Settings.autoLaunch; SaveSettings()
         end
@@ -1220,7 +1265,8 @@ function M.draw()
         if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
             ImGui.SetTooltip("When this UI box unloads TurboGear (/lua stop or /tgear stop), broadcast /lua stop turbogear_bg to peers and clean up legacy turbogear bg responders.")
         end
-        ImGui.SameLine()
+
+        col_text(Theme.section or Theme.header, "Runtime")
         do
             -- Storage backend selector (Phase 6): cycles auto -> file -> sqlite.
             -- The backend is chosen at load, so a change applies on restart.
@@ -1232,13 +1278,6 @@ function M.draw()
             if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
                 ImGui.SetTooltip("Persistence backend. auto = SQLite when lsqlite3 is available (auto-installed on first use), else the file cache. Restart TurboGear (/lua run turbogear) to apply a change.")
             end
-        end
-        ImGui.SameLine()
-        if toggle_button(Settings.startMinimized and "Start minimized: ON" or "Start minimized: OFF", Settings.startMinimized) then
-            Settings.startMinimized = not Settings.startMinimized; SaveSettings()
-        end
-        if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
-            ImGui.SetTooltip("ON starts the UI as the small TG icon. /lua run turbogear mini does the same for one launch.")
         end
         ImGui.SameLine()
         if toggle_button(Settings.autoPeerRefresh and "Auto peer refresh: ON" or "Auto peer refresh: OFF", Settings.autoPeerRefresh) then
@@ -1275,6 +1314,8 @@ function M.draw()
             end
             ImGui.EndCombo()
         end
+
+        col_text(Theme.section or Theme.header, "Maintenance")
         if themed_button("Clean Restart Peers", Theme.amber) then
             cfg.stop_peers()
             mq.cmd("/timed " .. tostring(math.max(5, math.floor(tonumber(Settings.peerLaunchDelayDs) or 20))) .. " " .. cfg.start_bg_command())
@@ -1286,11 +1327,15 @@ function M.draw()
             print("[TurboGear] (random delay staggers logins; every box self-starts the responder)")
         end
     end
-
-    if collapsing_section("TurboBiS", false) then
-        draw_turbobis_settings()
     end
 
+    if setup_tab == "announcements" then
+    if collapsing_section("TurboBiS", true) then
+        draw_turbobis_settings()
+    end
+    end
+
+    if setup_tab == "advanced" then
     if collapsing_section("Focus Display", false) then
         draw_focus_display_settings()
     end
@@ -1315,6 +1360,7 @@ function M.draw()
         col_text(Theme.dim, "Settings: " .. cfg.SettingsFile)
         col_text(Theme.dim, "Shared: " .. cfg.SharedSettingsFile)
         col_text(Theme.dim, "Cache: " .. cfg.CacheFile)
+    end
     end
 end
 

@@ -15,6 +15,7 @@ local ui_table = require('ui_table')
 local views = require('views')
 local item_actions = require('item_actions')
 local item_index = require('item_index')
+local index_warm_policy = require('index_warm_policy')
 local Engine = require('engine').Engine
 local Store = require('store').Store
 local characters = require('characters')
@@ -464,6 +465,34 @@ local function maybe_refresh_local_source()
     if Engine.publish(true, "full", { skipLockouts = true, skipLiveStats = true }) and invalidate_caches then invalidate_caches() end
 end
 
+local function request_selected_target_inventory(snap)
+    local key = selected_target_key()
+    target_refresh_requests[key] = nil
+    maybe_reload_store_cache(true)
+    M.begin_cache_watch(M.CACHE_WATCH_S)
+    local rec = {
+        last = os.clock(),
+        requested = os.time(),
+        waiting_since = os.time(),
+        ok = true,
+        cache_watch_until = os.clock() + M.CACHE_WATCH_S,
+        cache_reason = M.last_cache_reload_reason,
+    }
+    target_refresh_requests[key] = rec
+    if M._state.engine_claim_disabled then
+        local request_name = tostring((snap and snap.name) or views.source_owner_name(key) or ""):match("^%s*(.-)%s*$") or ""
+        if request_name ~= "" then
+            mq.cmd('/squelch /tgearbg requestsource ' .. request_name)
+        else
+            mq.cmd('/squelch /tgearbg sync quiet')
+        end
+    else
+        target_refresh_requests[key] = nil
+        maybe_refresh_selected_target(snap)
+        M.begin_cache_watch(M.CACHE_WATCH_S)
+    end
+end
+
 local function draw_target_freshness_warning(snap)
     if type(snap) ~= "table" then return end
     local age = snapshot_inventory_age(snap) or 0
@@ -499,6 +528,9 @@ local function draw_target_freshness_warning(snap)
         else
             col_text(Theme.amber or Theme.gold, "Target inventory is lite; Sync Now if suggestions look stale.")
         end
+        if themed_button("Request full inventory##tg_request_target_inventory_inline", Theme.blue, 160, 0) then
+            request_selected_target_inventory(snap)
+        end
     elseif age > 300 then
         if refresh and refresh.ok then
             col_text(Theme.amber or Theme.gold,
@@ -506,6 +538,9 @@ local function draw_target_freshness_warning(snap)
             draw_request_diag()
         else
             col_text(Theme.amber or Theme.gold, "Target inventory snapshot is " .. age_text(age) .. " old; Sync Now if gear changed recently.")
+        end
+        if themed_button("Request full inventory##tg_request_target_inventory_inline", Theme.blue, 160, 0) then
+            request_selected_target_inventory(snap)
         end
     end
 end
@@ -519,13 +554,14 @@ end
 local function selected_target_inventory_ready(snap)
     if selected_target_key() == "__self__" then return true end
     if type(snap) ~= "table" then return false end
-    if snap.depth ~= "full" or not snap_has_inventory(snap) then return false end
+    if not snap_has_inventory(snap) then return false end
     local age = snapshot_inventory_age(snap) or 999999
     return age <= TARGET.HARD_HIDE_MAX_AGE_S
 end
 
 local function selected_target_inventory_fresh(snap)
     if not selected_target_inventory_ready(snap) then return false end
+    if snap.depth ~= "full" then return false end
     local age = snapshot_inventory_age(snap) or 999999
     return age <= TARGET.ACTIONABLE_MAX_AGE_S
 end
@@ -593,25 +629,7 @@ local function draw_target_inventory_wait(snap)
     end
 
     if themed_button("Request inventory now##tg_request_target_inventory", Theme.blue, 150, 0) then
-        target_refresh_requests[key] = nil
-        maybe_reload_store_cache(true)
-        M.begin_cache_watch(M.CACHE_WATCH_S)
-        local rec = {
-            last = os.clock(),
-            requested = os.time(),
-            waiting_since = os.time(),
-            ok = true,
-            cache_watch_until = os.clock() + M.CACHE_WATCH_S,
-            cache_reason = M.last_cache_reload_reason,
-        }
-        target_refresh_requests[key] = rec
-        if M._state.engine_claim_disabled then
-            mq.cmd('/squelch /tgearbg sync')
-        else
-            target_refresh_requests[key] = nil
-            maybe_refresh_selected_target(snap)
-            M.begin_cache_watch(M.CACHE_WATCH_S)
-        end
+        request_selected_target_inventory(snap)
     end
     ImGui.SameLine()
     if themed_button("Start bg on " .. target_name .. "##tg_start_target_bg", Theme.purple, 170, 0) then
@@ -2938,6 +2956,9 @@ end
 
 function M.draw()
     return M._diag.time("ui.suggestions.draw", function()
+    pcall(function()
+        index_warm_policy.request_item_index("upgrade", 3.0)
+    end)
     ensure_defaults()
     local mode = Settings.suggestViewMode or "overview"
 
@@ -2992,18 +3013,7 @@ function M.draw()
     if draw_target_inventory_wait(selected_snap) then
         return
     end
-    -- Keep a usable full snap on screen, but quietly re-request when it goes stale
-    -- so Suggestions do not sit on a 5m+ cache until the user notices.
     selected_snap = views.source_snapshot(Settings.suggestTargetKey or "__self__")
-    if selected_snap and not selected_target_inventory_fresh(selected_snap) then
-        local key = selected_target_key()
-        local rec = target_refresh_requests[key]
-        local now = os.clock()
-        if not rec or (now - (tonumber(rec.last) or 0)) >= TARGET.STALE_REFRESH_GAP_S then
-            maybe_refresh_selected_target(selected_snap)
-            M.begin_cache_watch(M.CACHE_WATCH_S)
-        end
-    end
 
     if mode == "overview" then
         local slots, meta = visible_overview()

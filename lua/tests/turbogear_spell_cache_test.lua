@@ -103,5 +103,24 @@ check(SC.is_known('Not A Spell') == false, 'unknown name')
 local changed2 = SC.rebuild('Cleric')
 check(changed2 == false, 'second rebuild same sig')
 
+-- Restore from persisted snap does not live-gather
+SC._reset_for_tests()
+local restored, why = SC.restore_from_snapshot({
+    spells_sig = 'aegis of vie:1:0:9742',
+    spells = {
+        ['aegis of vie'] = { name = 'Aegis of Vie', book = 1, scroll = 0, spell_id = 9742 },
+    },
+    spell_ids = { [9742] = true },
+})
+check(restored == true and why == 'restored', 'restore_from_snapshot hydrates cache')
+check(SC.ready() == true, 'ready after restore')
+check(SC.is_known('Aegis of Vie') == true, 'restored name known')
+check(SC.is_known(9742) == true, 'restored id known')
+check(select(1, SC.restore_from_snapshot({})) == false, 'empty snap is not restored')
+SC._reset_for_tests()
+SC.note_deferred_unready()
+check(SC.deferred_unready() == true, 'note_deferred_unready')
+check(SC.ensure_built() == false, 'deferred unready does not rebuild')
+
 io.write(string.format('turbogear_spell_cache_test: %d passed, %d failed\n', passed, failed))
 os.exit(failed == 0 and 0 or 1)

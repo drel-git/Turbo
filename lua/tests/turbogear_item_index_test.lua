@@ -21,6 +21,9 @@ package.preload["config"] = function()
         SaveSharedSettings = function() end,
     }
 end
+package.preload["state"] = function()
+    return { bg = false }
+end
 
 local Store = {
     sources = {},
@@ -50,6 +53,10 @@ package.preload["snapshot"] = function()
 end
 
 local item_index = require("item_index")
+local policy = require("index_warm_policy")
+local function demand(reason)
+    policy.request_item_index(reason or "test", 60)
+end
 
 local passed, failed = 0, 0
 local function check(cond, label)
@@ -78,6 +85,7 @@ local function make_peer(name, item_name, id)
 end
 
 item_index._reset_for_tests()
+policy._reset_for_tests()
 Store.sources = {
     ["Srv:PeerA"] = make_peer("PeerA", "PeerA Ring", 10),
     ["Srv:PeerB"] = make_peer("PeerB", "PeerB Ring", 11),
@@ -85,11 +93,17 @@ Store.sources = {
 }
 Store.content_version = 1
 
--- Cold start must NOT sync-rebuild; get starts a job and serves empty/last-good.
+-- Undemanded get must not start a job (TurboBiS / Gear stay cold).
+local rows_cold, ver_cold = item_index.get(false)
+check(type(rows_cold) == "table", "cold get returns a table")
+check(item_index.building() ~= true, "undemanded get does not start a job")
+check(#rows_cold == 0 and ver_cold == 0, "undemanded get does not sync-fill rows")
+
+-- Stats/Focus/Search demand starts a cooperative job and serves last-good.
+demand("stats")
 local rows0, ver0 = item_index.get(false)
-check(type(rows0) == "table", "cold get returns a table")
-check(item_index.building() == true, "cold get starts a budgeted job")
-check(#rows0 == 0 and ver0 == 0, "cold get does not sync-fill rows")
+check(item_index.building() == true, "demanded get starts a budgeted job")
+check(#rows0 == 0 and ver0 == 0, "demanded get does not sync-fill rows")
 
 local finished_cold = false
 for _ = 1, 50 do
@@ -111,6 +125,7 @@ local cold_ver = ver1
 -- Content bump: get must NOT finish a multi-peer rebuild in-call.
 Store.content_version = 2
 Store.sources["Srv:PeerD"] = make_peer("PeerD", "PeerD Ring", 13)
+demand("stats")
 local rows2, ver2 = item_index.get(false)
 check(ver2 == cold_ver, "stale get keeps last-good version")
 check(#rows2 == cold_total, "stale get keeps last-good row count")
@@ -144,6 +159,7 @@ check(saw_d, "PeerD present after swap")
 
 -- Mid-job target change restarts; published generation matches latest content_version.
 Store.content_version = 3
+demand("focus")
 item_index.get(false)
 check(item_index.building() == true, "another bump starts a job")
 Store.content_version = 4
@@ -155,6 +171,7 @@ check(#rows4 >= #rows3, "final row count stable after restart")
 
 -- Within-peer chunking: a large bag list cannot finish in one tiny budget tick.
 item_index._reset_for_tests()
+policy._reset_for_tests()
 local big_bags = {}
 for i = 1, 200 do
     big_bags[i] = { name = "BagItem" .. i, id = 1000 + i, qty = 1, slotid = i, stats = {} }
@@ -174,17 +191,36 @@ Store.sources = {
 }
 Store.content_version = 1
 self_cached.bags = {}
+demand("stats")
 item_index.get(false)
 check(item_index.building() == true, "fat peer starts job")
-local progressed = item_index.tick(0.01)
-check(progressed == false, "tiny budget does not finish 200-bag peer in one tick")
-check(item_index.building() == true, "fat peer still building after tiny tick")
+-- Drive the deadline from a supplied clock. os.clock() advances in ~1ms granules
+-- on Windows, coarser than the 0.25ms floor tick() applies to any budget, so a
+-- real clock cannot express "expired mid-peer" and this assertion would come
+-- down to whether the machine happened to be slow enough.
+local BUDGET_MS = 0.25
+local STEP_S = 1e-5
+local clock_reads, fake_now = 0, 0
+item_index._set_clock_for_tests(function()
+    clock_reads = clock_reads + 1
+    fake_now = fake_now + STEP_S
+    return fake_now
+end)
+local progressed = item_index.tick(BUDGET_MS)
+check(progressed == false, "budgeted tick does not finish 200-bag peer in one tick")
+check(item_index.building() == true, "fat peer still building after budgeted tick")
+-- The budget expires BUDGET_MS/STEP_S reads in, and the item loop reads the
+-- clock once per item, so this also proves it consumed items instead of bailing
+-- at the loop head having done nothing.
+check(clock_reads > 20, "budgeted tick processed items before yielding, got " .. tostring(clock_reads))
+item_index._set_clock_for_tests(nil)
 while item_index.building() do item_index.tick(50) end
 local rows_fat = item_index.get(false)
 check(#rows_fat >= 200, "fat peer eventually indexed")
 
 -- Lite bag (no wear slots) then full meta on same id must rebuild Suggestions rows.
 item_index._reset_for_tests()
+policy._reset_for_tests()
 Store.sources = {
     ["Srv:BowPeer"] = {
         name = "BowPeer",
@@ -203,6 +239,7 @@ Store.sources = {
 }
 Store.content_version = 1
 self_cached.bags = {}
+demand("stats")
 item_index.get(false)
 while item_index.building() do item_index.tick(50) end
 local rows_lite = item_index.get(false)
@@ -236,6 +273,7 @@ check(saw_ranged, "full meta rebuild indexes ranged wear slot for bag bow")
 
 -- Store flatten serves Suggestions while the budgeted index is still building.
 item_index._reset_for_tests()
+policy._reset_for_tests()
 Store.sources = {
     ["Srv:Quick"] = {
         name = "Quick",
@@ -255,7 +293,12 @@ Store.sources = {
 Store.content_version = 9
 self_cached.bags = {}
 item_index.get(false)
-check(item_index.building() == true, "cold get starts job before store flatten")
+check(item_index.building() ~= true, "undemanded get stays cold before store flatten")
+local srows_cold, _, src_cold = item_index.suggestion_rows()
+check(src_cold == "store", "suggestion_rows uses store when index is idle")
+demand("upgrade")
+item_index.get(false)
+check(item_index.building() == true, "upgrade demand starts job before store flatten")
 local srows, _, src = item_index.suggestion_rows()
 check(src == "store", "suggestion_rows uses store while index building")
 local saw_quick = false

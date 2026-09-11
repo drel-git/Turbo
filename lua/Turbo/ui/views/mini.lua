@@ -12,15 +12,14 @@ local mq = require('mq')
 
 local M = {}
 
--- Data-driven mini-bar tool cluster (left of '+'). Hub art lives under
--- Turbo/icons/; TurboGear's own mini icon (icon_turbogear.png) is separate.
+-- Data-driven mini-bar tool cluster (left of '+').
 -- `short` = compact Setup checkbox label (one-row layout).
 M.TOOLS = {
     {
         key = 'turbogear',
         label = 'TurboGear',
         short = 'Gear',
-        icon = 'Turbo/icons/turbogear.png',
+        icon = 'turbogear/icon_turbogear.png',
         script = 'turbogear',
         launch = '/lua run turbogear',
         toggle = '/tgear toggle',
@@ -257,8 +256,12 @@ function M.render(state, actions, ui)
     ImGui.PushStyleVar(ImGuiStyleVar.PopupRounding, 4)
     ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 2.5)
     ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, 5, 4)
+    ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, 8, 6)
     ImGui.PushStyleColor(ImGuiCol.WindowBg, IM_COL32(24, 28, 44, 248))
     ImGui.PushStyleColor(ImGuiCol.Border, IM_COL32(255, 188, 72, 240))
+    if g.miniWindowPos and g.miniWindowPos.x and g.miniWindowPos.y and ImGui.SetNextWindowPos then
+        ImGui.SetNextWindowPos(g.miniWindowPos.x, g.miniWindowPos.y, ImGuiCond.Appearing)
+    end
     local shouldDraw
     g.windowOpen, shouldDraw = ImGui.Begin('Turbo###Turbo_Mini', g.windowOpen,
         bit32.bor(ImGuiWindowFlags.AlwaysAutoResize, ImGuiWindowFlags.NoResize, ImGuiWindowFlags.NoTitleBar))
@@ -266,7 +269,8 @@ function M.render(state, actions, ui)
     if shouldDraw then
         pcall(function()
             local wx, wy = ImGui.GetWindowPos()
-            if wx and wy then g.miniWindowPos = { x = wx, y = wy } end
+            if wx and wy and g.observeWindowPos then g.observeWindowPos('miniWindowPos', wx, wy)
+            elseif wx and wy then g.miniWindowPos = { x = wx, y = wy } end
         end)
 
         local function sp4() ImGui.SameLine(0, 4) end
@@ -548,7 +552,7 @@ function M.render(state, actions, ui)
     end
     ImGui.End()
     ImGui.PopStyleColor(2)
-    ImGui.PopStyleVar(5)
+    ImGui.PopStyleVar(6)
 end
 
 return M

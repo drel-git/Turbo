@@ -247,6 +247,9 @@ local adapters = {
     lockouts = make_roster_adapter(
         "lockoutsRosterScope", "lockoutsViewKey", "lockoutsViewSelectedChars", "lockouts",
         {}, "Source + columns + teams drive this Lockouts roster"),
+    type12 = make_roster_adapter(
+        "type12RosterScope", "type12ViewKey", "type12ViewSelectedChars", "type12",
+        {}, "Source + columns + teams drive Type 12 Focus"),
     stats_search = make_roster_adapter(
         "statsSearchScope", "statsSearchViewKey", "statsSearchSelectedChars", "stats_search",
         {}, "Source + columns drive Stats Search"),

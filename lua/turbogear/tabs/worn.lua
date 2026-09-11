@@ -9,7 +9,6 @@ local Settings, SaveSettings = cfg.Settings, cfg.SaveSettings
 local items = require('items')
 local grouped_slots = items.grouped_slots
 local views = require('views')
-local Engine = require('engine').Engine
 local item_actions = require('item_actions')
 
 local M = {}
@@ -141,10 +140,6 @@ local function draw_roster(keys)
 end
 
 function M.draw()
-    local st = require('state')
-    if not (st.lean and st.lean()) then
-        Engine.request_all(false)
-    end
     local use_pill = Settings.showCharactersPill == true
     if not use_pill then
         draw_mode_picker()

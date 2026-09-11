@@ -344,5 +344,61 @@ do
         'filter: nil needers safe')
 end
 
+-- Resumable entry eval: same final needs as add_entry_needs, chunked ops.
+do
+    local rec = {
+        list_id = "anguish",
+        item_name = "Many Names",
+        entry = {
+            item = "Many Names",
+            ids = { 1, 2, 3, 4, 5 },
+            names = { "Many Names", "Alias Two", "Alias Three", "Alias Four" },
+        },
+    }
+    local function ev(_) return "missing" end
+    local one_shot = { by_id = {}, by_name = {}, count = 0 }
+    local seen1 = {}
+    core.add_entry_needs(one_shot, seen1, rec, ev)
+
+    local stepped = { by_id = {}, by_name = {}, count = 0 }
+    local seen2 = {}
+    local job = core.begin_entry_job(rec)
+    local ticks, done = 0, false
+    while not done and ticks < 40 do
+        ticks = ticks + 1
+        done = core.step_entry_job(job, ev, stepped, seen2, 1)
+    end
+    check(ticks > 1, "incremental evaluator: many candidates take multiple ticks, got " .. tostring(ticks))
+    check(done == true, "incremental evaluator eventually completes")
+    check(job.phase == "done", "job reaches done")
+    check(stepped.count == one_shot.count, "final count matches one-shot")
+    for id, need in pairs(one_shot.by_id) do
+        check(stepped.by_id[id] ~= nil and stepped.by_id[id].display == need.display,
+            "id " .. tostring(id) .. " matches one-shot")
+    end
+    for key, need in pairs(one_shot.by_name) do
+        check(stepped.by_name[key] ~= nil and stepped.by_name[key].display == need.display,
+            "name key " .. tostring(key) .. " matches one-shot")
+    end
+
+    local owned_rec = { list_id = "x", item_name = "Have", entry = { item = "Have", ids = { 9 }, names = { "Have" } } }
+    local owned_job = core.begin_entry_job(owned_rec)
+    local owned_needs = { by_id = {}, by_name = {}, count = 0 }
+    local owned_seen = {}
+    local owned_done = core.step_entry_job(owned_job, function() return "equipped" end, owned_needs, owned_seen, 1)
+    check(owned_done == true and owned_needs.count == 0, "owned entry commits nothing")
+    check(owned_seen[owned_rec.entry] == true, "owned entry is marked seen")
+
+    local tiny = { by_id = {}, by_name = {}, count = 0 }
+    local tiny_seen = {}
+    local tiny_job = core.begin_entry_job(rec)
+    local d1, _, why1 = core.step_entry_job(tiny_job, ev, tiny, tiny_seen, 1)
+    check(d1 == false and why1 == "op_limit", "tiny budget yields after match")
+    check(tiny.count == 0, "partial match is not published into needs")
+    local d2 = core.step_entry_job(tiny_job, ev, tiny, tiny_seen, 1)
+    check(d2 == false, "resume continues commit")
+    check(tiny.count == 1, "count increments once on first commit op")
+end
+
 io.write(string.format('needs_index core: %d passed, %d failed\n', passed, failed))
 os.exit(failed == 0 and 0 or 1)

@@ -5,6 +5,7 @@
 local mq  = require('mq')
 local cfg = require('config')
 local CFG, Settings = cfg.CFG, cfg.Settings
+local ownership_index = require('ownership_index')
 
 local M = {}
 
@@ -23,90 +24,7 @@ local function norm(s)
     return s
 end
 
--- Rank suffixes on Adventurer's Tattered Sack must stay distinct. Stripping
--- trailing "(Reinforced)" / "(Celestial)" collapsed every rank to the base
--- name, so ID chains and material clear-when-owned could not work reliably.
-local function keep_tattered_sack_rank_paren(s)
-    return s:find("tattered sack", 1, true) ~= nil
-end
-
--- norm_item_name runs 3-4 regex gsubs per call and is invoked per alias name
--- per entry per evaluation - tens of thousands of times per needs-index
--- rebuild on fungal/Jonas-expanded entries. The vocabulary of names is small
--- and stable, so memoize per input string.
-local norm_name_cache = {}
-
-local function norm_item_name_uncached(s)
-    s = norm(s)
-    if not keep_tattered_sack_rank_paren(s) then
-        s = s:gsub("%s*%(%s*[^%)]-%s*%)%s*$", "")
-    end
-    s = s:gsub("%s*%[%s*[^%]]-%s*%]%s*$", "")
-    s = s:gsub("%s+", " ")
-    local stripped = s:gsub("%s*%d%d%d+$", "")
-    if stripped ~= "" then s = stripped end
-    return trim(s)
-end
-
-local function norm_item_name(s)
-    if type(s) ~= "string" then return norm_item_name_uncached(s) end
-    local hit = norm_name_cache[s]
-    if hit == nil then
-        hit = norm_item_name_uncached(s)
-        norm_name_cache[s] = hit
-    end
-    return hit
-end
-
-local function tier_rank(name)
-    name = tostring(name or ""):lower()
-    if name:find("- final", 1, true) then return 4 end
-    if name:find("- tier iii", 1, true) then return 3 end
-    if name:find("- tier ii", 1, true) then return 2 end
-    if name:find("- tier i", 1, true) then return 1 end
-    return nil
-end
-
-local function fungal_aliases(name)
-    local aliases, n = {}, tostring(name or "")
-    local rank = tier_rank(n)
-
-    local elem = n:match("^%s*(%S+)%s+Fungus of Suffering%s*%-")
-        or n:match("^%s*(%S+)%s+Fungus of Suffering%s*$")
-    if elem then
-        rank = rank or 4
-        aliases[#aliases+1] = elem .. " Slime of Suffering"
-        for i = 1, rank do
-            local suffix = i == 4 and "Final" or ("Tier " .. ({ "I", "II", "III" })[i])
-            aliases[#aliases+1] = elem .. " Fungus of Suffering - " .. suffix
-        end
-        return aliases
-    end
-
-    -- Loot links are often the Slime; BiS rows are Fungus tiers.
-    elem = n:match("^%s*(%S+)%s+Slime of Suffering%s*$")
-        or n:match("^%s*Base (%S+)%s+Slime of Suffering")
-    if elem then
-        aliases[#aliases+1] = elem .. " Slime of Suffering"
-        for i = 1, 4 do
-            local suffix = i == 4 and "Final" or ("Tier " .. ({ "I", "II", "III" })[i])
-            aliases[#aliases+1] = elem .. " Fungus of Suffering - " .. suffix
-        end
-        return aliases
-    end
-
-    local bloom = n:match("^%s*Fungal Bloom of (.-)%s*%-")
-        or n:match("^%s*Fungal Bloom of (.-)%s*$")
-    if bloom and bloom ~= "" then
-        rank = rank or 4
-        aliases[#aliases+1] = "Noxious Bloom of " .. bloom
-        for i = 1, rank do
-            local suffix = i == 4 and "Final" or ("Tier " .. ({ "I", "II", "III" })[i])
-            aliases[#aliases+1] = "Fungal Bloom of " .. bloom .. " - " .. suffix
-        end
-    end
-    return aliases
-end
+local norm_item_name = ownership_index.norm_item_name
 
 local function safe_id(name)
     local s = norm(name):gsub("[^%w]+", "_"):gsub("^_+", ""):gsub("_+$", "")
@@ -157,7 +75,8 @@ local function normalize_names(names, primary)
     local function add(v)
         v = trim(v)
         local k = norm(v)
-        if v ~= "" and not seen[k] then
+        -- Shared multi-ID names (Jonas "Skeletal Hand") never become match names.
+        if v ~= "" and not seen[k] and not ownership_index.name_is_id_only(v) then
             seen[k] = true
             out[#out+1] = v
         end
@@ -405,107 +324,8 @@ function M.snapshot_to_list(snap, name)
     })
 end
 
-local function all_items(snap)
-    local out = {}
-    for _, spec in ipairs({
-        { bucket = snap and snap.equipped or {}, status = "equipped" },
-        { bucket = snap and snap.bags or {},     status = "carried"  },
-        { bucket = snap and snap.bank or {},     status = "carried"  },
-    }) do
-        for _, it in ipairs(spec.bucket) do
-            out[#out+1] = { item = it, status = spec.status }
-        end
-    end
-    return out
-end
-
-local function all_augments(snap)
-    local out = {}
-    for _, spec in ipairs({
-        { bucket = snap and snap.equipped or {}, status = "equipped" },
-        { bucket = snap and snap.bags or {},     status = "carried"  },
-        { bucket = snap and snap.bank or {},     status = "carried"  },
-    }) do
-        for _, host in ipairs(spec.bucket) do
-            for _, aug in ipairs(host.augs or {}) do
-                if not aug.empty and aug.name and aug.name ~= "" and aug.name ~= "Empty" then
-                    out[#out+1] = {
-                        status = spec.status,
-                        item = {
-                            name = aug.name,
-                            id = aug.id or 0,
-                            icon = aug.icon or 0,
-                            location = host.location,
-                            where = string.format("%s / %s slot %d", host.where or "", host.name or "item", aug.index or 0),
-                            slotname = spec.status == "equipped" and (host.slotname or host.where) or nil,
-                            augType = aug.type or 0,
-                            host = host.name,
-                            augIndex = aug.index,
-                        },
-                    }
-                end
-            end
-        end
-    end
-    return out
-end
-
-local function better_match(a, b)
-    if not a then return b end
-    if not b then return a end
-    if a.status == "equipped" and b.status ~= "equipped" then return a end
-    if b.status == "equipped" and a.status ~= "equipped" then return b end
-    return a
-end
-
 local function snapshot_index(snap)
-    if not snap then return { by_id = {}, by_name = {}, known_spells = {} } end
-    local cache_key = table.concat({
-        tostring(snap.server or ""),
-        tostring(snap.name or ""),
-        tostring(snap.inventoryUpdated or snap.updated or ""),
-        tostring(#(snap.equipped or {})),
-        tostring(#(snap.bags or {})),
-        tostring(#(snap.bank or {})),
-    }, "|")
-    if snap._bis_index_key == cache_key and snap._bis_index then return snap._bis_index end
-
-    local idx = { by_id = {}, by_name = {}, known_spells = {} }
-    local function add_rec(rec)
-        local it = rec.item
-        local iid = tonumber(it and it.id)
-        if iid and iid > 0 then
-            idx.by_id[iid] = better_match(idx.by_id[iid], rec)
-        end
-        local n = norm_item_name(it and it.name)
-        if n ~= "" then
-            idx.by_name[n] = better_match(idx.by_name[n], rec)
-            for _, alias in ipairs(fungal_aliases(it and it.name)) do
-                local an = norm_item_name(alias)
-                if an ~= "" then idx.by_name[an] = better_match(idx.by_name[an], rec) end
-            end
-        end
-    end
-    for _, rec in ipairs(all_items(snap)) do add_rec(rec) end
-    for _, rec in ipairs(all_augments(snap)) do add_rec(rec) end
-    -- Book/disc ownership for spell-aware entries (avoid per-entry pairs() scan).
-    local known = idx.known_spells
-    local spells = snap.spells
-    if type(spells) == "table" then
-        for key, rec in pairs(spells) do
-            if type(rec) == "table" then
-                if (rec.book == true) or ((tonumber(rec.book) or 0) > 0) then
-                    local n = norm(rec.name or key)
-                    if n ~= "" then known[n] = true end
-                end
-            elseif rec == true then
-                local n = norm(key)
-                if n ~= "" then known[n] = true end
-            end
-        end
-    end
-    snap._bis_index_key = cache_key
-    snap._bis_index = idx
+    local idx = ownership_index.cached_snapshot_index(snap)
     return idx
 end
 
@@ -520,7 +340,9 @@ local function entry_matches_item(entry, it)
     local item_name = norm_item_name(it.name)
     if item_name ~= "" then
         for _, name in ipairs(entry.names or { entry.item }) do
-            if norm_item_name(name) == item_name then return true end
+            if norm_item_name(name) == item_name and not ownership_index.name_is_id_only(name) then
+                return true
+            end
         end
     end
     local iid = tonumber(it.id)
@@ -655,7 +477,7 @@ local function owned_in_store_bank(entry, item_name, item_id)
     local names = {}
     local function note_name(n)
         n = trim(n)
-        if n ~= "" then names[#names + 1] = n end
+        if n ~= "" and not ownership_index.name_is_id_only(n) then names[#names + 1] = n end
     end
     note_name(item_name)
     note_name(entry.item)
@@ -691,12 +513,12 @@ function M.live_item_status(entry, item_name, item_id)
         if st then return st end
     end
     item_name = trim(item_name)
-    if item_name ~= "" then
+    if item_name ~= "" and not ownership_index.name_is_id_only(item_name) then
         local st = try(item_name)
         if st then return st end
     end
     local canonical = trim(entry.item)
-    if canonical ~= "" and canonical ~= item_name then
+    if canonical ~= "" and canonical ~= item_name and not ownership_index.name_is_id_only(canonical) then
         local st = try(canonical)
         if st then return st end
     end
@@ -739,6 +561,7 @@ end
 
 function M.invalidate_live_ownership_cache()
     live_fallback_cache = {}
+    pcall(function() require('don_spells').invalidate_live() end)
     live_ownership_gen = live_ownership_gen + 1
 end
 
@@ -897,7 +720,7 @@ local function match_entry(entry, snap)
         if rec then return rec.item, rec.status, entry end
     end
     for _, name in ipairs(entry.names or { entry.item }) do
-        local rec = idx.by_name[norm_item_name(name)]
+        local rec = not ownership_index.name_is_id_only(name) and idx.by_name[norm_item_name(name)] or nil
         if rec then return rec.item, rec.status, entry end
     end
     -- Spell-aware packs: own the pack item OR know every listed spell/disc.
@@ -1022,7 +845,10 @@ local function link_matches_entry(entry, item_name, item_id)
     local lname = norm(item_name)
     if lname ~= "" then
         for _, name in ipairs(entry.names or { entry.item }) do
-            if norm_item_name(name) == norm_item_name(lname) then return true end
+            if norm_item_name(name) == norm_item_name(lname)
+                and not ownership_index.name_is_id_only(name) then
+                return true
+            end
         end
     end
     local iid = tonumber(item_id)

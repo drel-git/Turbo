@@ -2,11 +2,12 @@
 -- Verifies P1-interim: Store.save skips the disk read-merge when this process is
 -- the sole writer (on-disk signature unchanged since our last write) and DOES
 -- merge when the file changed externally (another box wrote), preserving that
--- box's entries. Uses a real (tiny) pickle serializer + real /tmp file I/O; the
--- store.save_merge / store.save_merge_skipped diag counters are the probe.
-package.path = 'lua/turbogear/?.lua;lua/turbogear/?/init.lua;' .. package.path
+-- box's entries. Uses a real (tiny) pickle serializer + real temp-dir file I/O;
+-- the store.save_merge / store.save_merge_skipped diag counters are the probe.
+package.path = 'lua/turbogear/?.lua;lua/turbogear/?/init.lua;lua/tests/helpers/?.lua;' .. package.path
+local tmpdir = require('tmpdir')
 
-local CACHE = "/tmp/tg_store_save_test_cache.lua"
+local CACHE = tmpdir.path("tg_store_save_test_cache.lua")
 os.remove(CACHE)
 
 -- minimal serializer: writes a loadable `return {...}` file (stand-in for mq.pickle)
@@ -30,12 +31,12 @@ package.preload['mq'] = function()
             MacroQuest = { Server = function() return "Srv" end } },
         pickle = function(path, tbl) local o = {"return "}; ser(tbl, o)
             local f = assert(io.open(path, "w")); f:write(table.concat(o)); f:close() end,
-        configDir = "/tmp",
+        configDir = tmpdir.dir(),
     }
 end
 package.preload['config'] = function()
     return { CFG = {}, Settings = { offlineSeconds = 45, staleSeconds = 20, mainTab = "bis" },
-        SharedSettings = { ignoredChars = {} }, CacheFile = CACHE, LegacyCacheFile = "/tmp/tg_nope.lua",
+        SharedSettings = { ignoredChars = {} }, CacheFile = CACHE, LegacyCacheFile = tmpdir.path("tg_nope.lua"),
         SaveSharedSettings = function() end, LoadSharedSettings = function() end }
 end
 package.preload['state'] = function() return { bg = false, show = true, lean = function() return false end } end

@@ -9,8 +9,38 @@ function M.trim(s)
     return tostring(s or ""):match("^%s*(.-)%s*$") or ""
 end
 
+function M.strip_trailing_corpse_id(item_name)
+    local name = M.trim(item_name)
+    return (name:gsub("%s*%(%s*[Ii][Dd]%s*:%s*%d+%s*%)%s*$", ""))
+end
+
 function M.normalize_item_name(item_name)
-    return tostring(item_name or ""):lower():gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
+    local name = tostring(item_name or ""):lower():gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
+    return M.strip_trailing_corpse_id(name)
+end
+
+-- CLI item identity parser. Brackets are accepted because command usage writes
+-- optional ids as [itemId], and entering that notation literally must not make
+-- "[47286]" part of the item name.
+function M.parse_item_name_id(text)
+    text = M.trim(text)
+    local name, item_id = text, 0
+    local parsed_name, parsed_id = text:match("^(.-)%s*%(%s*[Ii][Dd]%s*:%s*(%d+)%s*%)%s*$")
+    if not parsed_name then
+        parsed_name, parsed_id = text:match("^(.-)%s*%[%s*(%d+)%s*%]%s*$")
+    end
+    if not parsed_name then
+        parsed_name, parsed_id = text:match("^(.-)%s+(%d+)%s*$")
+    end
+    if parsed_name and parsed_id then
+        name, item_id = parsed_name, tonumber(parsed_id) or 0
+    end
+    name = M.trim(name)
+    -- MQ bind tokenization normally removes balanced quotes. Keep this helper
+    -- deterministic for direct calls and diagnostics too.
+    local quoted = name:match('^"(.*)"$') or name:match("^'(.*)'$")
+    if quoted ~= nil then name = M.trim(quoted) end
+    return name, item_id
 end
 
 local function chat_payload(line)
@@ -140,8 +170,8 @@ end
 
 -- Prefer the full Jonas-prefixed / longer display name when merging alias hits.
 function M.prefer_announce_item_name(current, incoming)
-    local a = tostring(current or "")
-    local b = tostring(incoming or "")
+    local a = M.strip_trailing_corpse_id(current)
+    local b = M.strip_trailing_corpse_id(incoming)
     if a == "" or a == "?" then return b ~= "" and b or a end
     if b == "" or b == "?" then return a end
     local na, nb = M.normalize_item_name(a), M.normalize_item_name(b)
@@ -429,13 +459,14 @@ end
 -- " - " (e.g. "Corrosive Fungus of Suffering - Tier II") so the NAMES are
 -- taken after the LAST " - "; names never contain " - " (they are pipe-joined).
 -- Returns the payload string (may be a raw \18 link) or nil.
-function M.parse_tg_line(line)
+local function split_tg_payload_and_needers(line)
     line = tostring(line or "")
     local s = line:find("[TG] - ", 1, true)
     if not s then return nil end
     local rest = line:sub(s + 7)
     rest = rest:gsub("['\"]+%s*$", "")
     local payload = rest
+    local names_seg = ""
     local cut, idx = nil, 1
     while true do
         local f = rest:find(" - ", idx, true)
@@ -443,10 +474,73 @@ function M.parse_tg_line(line)
         cut = f
         idx = f + 1
     end
-    if cut then payload = rest:sub(1, cut - 1) end
+    if cut then
+        payload = rest:sub(1, cut - 1)
+        names_seg = rest:sub(cut + 3)
+    end
     payload = M.trim(payload)
     if payload == "" then return nil end
+    return payload, names_seg
+end
+
+function M.parse_tg_needers(names_seg)
+    local out = {}
+    names_seg = M.trim(names_seg or "")
+    if names_seg == "" then return out end
+    for part in names_seg:gmatch("[^|]+") do
+        part = M.trim(part)
+        if part ~= "" then out[#out + 1] = part end
+    end
+    return out
+end
+
+-- Visible item name from a [TG] payload that may be a raw \18 link or hex dump.
+function M.tg_payload_display_name(payload)
+    payload = M.trim(payload or "")
+    if payload == "" then return "" end
+    if payload:find("\x12", 1, true) then
+        local parts = {}
+        for part in payload:gmatch("[^\x12]+") do
+            part = M.trim(part)
+            if part ~= "" and not part:match("^%x+$") then
+                parts[#parts + 1] = part
+            end
+        end
+        if #parts > 0 then
+            payload = parts[#parts]
+        else
+            payload = M.trim((payload:gsub("\x12", " ")))
+        end
+    end
+    local s, e = payload:find("^%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x+")
+    if s then
+        local after = M.trim(payload:sub(e + 1))
+        if after ~= "" and after:find("^%u") then payload = after end
+    end
+    payload = M.trim(payload)
+    if payload:match("^%x+$") and #payload >= 16 then return "" end
     return payload
+end
+
+function M.parse_tg_line(line)
+    local payload = select(1, split_tg_payload_and_needers(line))
+    return payload
+end
+
+-- Exact TurboGear [TG] announce: "[TG] - <payload> - N1 | N2".
+-- Returns nil unless the names segment is present (history observe only).
+function M.parse_tg_announce(line)
+    local payload, names_seg = split_tg_payload_and_needers(line)
+    if not payload then return nil end
+    local needers = M.parse_tg_needers(names_seg)
+    if #needers == 0 then return nil end
+    local item_name = M.tg_payload_display_name(payload)
+    if item_name == "" then return nil end
+    return {
+        payload = payload,
+        item_name = item_name,
+        needers = needers,
+    }
 end
 
 -- The one true [TG] output format. names may be a string or an array (sorted

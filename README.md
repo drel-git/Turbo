@@ -18,7 +18,19 @@
 
 ### Linux
 
-1. [**Download the latest release zip**](https://github.com/drel-git/Turbo/releases/latest) and extract it into your MacroQuest folder (the one containing `lua` and `Macros`). Done. Grab the new zip whenever a release drops.
+Either the patcher or the release zip works. Use whichever you prefer.
+
+**Patcher** (install plus later updates):
+
+1. [**Download TurboPatcher-linux-x64**](https://github.com/drel-git/TurboPatcher/releases/latest/download/TurboPatcher-linux-x64).
+2. Make it executable and point it at your MacroQuest folder (the one containing `lua` and `Macros`):
+
+```bash
+chmod +x TurboPatcher-linux-x64
+./TurboPatcher-linux-x64 update --mq "/path/to/your/MQ/root"
+```
+
+**Zip** (one-shot install or update): [**Download the latest release zip**](https://github.com/drel-git/Turbo/releases/latest) and extract it into that same MacroQuest folder.
 
 ### In game
 
@@ -28,6 +40,10 @@
 
 That one window drives the whole suite. Its Actions tab handles town chores, item handouts, currency collection, turn-ins, companion tools, and even patcher updates. The commands below are still useful for hotkeys and automation, but you don't need to memorize them.
 
+### First run performance tip
+
+TurboGear works best with MQ2Lua **Turbo Num = 1000**. On startup, TurboGear checks your live setting and shows a **Set to 1000** button if MacroQuest is still at the lower default. This helps linked-needs announces and large-fleet inventory warmup respond quickly.
+
 ## What's Included
 
 | Tool | Run | What it does |
@@ -36,7 +52,7 @@ That one window drives the whole suite. Its Actions tab handles town chores, ite
 | **TurboLoot** | `/mac turboloot` | INI-driven corpse looting, then selling, banking, tributing, and destroying in town. [More info](https://github.com/drel-git/TurboLoot) |
 | **TurboKey** | `/mac TurboKey RULE` | Pick up an item and run one command to add it to your loot rules as KEEP, SELL, BANK, TRIBUTE, DESTROY, ANNOUNCE, or IGNORE. Items can also be tagged with a click from TurboGear's item view |
 | **TurboGive** | `/mac TurboGive` | Hand out and collect items between your characters using a shared give list. [More info](https://github.com/drel-git/TurboLoot/blob/main/TurboGive%20Getting%20Started.md) |
-| **TurboGear** | `/lua run turbogear` | Live inventory of every boxed character in one window, BiS / upgrade views, and linked-needs announces when an item is linked in chat |
+| **TurboGear** | `/lua run turbogear` | Live fleet inventory, BiS / upgrade views, Stock Up, Spells, Type 12 tracking, and fast linked-needs announces when an item is linked in chat |
 | **TurboHandins** | `/lua run Turbo/handins` | One-window PoT and GoD symbol turn-ins from the in-game UI, with per-character exclusion lists |
 | **TurboMobs** | `/lua run TurboMobs` | NPC spawn tracker with alerts: 114 Lazarus zones preloaded, plus learn/track new nameds and PHs as you camp |
 | **TurboRolls** | `/lua run TurboRolls` | Raid roll tracking: start a range, live ranked rolls, announce winner or top rolls to raid |
@@ -60,6 +76,8 @@ The headline feature: when anyone links an item in chat, TurboGear instantly ann
 
 The Spells tab also tracks each caster's needed researchable spells (levels 66-70), shows what is still missing across the fleet, and exports per-character want lists with one click.
 
+Type 12 focus planning has its own tab with a fleet matrix plus Anguish/DSK source item reference.
+
 ### Town chores, handled
 
 The hub turns your loot rules into one-click town workflows. Park near a banker, tribute master, and vendor and hit the **Unload** button on the Actions tab: one click banks, tributes, sells, and destroys everything in a single pass. A whole grind session's worth of bag cleanup in seconds. Prefer it piecemeal? Sell, Bank, Tribute, and Destroy each have their own button (or `/mac turboloot sell`, `bank`, `tribute`, `destroy`).
@@ -76,7 +94,11 @@ TurboMobs watches for the NPCs you care about. It ships with prebuilt spawn list
 
 ## Updating
 
-Open TurboPatcher and click **Update Now**. Running Turbo scripts notice the update starting and stop themselves on every box, updated files are installed, and you just `/lua run turbogear` (or `/lua run Turbo`) again. The patcher shows exactly what changed in each release.
+**Windows:** open TurboPatcher and click **Update Now**.
+
+**Linux:** run `./TurboPatcher-linux-x64 update --mq "/path/to/your/MQ/root"`, or download the latest release zip and extract it over your MacroQuest folder. Either works.
+
+Running Turbo scripts notice a patcher update starting and stop themselves on every box, updated files are installed, and you just `/lua run turbogear` (or `/lua run Turbo`) again. The patcher shows exactly what changed in each release.
 
 ## Your Settings Are Safe
 
@@ -86,7 +108,7 @@ Updates never touch your personal data. Character settings, the inventory cache,
 
 - An EverQuest EMU server that allows boxing/automation (built and tested on Project Lazarus)
 - MacroQuest with E3Next (RoF2 client)
-- Windows for the patcher; on Linux, extract the release zip instead. The scripts themselves run wherever MQ runs
+- Windows or Linux. The patcher is available on both (`TurboPatcher.exe` or `TurboPatcher-linux-x64`); the release zip is also fine on either. The scripts themselves run wherever MQ runs
 
 > The core tools run on any compatible EMU server. The bundled datasets (BiS lists, the 114-zone spawn catalog, Diamond Coin collection, and the PoT/GoD turn-in lists) are tailored to Project Lazarus.
 

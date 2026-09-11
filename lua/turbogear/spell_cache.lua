@@ -9,10 +9,15 @@ local M = {}
 
 local known_by_norm = {}
 local known_by_id = {}
+local pending_norm = nil
+local pending_id = nil
 local ready = false
 local building = false
+local deferred_unready = false
 local last_sig = ''
 local last_published_sig = ''
+local last_spells = nil
+local last_ids = nil
 
 local function trim(s)
     return tostring(s or ''):match('^%s*(.-)%s*$') or ''
@@ -72,36 +77,7 @@ function M.last_published_signature()
     return last_published_sig
 end
 
---- Probe via spell_known and record. Used while rebuild enumerates the slice.
-function M.probe_name(name)
-    name = trim(name)
-    if name == '' then return false end
-    local SK = ensure_spell_known()
-    local known = SK and SK.live and SK.live(name) == true
-    if known then known_by_norm[norm(name)] = true end
-    return known == true
-end
-
-function M.probe_id(spell_id)
-    spell_id = tonumber(spell_id)
-    if not spell_id or spell_id <= 0 then return false end
-    local SK = ensure_spell_known()
-    local known = SK and SK.live_id and SK.live_id(spell_id) == true
-    if known then known_by_id[spell_id] = true end
-    return known == true
-end
-
---- Cache membership (ensures built). name string or spell_id number.
-function M.is_known(name_or_id)
-    if building then
-        if type(name_or_id) == 'number' then return M.probe_id(name_or_id) end
-        local as_id = tonumber(name_or_id)
-        if as_id and type(name_or_id) == 'string' and name_or_id:match('^%s*%d+%s*$') then
-            return M.probe_id(as_id)
-        end
-        return M.probe_name(name_or_id)
-    end
-    if not ready then M.rebuild() end
+local function lookup_known(name_or_id)
     if type(name_or_id) == 'number' then
         return known_by_id[name_or_id] == true
     end
@@ -114,58 +90,211 @@ function M.is_known(name_or_id)
     return known_by_norm[n] == true
 end
 
+local function record_known_name(name)
+    local dest = (building and pending_norm) or known_by_norm
+    if dest then dest[norm(name)] = true end
+end
+
+local function record_known_id(spell_id)
+    local dest = (building and pending_id) or known_by_id
+    if dest then dest[spell_id] = true end
+end
+
+--- Record a known spell found by another (already paid) live probe. No TLO work.
+function M.note_known(name, spell_id)
+    name = trim(name)
+    if name ~= '' then record_known_name(name) end
+    spell_id = tonumber(spell_id)
+    if spell_id and spell_id > 0 then record_known_id(spell_id) end
+end
+
+--- Probe via spell_known and record. Used while rebuild enumerates the slice.
+--- During rebuild, records go to the pending maps so the previous complete
+--- result stays visible until the atomic swap.
+function M.probe_name(name)
+    name = trim(name)
+    if name == '' then return false end
+    local SK = ensure_spell_known()
+    local known = SK and SK.live_lean and SK.live_lean(name) == true
+    if known then record_known_name(name) end
+    return known == true
+end
+
+function M.probe_id(spell_id)
+    spell_id = tonumber(spell_id)
+    if not spell_id or spell_id <= 0 then return false end
+    local SK = ensure_spell_known()
+    local known = SK and SK.live_lean_id and SK.live_lean_id(spell_id) == true
+    if known then record_known_id(spell_id) end
+    return known == true
+end
+
+--- Cache membership. Does not live-scan when startup deferred an unready cache
+--- (missing persisted spells is unknown, not "knows nothing").
+function M.is_known(name_or_id)
+    if building then
+        return lookup_known(name_or_id)
+    end
+    if not ready then
+        if deferred_unready then return false end
+        M.rebuild()
+    end
+    return lookup_known(name_or_id)
+end
+
 function M.ensure_built()
-    if not ready and not building then M.rebuild() end
+    if ready or building then return ready end
+    if deferred_unready then return false end
+    M.rebuild()
     return ready
 end
 
+--- Last complete spell maps + signature. Nil when no authority is loaded.
+function M.last_maps()
+    if not ready then return nil end
+    if type(last_sig) ~= 'string' or last_sig == '' then return nil end
+    return last_spells, last_ids, last_sig
+end
+
+function M.deferred_unready()
+    return deferred_unready == true
+end
+
+--- Startup with no persisted spell authority: do not manufacture an empty book
+--- and do not live-scan on the critical path.
+function M.note_deferred_unready()
+    if ready or building then return end
+    deferred_unready = true
+end
+
+--- Hydrate from a persisted snapshot. Missing/empty sig is not authority.
+function M.restore_from_snapshot(snap)
+    local okP, plan = pcall(require, 'spells_startup')
+    if not okP or not plan or not plan.snapshot_is_usable or not plan.snapshot_is_usable(snap) then
+        return false, 'missing'
+    end
+    local new_norm, new_id = {}, {}
+    if type(snap.spells) == 'table' then
+        for key, row in pairs(snap.spells) do
+            if type(row) == 'table' then
+                local book = (row.book == true) or ((tonumber(row.book) or 0) > 0)
+                if book then
+                    new_norm[norm(row.name or key)] = true
+                    local sid = tonumber(row.spell_id)
+                    if sid and sid > 0 then new_id[sid] = true end
+                end
+            end
+        end
+    end
+    if type(snap.spell_ids) == 'table' then
+        for id, v in pairs(snap.spell_ids) do
+            if v then
+                id = tonumber(id) or 0
+                if id > 0 then new_id[id] = true end
+            end
+        end
+    end
+    known_by_norm = new_norm
+    known_by_id = new_id
+    last_spells = snap.spells
+    last_ids = snap.spell_ids
+    last_sig = tostring(snap.spells_sig)
+    last_published_sig = last_sig
+    ready = true
+    building = false
+    deferred_unready = false
+    return true, 'restored'
+end
+
 --- One pass over the tracked lite slice (research + DoN) via spell_known.
+--- Previous complete maps stay visible until this replacement swaps atomically.
 --- Returns true when the known-set signature changed.
 function M.rebuild(className)
     if building then return false end
     building = true
-    ready = false
-    known_by_norm = {}
-    known_by_id = {}
+    pending_norm, pending_id = {}, {}
     local prev = last_sig
     className = trim(className)
     if className == '' then className = class_name() end
 
+    pcall(function()
+        local diag = require('diagnostics')
+        diag.count('snapshot.spells.live_refresh_started')
+        diag.event('snapshot.spells.live_refresh_started', 'source=spell_cache.rebuild class=' .. tostring(className or ''))
+    end)
     local spells, spell_ids = {}, {}
+    -- perfdiag: whole-scan wall ms + TLO lookups (book probes + scroll counts).
+    local okK, SK = pcall(require, 'spell_known')
+    local okR, RC = pcall(require, 'research_catalog')
+    if okK and SK and SK.reset_lookup_count then SK.reset_lookup_count() end
+    if okR and RC and RC.reset_scroll_query_count then RC.reset_scroll_query_count() end
+    local scan_t0 = os.clock()
     pcall(function()
         local spell_snap = require('spell_snapshot')
         spells, spell_ids = spell_snap.gather(className)
     end)
+    pcall(function()
+        local diag = require('diagnostics')
+        local lookups = (okK and SK and SK.lookup_count and SK.lookup_count() or 0)
+            + (okR and RC and RC.scroll_query_count and RC.scroll_query_count() or 0)
+        diag.sample('spell_cache.rebuild_ms', math.max(0, (os.clock() - scan_t0) * 1000))
+        diag.sample('spell_cache.rebuild_lookups', lookups)
+    end)
 
     for id, v in pairs(spell_ids or {}) do
-        if v then known_by_id[tonumber(id) or 0] = true end
+        if v then
+            id = tonumber(id) or 0
+            if id > 0 then pending_id[id] = true end
+        end
     end
     for key, row in pairs(spells or {}) do
         if type(row) == 'table' then
             local book = (row.book == true) or ((tonumber(row.book) or 0) > 0)
             if book then
-                known_by_norm[norm(row.name or key)] = true
+                pending_norm[norm(row.name or key)] = true
                 local sid = tonumber(row.spell_id)
-                if sid and sid > 0 then known_by_id[sid] = true end
+                if sid and sid > 0 then pending_id[sid] = true end
             end
         end
     end
 
+    local new_sig = ''
     local okSig, spell_snap = pcall(require, 'spell_snapshot')
     if okSig and spell_snap and spell_snap.signature then
-        last_sig = spell_snap.signature(spells, spell_ids) or ''
+        new_sig = spell_snap.signature(spells, spell_ids) or ''
     else
         local parts = {}
-        for n, _ in pairs(known_by_norm) do parts[#parts + 1] = 'n' .. n end
-        for id, _ in pairs(known_by_id) do
+        for n, _ in pairs(pending_norm) do parts[#parts + 1] = 'n' .. n end
+        for id, _ in pairs(pending_id) do
             if id > 0 then parts[#parts + 1] = 'i' .. tostring(id) end
         end
         table.sort(parts)
-        last_sig = table.concat(parts, '\31')
+        new_sig = table.concat(parts, '\31')
     end
 
+    -- Failed/empty gather is not authority. Keep the previous complete result.
+    local has_rows = type(spells) == 'table' and next(spells) ~= nil
+    local has_ids = type(spell_ids) == 'table' and next(spell_ids) ~= nil
+    if new_sig == '' and not has_rows and not has_ids then
+        pending_norm, pending_id = nil, nil
+        building = false
+        return false
+    end
+
+    known_by_norm = pending_norm
+    known_by_id = pending_id
+    pending_norm, pending_id = nil, nil
+    last_spells = spells
+    last_ids = spell_ids
+    last_sig = new_sig
     ready = true
     building = false
+    deferred_unready = false
+    pcall(function()
+        local diag = require('diagnostics')
+        diag.count('snapshot.spells.live_refresh_completed')
+        diag.event('snapshot.spells.live_refresh_completed', 'source=spell_cache.rebuild')
+    end)
     return last_sig ~= prev
 end
 
@@ -209,8 +338,11 @@ end
 -- Test helper
 function M._reset_for_tests()
     known_by_norm, known_by_id = {}, {}
+    pending_norm, pending_id = nil, nil
     ready, building = false, false
+    deferred_unready = false
     last_sig, last_published_sig = '', ''
+    last_spells, last_ids = nil, nil
 end
 
 return M

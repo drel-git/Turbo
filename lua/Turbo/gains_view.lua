@@ -825,13 +825,9 @@ local function toggleButton(label, id, active, cmd, width)
     end
 end
 
-local function ensureWindowHeight(targetH)
-    targetH = tonumber(targetH) or 0
-    if targetH <= 0 then return end
-    local okSize, sx, sy = pcall(ImGui.GetWindowSize)
-    if okSize and sx and sy and sy < targetH then
-        pcall(function() ImGui.SetWindowSize(sx, targetH) end)
-    end
+local function ensureWindowHeight(_targetH)
+    -- Outer Gains window size is owned by ImGui + constraints. Pages scroll.
+    return _targetH
 end
 
 local function renderToggleGroup(title, specs, display, commandScope)

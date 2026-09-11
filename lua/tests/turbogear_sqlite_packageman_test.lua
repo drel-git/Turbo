@@ -4,7 +4,8 @@
 -- and still works via a plain require when it is not.
 package.path = 'lua/turbogear/?.lua;lua/turbogear/?/init.lua;lua/tests/helpers/?.lua;' .. package.path
 
-local DB = "/tmp/tg_pm_test.db"
+local tmpdir = require('tmpdir')
+local DB = tmpdir.path("tg_pm_test.db")
 for _, p in ipairs({DB, DB.."-wal", DB.."-shm"}) do os.remove(p) end
 
 local pm_calls = {}
@@ -13,7 +14,7 @@ package.preload['mq/PackageMan'] = function()
 end
 package.preload['lsqlite3'] = function() return require('lsqlite3_ffi_shim') end
 package.preload['config'] = function()
-    return { CFG = {}, Settings = {}, SharedSettings = {}, DbFile = DB, CacheFile = "/tmp/tg_pm_nopickle.lua" }
+    return { CFG = {}, Settings = {}, SharedSettings = {}, DbFile = DB, CacheFile = tmpdir.path("tg_pm_nopickle.lua") }
 end
 require('diagnostics')
 

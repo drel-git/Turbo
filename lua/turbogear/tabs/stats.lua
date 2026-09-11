@@ -8,6 +8,7 @@ local cfg = require('config')
 local Settings, SaveSettings = cfg.Settings, cfg.SaveSettings
 local stat_defs = require('stat_defs')
 local item_index = require('item_index')
+local index_warm_policy = require('index_warm_policy')
 local ui_table = require('ui_table')
 local views = require('views')
 local item_actions = require('item_actions')
@@ -504,8 +505,6 @@ local function draw_breakdown_filters()
     local mode = view_mode()
     if mode == "search" then return end
     ImGui.Separator()
-    draw_stat_picker()
-    ImGui.SameLine()
     ImGui.SetNextItemWidth(260.0)
     local next_search = input_text_hint("##stats_breakdown_search", "Search item breakdown", search_text)
     if next_search ~= search_text then
@@ -524,6 +523,101 @@ local function source_location_text(row)
         parts[#parts + 1] = "installed in " .. row.installedIn
     end
     return table.concat(parts, " | ")
+end
+
+local function rows_for_totals(mode)
+    if mode == "character" or mode == "plan" then
+        return snapshot_rows(mode)
+    end
+    return {}
+end
+
+local function stat_totals_from_rows(rows)
+    local totals = stat_defs.default_stats()
+    for _, row in ipairs(rows or {}) do
+        if type(row.stats) == "table" then
+            for _, def in ipairs(stat_defs.stats) do
+                local v = tonumber(row.stats[def.key]) or 0
+                if v ~= 0 then totals[def.key] = (totals[def.key] or 0) + v end
+            end
+        end
+    end
+    return totals
+end
+
+local function select_stat_key(key)
+    key = tostring(key or "")
+    if key == "" or Settings.statsSelectedStat == key then return end
+    Settings.statsSelectedStat = key
+    Settings.statsSortKey = "value"
+    Settings.statsSortDesc = true
+    SaveSettings()
+    filtered_key = nil
+end
+
+local function draw_stat_total_cell(key, totals, width)
+    local value = tonumber(totals and totals[key]) or 0
+    if value == 0 then return end
+    local selected = Settings.statsSelectedStat == key
+    local label = string.format("%s  %s", stat_defs.analyze_label(key), stat_defs.format_value(key, value))
+    if ImGui.Selectable(label .. "##stats_total_" .. tostring(key), selected) then
+        select_stat_key(key)
+    end
+    if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
+        ImGui.SetTooltip("Show contributors for " .. stat_defs.label(key))
+    end
+end
+
+local function draw_stat_totals_panel(totals)
+    col_text(Theme.section or Theme.header, "Stat totals")
+    local headers = stat_defs.analyze_column_headers or {}
+    local groups = stat_defs.analyze_column_groups or {}
+    local cols = math.max(1, #headers)
+    if not ImGui.BeginTable("StatsTotalsPicker", cols, ImGuiTableFlags.BordersInnerV + ImGuiTableFlags.RowBg) then
+        return
+    end
+    for i = 1, cols do
+        ImGui.TableSetupColumn(headers[i] or ("Group " .. tostring(i)), ImGuiTableColumnFlags.WidthStretch, 1.0)
+    end
+    ImGui.TableNextRow()
+    for i = 1, cols do
+        ImGui.TableSetColumnIndex(i - 1)
+        col_text(Theme.header or Theme.item, headers[i] or "")
+    end
+    local max_rows = 0
+    for _, group in ipairs(groups) do
+        if #group > max_rows then max_rows = #group end
+    end
+    for row_i = 1, max_rows do
+        ImGui.TableNextRow()
+        for col_i, group in ipairs(groups) do
+            ImGui.TableSetColumnIndex(col_i - 1)
+            local key = group[row_i]
+            if key then
+                draw_stat_total_cell(key, totals, 150.0)
+            else
+                ImGui.TextDisabled("")
+            end
+        end
+    end
+    ImGui.EndTable()
+end
+
+local function draw_source_details(mode, loadout)
+    local label = mode == "plan" and "Plan Details" or "Worn Gear Details"
+    if not theme.collapsing_section(label, false) then return end
+    if mode == "character" and loadout and loadout.draw_worn_summary then
+        loadout.draw_worn_summary(Settings.statsSourceKey or "__self__")
+    elseif mode == "plan" and loadout then
+        local list_id = Settings.statsLoadoutList or ""
+        if list_id == "" then list_id = loadout.selected_list_id() or "" end
+        Settings.statsLoadoutList = list_id
+        if list_id == "" then
+            col_text(Theme.amber, "No loadout lists yet. Create one on TurboBiS or in Setup.")
+        else
+            loadout.draw_summary(list_id)
+        end
+    end
 end
 
 local function sort_label(label, key)
@@ -629,23 +723,22 @@ local function draw_stats_content()
     local mode = view_mode()
     local ok_loadout, loadout = pcall(require, 'loadout')
 
-    if mode == "character" and ok_loadout and loadout and loadout.draw_worn_summary then
-        loadout.draw_worn_summary(Settings.statsSourceKey or "__self__")
-    elseif mode == "plan" and ok_loadout and loadout then
-        local list_id = Settings.statsLoadoutList or ""
-        if list_id == "" then list_id = loadout.selected_list_id() or "" end
-        Settings.statsLoadoutList = list_id
-        if list_id == "" then
-            col_text(Theme.amber, "No loadout lists yet. Create one on TurboBiS or in Setup.")
+    if mode == "character" or mode == "plan" then
+        local total_rows = rows_for_totals(mode)
+        if #total_rows > 0 then
+            draw_stat_totals_panel(stat_totals_from_rows(total_rows))
+        elseif mode == "plan" then
+            col_text(Theme.amber, "No loadout list rows available.")
         else
-            loadout.draw_summary(list_id)
+            col_text(Theme.amber, "No worn gear stat rows available.")
         end
     end
 
     draw_breakdown_filters()
     local rows = visible_rows()
     if mode == "character" or mode == "plan" then
-        col_text(Theme.dim, string.format("Item breakdown for %s - pick another stat above to filter rows (right-click items for Inspect / Alla)", stat_label(Settings.statsSelectedStat)))
+        col_text(Theme.section or Theme.header, string.format("%s contributors", stat_label(Settings.statsSelectedStat)))
+        col_text(Theme.dim, "Click a stat total above to change this breakdown. Right-click items for Inspect / Alla.")
     else
         col_text(Theme.dim, string.format("%d cached %s row%s with %s > 0",
             #rows,
@@ -681,11 +774,17 @@ local function draw_stats_content()
 
     draw_owner_totals(rows)
     draw_rows(rows)
+    if mode == "character" or mode == "plan" then
+        draw_source_details(mode, ok_loadout and loadout or nil)
+    end
     local status = item_actions.status()
     if status and status ~= "" then col_text(Theme.dim, status) end
 end
 
 function M.draw()
+    pcall(function()
+        index_warm_policy.request_item_index("stats", 3.0)
+    end)
     ensure_defaults()
     draw_controls()
 

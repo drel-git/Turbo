@@ -4,6 +4,7 @@
 local cfg = require('config')
 local Settings = cfg.Settings
 local item_index = require('item_index')
+local index_warm_policy = require('index_warm_policy')
 
 local M = {}
 
@@ -19,10 +20,10 @@ end
 
 local TAB_LABELS = {
     gear = "Gear",
-    inspect = "Inspect",
     upgrade = "Upgrade",
-    bis = "BiS + Lists",
+    bis = "TurboBiS",
     lockouts = "Lockouts",
+    stock = "Stock Up",
     setup = "Setup",
 }
 
@@ -45,15 +46,15 @@ function M.tab_for_row(row)
     if type(row.stats) == "table" then
         for _, value in pairs(row.stats) do
             if (tonumber(value) or 0) > 0 then
-                return "inspect", "stats"
+                return "gear", "stats"
             end
         end
     end
     if type(row.focusEffects) == "table" and #row.focusEffects > 0 then
-        return "inspect", "focus"
+        return "gear", "focus"
     end
     if type(row.wornFocusEffects) == "table" and #row.wornFocusEffects > 0 then
-        return "inspect", "focus"
+        return "gear", "focus"
     end
     return "gear", "inventory"
 end
@@ -64,10 +65,6 @@ end
 
 function M.row_hint(row)
     local tab, sub = M.tab_for_row(row)
-    if tab == "inspect" then
-        if sub == "focus" then return "Inspect · Focus" end
-        return "Inspect · Stats"
-    end
     if tab == "upgrade" then
         if sub == "compare" then return "Upgrade · Compare" end
         return "Upgrade · Suggest"
@@ -75,8 +72,10 @@ function M.row_hint(row)
     if tab == "gear" then
         if sub == "worn" then return "Gear · Worn Augs" end
         if sub == "stored" then return "Gear · Stored Augs" end
-        if sub == "stock" then return "Gear · Stock Up" end
         if sub == "empty" then return "Gear · Empty" end
+        if sub == "stats" then return "Gear · Stats" end
+        if sub == "focus" then return "Gear · Focus" end
+        if sub == "effects" then return "Gear · Effects" end
         return "Gear · Inventory"
     end
     return M.tab_label(tab)
@@ -90,15 +89,13 @@ function M.filter(needle, limit)
         return {}
     end
 
+    pcall(function()
+        index_warm_policy.request_item_index("search", 3.0)
+    end)
     item_index.get(false)
-    -- While Search is open, spend a little extra budget so a cold/empty index
-    -- can finish instead of sitting at 0 matches for many seconds.
-    if #(item_index.rows or {}) == 0 and item_index.building and item_index.building() then
-        for _ = 1, 6 do
-            if item_index.tick(16) then break end
-            if #(item_index.rows or {}) > 0 then break end
-        end
-    end
+    -- Serve last-good completed rows while a cooperative rebuild runs.
+    -- Do not hitch the UI with synchronous tick bursts; the run loop
+    -- advances item_index only while Search/Upgrade requested it.
     local version = tostring(item_index.version or 0) .. ":" .. tostring(#(item_index.rows or {}))
     local cache_key = needle .. ":" .. version .. ":" .. tostring(limit or 80)
     if filtered_cache.key == cache_key then
@@ -169,14 +166,12 @@ function M.apply_row(row)
             Settings.inventoryViewMode = "table"
             Settings.inventorySearch = name
         end
-    elseif tab == "inspect" then
-        Settings.inspectTab = sub or "stats"
     elseif tab == "upgrade" then
         Settings.upgradeTab = sub or "suggestions"
     end
-    if tab == "inspect" and (sub or "stats") == "stats" then
+    if tab == "gear" and (sub or "inventory") == "stats" then
         require('tabs.stats').set_search(name)
-    elseif tab == "inspect" and sub == "focus" then
+    elseif tab == "gear" and sub == "focus" then
         require('tabs.focus').set_search(name)
     elseif tab == "upgrade" and (sub or "suggestions") == "suggestions" then
         require('tabs.suggestions').set_search(name)

@@ -45,7 +45,12 @@ package.preload['config'] = function()
         SaveSharedSettings = function() end, LoadSharedSettings = function() end,
     }
 end
-package.preload['state'] = function() return { bg = true, show = false, lean = function() return false end } end
+package.preload['state'] = function()
+    return {
+        bg = true, show = false, lean = function() return false end,
+        local_guard_scripts = { main = true, bg = true },
+    }
+end
 
 -- Patch os.clock after packages load so store.lua's schedule uses our clock.
 local real_clock = os.clock

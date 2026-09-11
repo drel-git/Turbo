@@ -4,17 +4,18 @@
 package.path = 'lua/turbogear/?.lua;lua/turbogear/?/init.lua;lua/tests/helpers/?.lua;' .. package.path
 package.preload['lsqlite3'] = function() return require('lsqlite3_ffi_shim') end
 
-local DB = "/tmp/tg_store_sqlite_integration.db"
+local tmpdir = require('tmpdir')
+local DB = tmpdir.path("tg_store_sqlite_integration.db")
 for _, p in ipairs({DB, DB.."-wal", DB.."-shm"}) do os.remove(p) end
 
 package.preload['mq'] = function()
     return { TLO = { Me = { CleanName = function() return "Me" end },
-        MacroQuest = { Server = function() return "Srv" end } }, configDir = "/tmp" }
+        MacroQuest = { Server = function() return "Srv" end } }, configDir = tmpdir.dir() }
 end
 package.preload['config'] = function()
     return { CFG = {}, Settings = { offlineSeconds = 45, staleSeconds = 20, mainTab = "bis", storeBackend = "auto" },
-        SharedSettings = { ignoredChars = {} }, DbFile = DB, CacheFile = "/tmp/tg_nonexistent_pickle.lua",
-        LegacyCacheFile = "/tmp/tg_nonexistent_legacy.lua", SaveSharedSettings = function() end, LoadSharedSettings = function() end }
+        SharedSettings = { ignoredChars = {} }, DbFile = DB, CacheFile = tmpdir.path("tg_nonexistent_pickle.lua"),
+        LegacyCacheFile = tmpdir.path("tg_nonexistent_legacy.lua"), SaveSharedSettings = function() end, LoadSharedSettings = function() end }
 end
 package.preload['state'] = function() return { bg = false, show = true, lean = function() return false end } end
 

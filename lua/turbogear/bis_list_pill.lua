@@ -14,7 +14,7 @@ local catalog = require('bis_catalog')
 local M = {}
 
 -- Bump when this file changes so /lua run turbogear reloads a cached require().
-M.VERSION = 11
+M.VERSION = 12
 
 -- Gated click/popup diagnostics (toggle: /tgear pilldebug). Prints one line
 -- when the pill click registers and one when the popup actually opens, so an
@@ -44,16 +44,7 @@ local function truncate_pill_label(text, max_chars)
 end
 
 local function list_pill_label()
-    local tab = tostring(Settings.bisListsTab or "catalog")
-    if tab == "edit" then
-        return "List: Manage Lists"
-    end
-    if tab == "my" then
-        local list = bis.get(Settings.bisSelectedList)
-        local name = list and list.name or "Custom List"
-        return "List: " .. truncate_pill_label(name, 18)
-    end
-    return "List: BiS Catalog"
+    return "Click Here to choose your pages & lists"
 end
 
 local function checkbox_value(label, checked)
@@ -187,7 +178,6 @@ local function draw_list_pill_panel(api)
             local id = tostring(rec.id or "")
             local selected = in_user and tostring(Settings.bisSelectedList or "") == id
             local label = tostring(rec.name or id)
-            if not catalog.list_announce_enabled(id) then label = label .. " !" end
             if ImGui.Selectable(label .. "##tg_list_pill_custom_" .. id, selected) then
                 -- Selected row returns true every frame (see MODE note): only
                 -- act on rows that were not already the active list.
@@ -238,7 +228,7 @@ function M.draw(opts, api)
     if width <= 0 then width = 200 end
     if width > 280 then width = 280 end
 
-    local color = Theme.listPill or Theme.charactersPill or Theme.steel or Theme.blue
+    local color = Theme.customize or Theme.listPill or Theme.steel or Theme.blue
     if themed_button(label .. id, color, width, opts.height or 22) then
         set_panel_open(not panel_is_open())
         pill_debug(panel_is_open() and "CLICK: panel opening" or "CLICK: panel closing")
@@ -254,7 +244,7 @@ function M.draw(opts, api)
         end)
     end
     if pill_hovered and ImGui.SetTooltip then
-        ImGui.SetTooltip("BiS Catalog, custom lists, Manage Lists, and which catalog tabs are visible.")
+        ImGui.SetTooltip("Catalog pages, custom lists, Manage Lists, compact view, and visible TurboBiS tabs.")
     end
 
     if close_requested then

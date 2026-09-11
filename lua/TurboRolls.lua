@@ -317,175 +317,20 @@ local function drawButtonRow(buttons, gap)
     end
 end
 
-local function dragCurrentWindow()
-    if not (ImGui.IsMouseDragging and ImGui.GetMouseDragDelta and ImGui.SetWindowPos) then return end
-    if not ImGui.IsMouseDragging(0, 0.0) then return end
-    local delta = ImGui.GetMouseDragDelta(0)
-    local dx = type(delta) == 'table' and tonumber(delta.x or delta[1]) or tonumber(delta) or 0
-    local dy = type(delta) == 'table' and tonumber(delta.y or delta[2]) or 0
-    if dx == 0 and dy == 0 then return end
-    local px, py = ImGui.GetWindowPos()
-    ImGui.SetWindowPos((tonumber(px) or 0) + dx, (tonumber(py) or 0) + dy)
-    if ImGui.ResetMouseDragDelta then ImGui.ResetMouseDragDelta(0) end
-end
-
-local chromeDragState = {
-    excludes = {},
-    band = nil,
-    grabbing = false,
-    lastX = nil,
-    lastY = nil,
-}
-
-local function vec2XY(v, y)
-    if type(v) == 'table' then
-        return tonumber(v.x or v.X or v[1]) or 0, tonumber(v.y or v.Y or v[2]) or 0
+local lastFixedSizeKey = nil
+local function applyFixedWindowSize(w, h, sizeKey)
+    if ImGui.SetNextWindowSizeConstraints then
+        ImGui.SetNextWindowSizeConstraints(w, h, w, h)
     end
-    return tonumber(v) or 0, tonumber(y) or 0
-end
-
-local function chromeDragCanHandle()
-    return ImGui.GetMousePos and ImGui.GetWindowPos and ImGui.GetWindowSize
-        and ImGui.GetCursorScreenPos and ImGui.GetItemRectMin and ImGui.GetItemRectMax
-        and ImGui.SetWindowPos and ImGui.IsMouseClicked and ImGui.IsMouseDown
-end
-
-local function chromeMousePos()
-    if not ImGui.GetMousePos then return nil, nil end
-    local x, y = ImGui.GetMousePos()
-    return vec2XY(x, y)
-end
-
-local function chromeWindowRect()
-    if not (ImGui.GetWindowPos and ImGui.GetWindowSize) then return nil end
-    local x, y = vec2XY(ImGui.GetWindowPos())
-    local w, h = vec2XY(ImGui.GetWindowSize())
-    return { x1 = x, y1 = y, x2 = x + w, y2 = y + h }
-end
-
-local function chromeCursorScreenY()
-    if not ImGui.GetCursorScreenPos then return nil end
-    local _, y = vec2XY(ImGui.GetCursorScreenPos())
-    return y
-end
-
-local function chromeItemRect()
-    if not (ImGui.GetItemRectMin and ImGui.GetItemRectMax) then return nil end
-    local minX, minY = ImGui.GetItemRectMin()
-    local maxX, maxY = ImGui.GetItemRectMax()
-    local x1, y1 = vec2XY(minX, minY)
-    local x2, y2 = vec2XY(maxX, maxY)
-    return { x1 = x1, y1 = y1, x2 = x2, y2 = y2 }
-end
-
-local function pointInRect(x, y, r)
-    return r and x >= r.x1 and x <= r.x2 and y >= r.y1 and y <= r.y2
-end
-
-local function chromeDragReset()
-    chromeDragState.excludes = {}
-    chromeDragState.band = nil
-end
-
-local function chromeDragAddLastItem()
-    local r = chromeItemRect()
-    if r then chromeDragState.excludes[#chromeDragState.excludes + 1] = r end
-end
-
-local function chromeDragSetBandToCursor()
-    local win = chromeWindowRect()
-    local cy = chromeCursorScreenY()
-    if not win or not cy then return end
-    chromeDragState.band = {
-        x1 = win.x1,
-        y1 = win.y1,
-        x2 = win.x2,
-        y2 = math.max(win.y1 + 48, cy),
-    }
-end
-
-local function chromeDragBlocked(x, y)
-    for _, r in ipairs(chromeDragState.excludes or {}) do
-        if pointInRect(x, y, r) then return true end
+    local cond = ImGuiCond.Appearing
+    if sizeKey ~= lastFixedSizeKey then
+        cond = ImGuiCond.Always
+        lastFixedSizeKey = sizeKey
     end
-    return false
-end
-
-local function chromeDragMove(x, y)
-    if not (ImGui.SetWindowPos and x and y) then return end
-    if chromeDragState.lastX and chromeDragState.lastY then
-        local dx = x - chromeDragState.lastX
-        local dy = y - chromeDragState.lastY
-        if dx ~= 0 or dy ~= 0 then
-            local wx, wy = vec2XY(ImGui.GetWindowPos())
-            ImGui.SetWindowPos(wx + dx, wy + dy)
-        end
-    end
-    chromeDragState.lastX, chromeDragState.lastY = x, y
-end
-
-local function chromeDragApplyActive()
-    if not chromeDragState.grabbing then return end
-    if not (ImGui.IsMouseDown and ImGui.IsMouseDown(0)) then
-        chromeDragState.grabbing = false
-        chromeDragState.lastX, chromeDragState.lastY = nil, nil
-        return
-    end
-    local mx, my = chromeMousePos()
-    if not mx or not my then return end
-    if ImGui.ClearActiveID then ImGui.ClearActiveID() end
-    chromeDragMove(mx, my)
-end
-
-local function chromeDragActiveItem()
-    if not (ImGui.IsItemActive and ImGui.IsItemActive()) then return false end
-    if not (ImGui.IsMouseDown and ImGui.IsMouseDown(0)) then return false end
-    local mx, my = chromeMousePos()
-    if not mx or not my then return false end
-    if not chromeDragState.grabbing then
-        chromeDragState.grabbing = true
-        chromeDragState.lastX, chromeDragState.lastY = mx, my
-        if ImGui.ResetMouseDragDelta then ImGui.ResetMouseDragDelta(0) end
-    end
-    if ImGui.ClearActiveID then ImGui.ClearActiveID() end
-    chromeDragMove(mx, my)
-    return true
-end
-
-local function chromeDragHandle(tooltip)
-    if not chromeDragCanHandle() then return end
-    local mx, my = chromeMousePos()
-    if not mx or not my or not chromeDragState.band then return end
-    local hovered = not ImGui.IsWindowHovered or ImGui.IsWindowHovered()
-    local inBand = pointInRect(mx, my, chromeDragState.band)
-    local blocked = chromeDragBlocked(mx, my)
-    local down = ImGui.IsMouseDown(0)
-
-    if ImGui.IsMouseClicked(0) then
-        if hovered and inBand and not blocked then
-            chromeDragState.grabbing = true
-            chromeDragState.lastX, chromeDragState.lastY = mx, my
-            if ImGui.ResetMouseDragDelta then ImGui.ResetMouseDragDelta(0) end
-        elseif not chromeDragState.grabbing then
-            chromeDragState.lastX, chromeDragState.lastY = nil, nil
-        end
-    end
-
-    if not down then
-        chromeDragState.grabbing = false
-        chromeDragState.lastX, chromeDragState.lastY = nil, nil
-        return
-    end
-
-    if chromeDragState.grabbing then
-        if ImGui.ClearActiveID then ImGui.ClearActiveID() end
-    elseif hovered and inBand and not blocked and ImGui.SetTooltip then
-        ImGui.SetTooltip(tooltip or 'Drag empty header space to move this window.')
-    end
+    ImGui.SetNextWindowSize(w, h, cond)
 end
 
 local function drawTitleChrome(isFull)
-    chromeDragReset()
     local barW = contentRegionWidth()
     local titleA = 'Turbo'
     local titleB = isFull and string.format('Rolls v%s', VERSION) or 'Rolls'
@@ -500,7 +345,6 @@ local function drawTitleChrome(isFull)
     if styledButton('...##tr_menu_btn', 'menu', 7, 3, 'TurboRolls menu.', btnW, btnH) then
         if ImGui.OpenPopup then ImGui.OpenPopup('##tr_title_menu') end
     end
-    chromeDragAddLastItem()
     if ImGui.BeginPopup and ImGui.BeginPopup('##tr_title_menu') then
         if styledButton('Top 3##tr_menu_top', 'announce', 7, 3, 'Announce the top three valid rolls.', 130, 22) then
             announceTop(3)
@@ -525,28 +369,21 @@ local function drawTitleChrome(isFull)
         ImGui.EndPopup()
     end
 
-    local hasRightButton = true
-    local dragX = x0 + btnW + 4
-    local dragW = math.max(20, barW - (hasRightButton and ((btnW * 2) + 8) or (btnW + 4)))
-    local dragMinX, dragMinY, dragMaxX = nil, nil, nil
-    if ImGui.SetCursorPos and ImGui.InvisibleButton then
-        ImGui.SetCursorPos(dragX, y0)
-        ImGui.InvisibleButton('##tr_header_drag', dragW, 38)
-        if ImGui.GetItemRectMin and ImGui.GetItemRectMax then
-            local rmin, rminY = ImGui.GetItemRectMin()
-            local rmax = ImGui.GetItemRectMax()
-            dragMinX = type(rmin) == 'table' and tonumber(rmin.x or rmin[1]) or tonumber(rmin) or nil
-            dragMinY = type(rmin) == 'table' and tonumber(rmin.y or rmin[2]) or tonumber(rminY) or nil
-            dragMaxX = type(rmax) == 'table' and tonumber(rmax.x or rmax[1]) or tonumber(rmax) or nil
+    local titleSX, titleSY = x0, y0
+    if ImGui.GetCursorScreenPos then
+        if ImGui.SetCursorPos then ImGui.SetCursorPos(x0 + btnW + 4, y0) end
+        local sx, sy = ImGui.GetCursorScreenPos()
+        if type(sx) == 'table' then
+            titleSX = tonumber(sx.x or sx[1]) or titleSX
+            titleSY = tonumber(sx.y or sx[2]) or tonumber(sy) or titleSY
+        else
+            titleSX, titleSY = tonumber(sx) or titleSX, tonumber(sy) or titleSY
         end
-        chromeDragActiveItem()
-        if (not chromeDragCanHandle()) and ImGui.IsItemActive and ImGui.IsItemActive() then dragCurrentWindow() end
-        if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then ImGui.SetTooltip('Drag to move TurboRolls.') end
     end
-
-    if ImGui.GetWindowDrawList and dragMinX and dragMinY and dragMaxX and IM_COL32 then
-        local drawX = dragMinX + math.max(0, ((dragMaxX - dragMinX) - titleW) * 0.5)
-        local drawY = dragMinY + 4
+    local dragW = math.max(20, barW - (btnW * 2) - 8)
+    if ImGui.GetWindowDrawList and IM_COL32 then
+        local drawX = titleSX + math.max(0, (dragW - titleW) * 0.5)
+        local drawY = titleSY + 4
         ImGui.GetWindowDrawList():AddText(ImVec2(drawX, drawY), IM_COL32(255, 199, 82, 255), titleA)
         ImGui.GetWindowDrawList():AddText(ImVec2(drawX + textWidth(titleA), drawY), IM_COL32(235, 240, 250, 255), titleB)
     elseif ImGui.SetCursorPos then
@@ -556,19 +393,14 @@ local function drawTitleChrome(isFull)
         ImGui.TextColored(0.92, 0.94, 0.98, 1.00, titleB)
     end
 
-    if hasRightButton then
-        if ImGui.SetCursorPos then ImGui.SetCursorPos(x0 + math.max(0, barW - btnW), y0) end
-        local toggleLabel = isFull and '-##tr_mode_toggle' or '+##tr_mode_toggle'
-        local toggleTip = isFull and 'Collapse to mini view.' or 'Expand to the full roll table and tools view.'
-        if styledButton(toggleLabel, 'expand', 7, 3, toggleTip, btnW, btnH) then
-            compactMode = isFull
-        end
-        chromeDragAddLastItem()
+    if ImGui.SetCursorPos then ImGui.SetCursorPos(x0 + math.max(0, barW - btnW), y0) end
+    local toggleLabel = isFull and '-##tr_mode_toggle' or '+##tr_mode_toggle'
+    local toggleTip = isFull and 'Collapse to mini view.' or 'Expand to the full roll table and tools view.'
+    if styledButton(toggleLabel, 'expand', 7, 3, toggleTip, btnW, btnH) then
+        compactMode = isFull
     end
 
     if ImGui.SetCursorPos then ImGui.SetCursorPos(x0, y0 + 42) end
-    chromeDragSetBandToCursor()
-    chromeDragHandle('Drag empty TurboRolls header space to move the window.')
     ImGui.Separator()
 end
 
@@ -901,8 +733,7 @@ local function drawCompactWindow(sorted, winner)
     if ImGuiWindowFlags.NoScrollbar then
         compactFlags = bit32.bor(compactFlags, ImGuiWindowFlags.NoScrollbar)
     end
-    if ImGui.SetNextWindowSizeConstraints then ImGui.SetNextWindowSizeConstraints(compactW, compactH, compactW, compactH) end
-    ImGui.SetNextWindowSize(compactW, compactH, ImGuiCond.Always)
+    applyFixedWindowSize(compactW, compactH, 'compact')
 
     ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 6)
     ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 2)
@@ -924,7 +755,6 @@ local function drawCompactWindow(sorted, winner)
         return
     end
 
-    chromeDragApplyActive()
     drawTitleChrome(false)
 
     if winner then
@@ -962,8 +792,7 @@ local function drawFullWindow(sorted, winner)
     elseif showTools then
         targetHeight = 432
     end
-    if ImGui.SetNextWindowSizeConstraints then ImGui.SetNextWindowSizeConstraints(fullW, targetHeight, fullW, targetHeight) end
-    ImGui.SetNextWindowSize(fullW, targetHeight, ImGuiCond.Always)
+    applyFixedWindowSize(fullW, targetHeight, 'full-' .. tostring(targetHeight))
 
     ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 6)
     ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 2)
@@ -974,7 +803,11 @@ local function drawFullWindow(sorted, winner)
     ImGui.PushStyleColor(ImGuiCol.TitleBgCollapsed, 0.08, 0.11, 0.16, 1.00)
 
     local open = showWindow
-    open = ImGui.Begin(string.format('%s v%s', SCRIPT_NAME, VERSION), open, ImGuiWindowFlags.NoTitleBar or 0)
+    local fullFlags = ImGuiWindowFlags.NoTitleBar or 0
+    if ImGuiWindowFlags.NoResize then
+        fullFlags = bit32.bor(fullFlags, ImGuiWindowFlags.NoResize)
+    end
+    open = ImGui.Begin(string.format('%s v%s', SCRIPT_NAME, VERSION), open, fullFlags)
     showWindow = open
 
     if not open then
@@ -985,7 +818,6 @@ local function drawFullWindow(sorted, winner)
         return
     end
 
-    chromeDragApplyActive()
     drawTitleChrome(true)
 
     if winner then

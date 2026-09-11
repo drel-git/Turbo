@@ -1,3 +1,40 @@
+1.2.139
+This is the largest TurboGear update so far, focused on performance, linked-needs reliability, and UI cleanup.
+
+## Highlights
+
+- Major linked-needs performance overhaul
+  - Reworked linked item announces around resident generated authority, compact ownership caches, and bounded targeted fallback
+  - Avoids heavy synchronous fleet scans when loot links arrive
+  - Greatly reduces delayed [TG] announces and startup warmup pain
+
+- MQ2Lua Turbo Num setup helper
+  - TurboGear now detects low MQ2Lua Turbo Num values
+  - Recommends 1000 instructions per frame for fast linked-needs warmup (Thanks Realist!)
+  - Adds clear warnings, `/tgear status` diagnostics, Setup status, and a main-window Set to 1000 banner
+
+- Duplicate loot-link cleanup
+  - Strips stray trailing `(ID: n)` corpse-id text from TurboLoot announce/skip item names
+  - Prevents duplicated linked rows such as clean item name plus item name with corpse id attached
+
+- Safer cache/readiness model
+  - Keeps last-good data visible while refreshes warm
+  - Separates local vs published ownership readiness
+  - Reduces UI-driven cache churn and avoids broad scans from draw paths
+
+- UI refresh
+  - Cleaner top-level layout: Gear, Upgrade, TurboBiS, Type 12, Spells, Lockouts, Stock Up, Setup
+  - New top-level Type 12 tab combines the Type 12 matrix with Anguish/DSK source item reference (Thanks Sebbun!)
+  - DoN spells moved into Spells
+  - Stock Up, Stats, Gear Inventory, Setup, Lockouts, and TurboBiS received readability and workflow improvements
+
+- Lockouts / DoN cleanup
+  - added a DoN task lockout tracker
+
+- Linux Patcher
+  - Update patcher now available for Linux
+
+
 1.2.138
 - Announce: [TG] only from live chat links / [ANNOUNCE] / [SKIP]. lootseen and
   LOOT_LINK refresh Linked/Go-loot corpse ids only (stops re-announce when

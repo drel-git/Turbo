@@ -9,6 +9,7 @@ local snapshot = require('snapshot')
 local snapshot_delta = require('snapshot_delta')
 local state = require('state')
 local diag = require('diagnostics')
+local worn_poll_policy = require('inventory_watch_worn_poll_policy')
 
 local M = { registered = false }
 
@@ -28,6 +29,7 @@ local delta_baseline_bank = false
 -- (avoids hitch on Give Now). Counts down on tick; no bag-scan fallback
 -- (optimistic give delta + later bg note cover the UI).
 local store_adopt_retries = 0
+local note_worn_poll_activity
 
 local function enabled()
     return CFG.inventory_watch_enabled ~= false
@@ -48,6 +50,7 @@ end
 
 local function mark_dirty(urgent, full)
     if not enabled() then return end
+    if note_worn_poll_activity then note_worn_poll_activity("dirty") end
     dirty_at = urgent and (os.clock() - debounce_s()) or os.clock()
     dirty_urgent = dirty_urgent or urgent == true
     dirty_full = dirty_full or full == true
@@ -100,9 +103,24 @@ end
 -- Phase 2: worn change detection. Local BiS uses live FindItem (no persist).
 -- Persist/publish for peers is debounced — never saveNow on the UI thread.
 local last_worn_sig, last_worn_poll_at = nil, 0
+local worn_poll_fast_until = 0
 local worn_persist_due_at = nil
 local worn_persist_snap = nil
 local last_known_wallet_sig = nil
+
+note_worn_poll_activity = function(reason)
+    if state.bg ~= true then return end
+    worn_poll_fast_until = worn_poll_policy.activate_until(os.clock(), CFG)
+    diag.count("inventory_watch.worn_poll_fast_reset")
+    reason = tostring(reason or "")
+    if reason == "dirty" then
+        diag.count("inventory_watch.worn_poll_fast_reset_dirty")
+    elseif reason == "worn_event" then
+        diag.count("inventory_watch.worn_poll_fast_reset_worn_event")
+    elseif reason == "worn_poll" then
+        diag.count("inventory_watch.worn_poll_fast_reset_worn_poll")
+    end
+end
 
 local function worn_persist_debounce_s()
     local s = tonumber(CFG.perf_worn_persist_debounce_s) or 2.5
@@ -172,7 +190,9 @@ local function flush_worn_persist_if_due()
     worn_persist_snap = nil
     if type(snap) ~= "table" then return end
     -- Debounced peer update: one publish/save after gear settles — not per equip.
-    if not persist_worn_snap(snap) then
+    if not diag.time("inventory_watch.worn_persist", function()
+        return persist_worn_snap(snap)
+    end) then
         -- Keep the patched snap; short retry (not full debounce) so one fail
         -- does not wait another 2.5s while peers stay stale.
         worn_persist_snap = snap
@@ -213,7 +233,9 @@ local function apply_worn_refresh(now, reason)
     if not snapshot.refresh_equipped or not snapshot.cached() then return false end
     -- Full-build changed (and still-lite) slots only; unchanged full rows reuse.
     -- Keeps Suggestions worn AC correct without a UI-thread stats walk.
-    local snap = snapshot.refresh_equipped("full")
+    local snap = diag.time("inventory_watch.worn_refresh", function()
+        return snapshot.refresh_equipped("full")
+    end)
     if not snap then return false end
     if snapshot.worn_signature then
         last_worn_sig = snapshot.worn_signature()
@@ -223,6 +245,9 @@ local function apply_worn_refresh(now, reason)
     if reason and reason ~= "" then
         diag.count("inventory_watch.worn_refresh_" .. tostring(reason))
     end
+    if reason == "worn_poll" or reason == "worn_event" then
+        note_worn_poll_activity(reason)
+    end
     schedule_worn_persist(snap)
     return true
 end
@@ -231,6 +256,8 @@ end
 -- rebuild those slots full on bg (reuse leaves already-full rows alone).
 local function maybe_heal_lite_worn(now)
     if state.engine_claim_disabled == true then return false end
+    local eng = package.loaded.engine
+    if type(eng) == "table" and eng.Engine and eng.Engine._heavy_tlo then return false end
     local gap = tonumber(CFG.worn_lite_heal_gap_s)
     if gap == nil then gap = 30.0 end
     if gap < 5 then gap = 5 end
@@ -244,6 +271,8 @@ local function maybe_heal_lite_worn(now)
 end
 
 local function on_worn_line(_line)
+    diag.count("inventory_watch.worn_event_rx")
+    note_worn_poll_activity("worn_event")
     local now = os.clock()
     if apply_worn_refresh(now, "worn_event") then return end
     if state.engine_claim_disabled == true then
@@ -256,13 +285,33 @@ end
 local function poll_equipped_if_due()
     if CFG.perf_equip_poll == false then return end
     if not snapshot.worn_signature then return end
-    local interval = tonumber(CFG.perf_equip_poll_interval_s) or 1.0
-    if interval <= 0 then return end
+    -- Same-tick exclusion with heartbeat DynamicZone / inventory / rich enrich.
+    local eng = package.loaded.engine
+    if type(eng) == "table" and eng.Engine and eng.Engine._heavy_tlo then return end
     local now = os.clock()
+    local interval, mode = worn_poll_policy.interval(now, CFG, {
+        bg = state.bg == true,
+        fast_until = worn_poll_fast_until,
+    })
+    if interval <= 0 then return end
     if (now - last_worn_poll_at) < interval then return end
     last_worn_poll_at = now
+    if mode == "fast" then
+        diag.count("inventory_watch.worn_poll_fast_due")
+        diag.sample("inventory_watch.worn_poll_fast_interval_ms", interval * 1000)
+    elseif mode == "idle" then
+        diag.count("inventory_watch.worn_poll_idle_due")
+        diag.sample("inventory_watch.worn_poll_idle_interval_ms", interval * 1000)
+    end
 
-    local sig = snapshot.worn_signature()
+    local sig = diag.time("inventory_watch.worn_signature", function()
+        return snapshot.worn_signature()
+    end)
+    if mode == "fast" then
+        diag.count("inventory_watch.worn_signature_fast")
+    elseif mode == "idle" then
+        diag.count("inventory_watch.worn_signature_idle")
+    end
     if sig == last_worn_sig then return end
     if last_worn_sig == nil then
         last_worn_sig = sig -- seed; no phantom on first observation
@@ -270,6 +319,11 @@ local function poll_equipped_if_due()
     end
     last_worn_sig = sig
     diag.count("inventory_watch.worn_change")
+    if mode == "fast" then
+        diag.count("inventory_watch.worn_change_fast")
+    elseif mode == "idle" then
+        diag.count("inventory_watch.worn_change_idle")
+    end
     apply_worn_refresh(now, "worn_poll")
 end
 
@@ -394,6 +448,23 @@ local function spell_like_removed(baseline, snap)
     return false
 end
 
+-- After a published spell-set change (scribe / tome learned): drop this box's
+-- live DoN memo so its own view is instant, and (bg only - it owns the actor
+-- bus) push a fresh "don" answer so peers' spell rows don't wait for their
+-- next search. Only runs when publish_if_changed saw a real known-set change.
+local function after_spell_publish(reason)
+    pcall(function() require('don_spells').invalidate_live() end)
+    if state.bg ~= true then return false end
+    local queued = false
+    pcall(function()
+        local Engine = require('engine').Engine
+        if Engine and Engine.queue_bis_push then queued = Engine.queue_bis_push("don", 2.0) == true end
+    end)
+    if queued then diag.count("inventory_watch.don_push_queued") end
+    return queued
+end
+M._after_spell_publish = after_spell_publish -- test hook
+
 local function maybe_spell_republish(snap, baseline)
     if not spell_like_removed(baseline, snap) then return false end
     diag.count("inventory_watch.spell_like_removed")
@@ -403,6 +474,7 @@ local function maybe_spell_republish(snap, baseline)
     local published = select(1, SC.publish_if_changed("inventory_spell_consume"))
     if published then
         diag.count("inventory_watch.spell_publish")
+        after_spell_publish("spell_consume")
     end
     return published == true
 end
@@ -411,34 +483,36 @@ local function flush_if_due()
     if not enabled() or not dirty_at then return false end
     local now = os.clock()
     if (now - dirty_at) < debounce_s() then return false end
-    dirty_at = nil
+    return diag.time("inventory_watch.dirty_flush", function()
+        dirty_at = nil
 
-    snapshot.invalidate()
-    local urgent = dirty_urgent == true
-    dirty_urgent = false
-    local full = dirty_full == true
-    dirty_full = false
-    local depth = full and "full" or "lite"
-    local publish_opts = { skipLockouts = true, skipLiveStats = true, reason = "inventory_watch_dirty" }
-    -- Urgent changes (go-loot, equip/bank) bypass the publish cooldown and flush
-    -- the shared cache so the announce UI can reload without waiting ~30s.
-    if urgent then publish_opts.saveNow = true end
-    local baseline_before = delta_baseline
-    local snap = snapshot.gather({
-        force = true,
-        depth = depth,
-        noCoalesce = true, -- real inventory change; never reuse a coalesced force gather
-        skipLockouts = publish_opts and publish_opts.skipLockouts == true,
-        skipLiveStats = publish_opts and publish_opts.skipLiveStats == true,
-    })
-    -- Scribe path: scroll/tome removed → rebuild known-cache + spell publish.
-    -- Cheap name/id pre-check; full spell gather only on a positive match.
-    if maybe_spell_republish(snap, baseline_before) then
-        -- Spell publish already shipped inventory+spells; refresh local sig.
-        if snap then last_known_sig = snapshot.lite_signature(snap) end
-        return true
-    end
-    return publish_snap_if_changed(snap, now, depth, urgent, publish_opts)
+        snapshot.invalidate()
+        local urgent = dirty_urgent == true
+        dirty_urgent = false
+        local full = dirty_full == true
+        dirty_full = false
+        local depth = full and "full" or "lite"
+        local publish_opts = { skipLockouts = true, skipLiveStats = true, reason = "inventory_watch_dirty" }
+        -- Urgent changes (go-loot, equip/bank) bypass the publish cooldown and flush
+        -- the shared cache so the announce UI can reload without waiting ~30s.
+        if urgent then publish_opts.saveNow = true end
+        local baseline_before = delta_baseline
+        local snap = snapshot.gather({
+            force = true,
+            depth = depth,
+            noCoalesce = true, -- real inventory change; never reuse a coalesced force gather
+            skipLockouts = publish_opts and publish_opts.skipLockouts == true,
+            skipLiveStats = publish_opts and publish_opts.skipLiveStats == true,
+        })
+        -- Scribe path: scroll/tome removed → rebuild known-cache + spell publish.
+        -- Cheap name/id pre-check; full spell gather only on a positive match.
+        if maybe_spell_republish(snap, baseline_before) then
+            -- Spell publish already shipped inventory+spells; refresh local sig.
+            if snap then last_known_sig = snapshot.lite_signature(snap) end
+            return true
+        end
+        return publish_snap_if_changed(snap, now, depth, urgent, publish_opts)
+    end)
 end
 
 local function bg_poll_if_due()
@@ -450,43 +524,46 @@ local function bg_poll_if_due()
     last_bg_poll_at = now
 
     if dirty_at then return end
-    local snap = snapshot.gather({
-        force = false,
-        depth = "lite",
-        skipLockouts = true,
-        skipLiveStats = true,
-    })
-    if not snap then return end
-    local sig = snapshot.lite_signature(snap)
-    if sig == last_known_sig then return end
+    return diag.time("inventory_watch.bg_poll", function()
+        local snap = snapshot.gather({
+            force = false,
+            depth = "lite",
+            skipLockouts = true,
+            skipLiveStats = true,
+        })
+        if not snap then return end
+        local sig = snapshot.lite_signature(snap)
+        if sig == last_known_sig then return end
 
-    -- Scribe/memorize often emits no watched chat line, so flush_if_due never
-    -- runs. On any inventory sig change, refresh known-cache; publish_if_changed
-    -- is a no-op when the known-set is unchanged.
-    local baseline_before = delta_baseline
-    if maybe_spell_republish(snap, baseline_before) then
-        last_known_sig = sig
-        return
-    end
-    -- No spell-like removal detected (or no baseline yet): still rebuild so a
-    -- silent scribe can't leave peers/UI on a pre-scribe known-set forever.
-    local published = false
-    pcall(function()
-        local SC = require('spell_cache')
-        SC.rebuild(snap and snap.class)
-        published = SC.publish_if_changed('inventory_watch_bg_poll') == true
+        -- Scribe/memorize often emits no watched chat line, so flush_if_due never
+        -- runs. On any inventory sig change, refresh known-cache; publish_if_changed
+        -- is a no-op when the known-set is unchanged.
+        local baseline_before = delta_baseline
+        if maybe_spell_republish(snap, baseline_before) then
+            last_known_sig = sig
+            return
+        end
+        -- No spell-like removal detected (or no baseline yet): still rebuild so a
+        -- silent scribe can't leave peers/UI on a pre-scribe known-set forever.
+        local published = false
+        pcall(function()
+            local SC = require('spell_cache')
+            SC.rebuild(snap and snap.class)
+            published = SC.publish_if_changed('inventory_watch_bg_poll') == true
+        end)
+        if published then
+            last_known_sig = sig
+            diag.count("inventory_watch.spell_publish")
+            after_spell_publish("bg_poll")
+            return
+        end
+
+        publish_snap_if_changed(snap, now, "lite", false, {
+            skipLockouts = true,
+            skipLiveStats = true,
+            reason = "inventory_watch_bg_poll",
+        })
     end)
-    if published then
-        last_known_sig = sig
-        diag.count("inventory_watch.spell_publish")
-        return
-    end
-
-    publish_snap_if_changed(snap, now, "lite", false, {
-        skipLockouts = true,
-        skipLiveStats = true,
-        reason = "inventory_watch_bg_poll",
-    })
 end
 
 function M.register()
@@ -571,21 +648,45 @@ function M.tick()
 end
 
 function M.seed_signature()
-    local snap = snapshot.cached() or snapshot.gather({ force = false, depth = "lite" })
+    local snap = snapshot.cached()
+    -- bg-only must not inventory-walk just to seed a signature. That gather
+    -- at script start is how a sitting responder dies before the run loop.
+    if not snap and state.bg ~= true then
+        snap = snapshot.gather({ force = false, depth = "lite" })
+    end
     if snap then last_known_sig = snapshot.lite_signature(snap) end
     if snapshot.worn_signature then
         last_worn_sig = snapshot.worn_signature()
     end
 end
 
--- Call from bg startup after the actor mailbox is claimed. Builds the known
--- cache once and publishes when the signature is new.
+-- Call from bg startup after the actor mailbox is claimed. Restore persisted
+-- spell authority when present; never live-scan the book on the critical path.
 function M.startup_spell_cache()
     if state.bg ~= true then return end
     pcall(function()
+        local plan_mod = require('spells_startup')
         local SC = require('spell_cache')
-        SC.rebuild()
-        SC.publish_if_changed('startup')
+        local snap = snapshot.cached()
+        if not plan_mod.snapshot_is_usable(snap) then
+            pcall(function()
+                local store_mod = require('store')
+                local key = store_mod.my_key and store_mod.my_key() or nil
+                local stored = key and store_mod.Store and store_mod.Store.get and store_mod.Store.get(key) or nil
+                if plan_mod.snapshot_is_usable(stored) then snap = stored end
+            end)
+        end
+        local plan = plan_mod.plan_bg_startup({ snap = snap })
+        if plan.action == "restore_cache" then
+            SC.restore_from_snapshot(snap)
+            if snapshot.seed_spell_authority then snapshot.seed_spell_authority(snap) end
+            diag.count("snapshot.spells.cache_restore")
+            diag.event("snapshot.spells.cache_restore", "sig=" .. tostring(snap.spells_sig or ""))
+        else
+            SC.note_deferred_unready()
+            diag.count("snapshot.spells.deferred")
+            diag.event("snapshot.spells.deferred", "no cached spell authority")
+        end
     end)
 end
 

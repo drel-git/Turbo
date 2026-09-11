@@ -142,6 +142,12 @@ local BIS_BAG    = { 0.52, 0.72, 1.00, 1.0 }  -- owned in bags/bank / Ready to L
 local BIS_MISS   = { 0.62, 0.34, 0.34, 1.0 }
 local BIS_ELSE   = { 0.95, 0.72, 0.30, 1.0 }
 local BIS_PACK   = { 0.95, 0.78, 0.35, 1.0 }  -- DoN Pack Owned
+local BIS_UNKNOWN = { 0.55, 0.55, 0.58, 1.0 }  -- peer DoN ability, no data yet
+-- "Missing only" keeps rows that still need attention: missing, plus unknown
+-- (no data yet - may well be missing). Ready / Pack count as done.
+local function needs_attention(row)
+    return row ~= nil and (row.status == "missing" or row.status == "unknown")
+end
 local BIS_CYAN   = { 0.36, 0.66, 0.76, 1.0 }
 local BIS_ITEM   = { 0.37, 0.68, 0.80, 1.0 }
 local ULTRA_CELL_BG = {
@@ -697,13 +703,6 @@ local function draw_user_list_actions(list_id)
             loadout.open_for_list(list_id, "focus")
         end
     end
-    ImGui.SameLine()
-    if themed_button("Use for Linked Needs##bis_act_ann", Theme.sync) then
-        local ok, detail = userlists.prepare_for_announces(list_id)
-        status_msg = ok
-            and string.format("'%s' is active for linked-needs announces.", tostring(detail or list_id))
-            or tostring(detail or "Could not enable linked needs.")
-    end
 end
 
 local function draw_my_lists_header()
@@ -754,14 +753,14 @@ local function draw_catalog_buttons()
 end
 
 local function active_announce_list_id()
-    if Settings.bisListMode == "user" then return tostring(Settings.bisSelectedList or "") end
+    if Settings.bisListMode == "user" then return "" end
     return tostring(selected_catalog_id() or "")
 end
 
 local function draw_announce_disabled_warning()
     local id = active_announce_list_id()
     if id == "" or catalog.list_announce_enabled(id) then return end
-    col_text(Theme.amber, "! Announce OFF for this TurboBiS list.")
+    col_text(Theme.amber, "! [TG] Announce OFF for this built-in TurboBiS list.")
 end
 
 local function linked_item_age_text(age_s)
@@ -1031,12 +1030,13 @@ local function row_color(row)
     if row and row.status == "known" then return BIS_GREEN end
     if row and (row.status == "carried" or row.status == "ready") then return BIS_BAG end
     if row and row.status == "pack_owned" then return BIS_PACK end
+    if row and row.status == "unknown" then return BIS_UNKNOWN end
     if show_elsewhere() and row and row.elsewhere then return BIS_ELSE end
     return BIS_MISS
 end
 
 local function apply_ultra_cell_bg(row)
-    if not row or row.empty or (row.status == "missing" and not (show_elsewhere() and row.elsewhere)) then return end
+    if not row or row.empty or row.status == "unknown" or (row.status == "missing" and not (show_elsewhere() and row.elsewhere)) then return end
     local bg = ULTRA_CELL_BG.carried
     if row.status == "equipped" or row.status == "known" then bg = ULTRA_CELL_BG.equipped
     elseif row.status == "pack_owned" then bg = ULTRA_CELL_BG.pack end
@@ -1139,6 +1139,7 @@ local function status_glyph(row)
     if row.status == "equipped" or row.status == "known" then return "W" end
     if row.status == "carried" or row.status == "ready" then return "B" end
     if row.status == "pack_owned" then return "P" end
+    if row.status == "unknown" then return "?" end
     if show_elsewhere() and row.elsewhere then return "E" end
     return "X"
 end
@@ -1149,6 +1150,7 @@ local function row_label(row)
     if row and row.status == "known" then return "Known" end
     if row and row.status == "ready" then return "Ready to Learn" end
     if row and row.status == "pack_owned" then return "Pack Owned" end
+    if row and row.status == "unknown" then return "Unknown" end
     if show_elsewhere() and row and row.elsewhere then return "Elsewhere" end
     return "Need"
 end
@@ -1157,6 +1159,7 @@ local function row_location(row)
     if row and row.status == "known" then return "Spell book / discs" end
     if row and row.status == "ready" then return "Ready to learn" end
     if row and row.status == "pack_owned" then return "Pack owned" end
+    if row and row.status == "unknown" then return "No spell data yet (Refresh)" end
     local m = row.match
     if not m then return "-" end
     if type(m) == "string" then return m end
@@ -1827,7 +1830,7 @@ local function draw_single(list, snap, view_key)
             views.setup_scroll_freeze("BiSHaveNeed", 0, 1)
             views.table_headers_centered({ "Status", "Slot", "BiS Item", "Found Where", "IDs", "Find" })
             for i, row in ipairs(rows) do
-                if (not Settings.bisShowMissingOnly or row.status == "missing") and matches_filter(row, needle) then
+                if (not Settings.bisShowMissingOnly or needs_attention(row)) and matches_filter(row, needle) then
                     decorate_elsewhere(row, snap)
                     shown = shown + 1
                     local e = row.entry
@@ -1902,7 +1905,7 @@ local function draw_roster(list)
                 local any_missing = false
                 for _, key in ipairs(keys) do
                     local row = rows_by_key[key] and rows_by_key[key][i]
-                    if row and row.status == "missing" then any_missing = true; break end
+                    if needs_attention(row) then any_missing = true; break end
                 end
                 if (not Settings.bisShowMissingOnly or any_missing) and matches_filter(ref, needle) then
                     decorate_elsewhere(ref, reference_snap)
@@ -2036,7 +2039,7 @@ local function draw_all_lists_search(needle)
 end
 
 local function draw_catalog_single(list_id, snap, view_key)
-    local rows = catalog.rows_for_snap(list_id, snap)
+    local rows = M._visible_catalog_rows_for_bis(list_id, catalog.rows_for_snap(list_id, snap))
     local equipped, carried, missing = bis.counts(rows)
     col_text(Theme.dim, string.format("%s %s: %d equipped / %d carried / %d missing", snap.name or "Source", catalog.list_label(list_id), equipped, carried, missing))
     local needle = (filter or ""):lower()
@@ -2060,7 +2063,7 @@ local function draw_catalog_single(list_id, snap, view_key)
                             ImGui.TextDisabled("")
                         end
                     end
-                elseif not row.empty and (not Settings.bisShowMissingOnly or row.status == "missing") and catalog_row_matches(row, needle) then
+                elseif not row.empty and (not Settings.bisShowMissingOnly or needs_attention(row)) and catalog_row_matches(row, needle) then
                     decorate_elsewhere(row, snap)
                     local slot_name = row.entry.slot or row.slot or ""
                     ImGui.TableNextRow()
@@ -2160,6 +2163,23 @@ local function copy_keys(keys)
     return out
 end
 
+function M._hide_catalog_category_in_bis(list_id, category)
+    return tostring(list_id or "") == "don" and tostring(category or "") == "Spells"
+end
+
+function M._visible_catalog_rows_for_bis(list_id, rows)
+    if type(rows) ~= "table" or not M._hide_catalog_category_in_bis(list_id, "Spells") then
+        return rows or {}
+    end
+    local out = {}
+    for _, row in ipairs(rows) do
+        if not M._hide_catalog_category_in_bis(list_id, row and row.category) then
+            out[#out + 1] = row
+        end
+    end
+    return out
+end
+
 local function start_roster_build_job(list_id, keys, cache_key)
     local counts_by_key, snaps_by_key = {}, {}
     local build_keys = copy_keys(keys)
@@ -2173,7 +2193,7 @@ local function start_roster_build_job(list_id, keys, cache_key)
         end
     end
     -- DoN Spells: size section to max class ability count among visible columns.
-    local refs = catalog.reference_rows(list_id, { class_names = class_names })
+    local refs = M._visible_catalog_rows_for_bis(list_id, catalog.reference_rows(list_id, { class_names = class_names }))
     roster_build_job = {
         key = cache_key,
         list_id = list_id,
@@ -2238,9 +2258,9 @@ local function process_roster_build_job(cache_key)
                         elseif row.status == "carried" or row.status == "known"
                             or row.status == "ready" or row.status == "pack_owned" then
                             c[2] = (c[2] or 0) + 1
-                        else c[3] = (c[3] or 0) + 1 end
+                        elseif row.status ~= "unknown" then c[3] = (c[3] or 0) + 1 end
                     end
-                    if row and row.status == "missing" and not row.pad then any_missing = true end
+                    if needs_attention(row) and not row.pad then any_missing = true end
                     if catalog_row_matches(row, job.needle or "") then any_match = true end
                 end
                 if any_real and any_match and (not Settings.bisShowMissingOnly or any_missing) then
@@ -2356,7 +2376,7 @@ end
 local function draw_catalog_cell(row, layout, layout_cfg, snap, slot, ridx, col_idx)
     ImGui.TableSetColumnIndex(col_idx)
     local name_max = layout_cfg and layout_cfg.name_max or 20
-    if Settings.bisShowMissingOnly and row and not row.empty and not row.pad and row.status ~= "missing" then
+    if Settings.bisShowMissingOnly and row and not row.empty and not row.pad and not needs_attention(row) then
         ImGui.TextDisabled("-")
         return
     end
@@ -2409,6 +2429,15 @@ M.bis_legend_tooltip = function(layout)
 end
 
 local function draw_catalog_roster(list_id)
+    if list_id == "focusitems" then
+        local keys = roster_source_keys_for_view(Settings.bisViewKey or "__all__")
+        local ok, t12 = pcall(require, 'type12_matrix')
+        if ok and t12 and t12.draw then
+            return t12.draw(keys)
+        end
+        col_text(Theme.amber or Theme.dim, "Type 12 Aug matrix unavailable.")
+        return
+    end
     -- LazBiS-style: ask peers to FindItem this catalog (bg owns the actor bus).
     pcall(function()
         local bs = require('bis_search')
@@ -2633,6 +2662,8 @@ local function draw_bis_body()
             catalog_id = selected_catalog_id()
             if catalog_id == "" then
                 col_text(Theme.amber, "No catalog data loaded.")
+            elseif catalog_id == "focusitems" then
+                draw_catalog_roster(catalog_id)
             elseif view_key == "__all__" or view_key == SELECTED_VIEW_KEY then
                 draw_catalog_roster(catalog_id)
             else
@@ -2674,7 +2705,7 @@ end
 -- List pill lives in bis_list_pill.lua (keeps this chunk under the 200-local limit).
 -- Force-reload when VERSION changes so /lua stop+run picks up edits (MQ may keep package.loaded).
 function M.draw_list_pill(opts)
-    local ver = 11
+    local ver = 12
     if rawget(_G, "__TGListPillVer") ~= ver then
         package.loaded["bis_list_pill"] = nil
         _G.__TGListPillVer = ver
