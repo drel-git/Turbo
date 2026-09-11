@@ -1,3 +1,9 @@
+1.2.140
+TurboGear v1.2.139 Hotfix
+- Fixed clean-install/custom-lockout startup spam when TurboGear_lockouts_custom.lua does not exist yet.
+- Fixed a zoning crash in turbogear_bg caused by lockout watcher state being initialized too late.
+- Missing custom lockout files now correctly behave as "no custom lockouts configured."
+
 1.2.139
 This is the largest TurboGear update so far, focused on performance, linked-needs reliability, and UI cleanup.
 

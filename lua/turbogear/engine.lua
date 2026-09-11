@@ -185,6 +185,7 @@ local function write_local_cache_snapshot(force, depth, opts)
 end
 
 local last_zone_short = nil
+local lockout_watch = { next_at = 0, sig = nil, don = nil }
 
 local function zone_fields()
     local zoneShort, zoneName = "", ""
@@ -1252,8 +1253,6 @@ local function prune_dedupe_maps()
         end
     end
 end
-
-local lockout_watch = { next_at = 0, sig = nil, don = nil }
 
 --- Names a lockout map holds, for the diagnostic trail. A snapshot that goes
 --- out with the wrong set here is the difference between "the peer never told

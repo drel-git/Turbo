@@ -101,6 +101,9 @@ function M.load_custom(force)
     if custom_loaded and not force then return custom_entries end
     custom_loaded = true
     custom_entries = {}
+    local fh = io.open(CUSTOM_FILE, "r")
+    if not fh then return custom_entries end
+    fh:close()
     local ok, data = pcall(dofile, CUSTOM_FILE)
     if ok and type(data) == "table" and type(data.entries) == "table" then
         for _, e in ipairs(data.entries) do
