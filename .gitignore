@@ -1,2 +1,3 @@
-# Maintainer scripts. Keep local; do not publish on drel-git/Turbo.
+# Maintainer-only. Keep local; do not publish on drel-git/Turbo.
 tools/
+lua/tests/
