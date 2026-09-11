@@ -1,3 +1,7 @@
+1.2.141
+TurboGear v1.2.141 Hotfix
+- Added regression coverage for Sebilis mold ownership matching.
+
 1.2.140
 TurboGear v1.2.139 Hotfix
 - Fixed clean-install/custom-lockout startup spam when TurboGear_lockouts_custom.lua does not exist yet.

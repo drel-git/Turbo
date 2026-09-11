@@ -452,6 +452,42 @@ local function expand_don_scales_chain(out, class_name)
     return out
 end
 
+-- Sebilis Forsaken armor: LazBiS treats either the finished class armor or the
+-- matching Ruined Shadowy mold as satisfying the slot. Add the mold as a
+-- satisfy alias so TurboBiS, linked-needs, and generated authority agree.
+function M.expand_sebilis_forsaken_chain(out)
+    local mold = ({
+        Arms = { name = "Ruined Shadowy Armguards", id = 150774 },
+        Chest = { name = "Ruined Shadowy Breastplate" },
+        Feet = { name = "Ruined Shadowy Boots", id = 150775 },
+        Hands = { name = "Ruined Shadowy Gauntlets", id = 150778 },
+        Head = { name = "Ruined Shadowy Helm" },
+        Legs = { name = "Ruined Shadowy Greaves" },
+        Wrist = { name = "Ruined Shadowy Bracer" },
+    })[tostring(out.slot or "")]
+    if not mold then return out end
+    local item = tostring(out.item or "")
+    if not item:lower():find("^forsaken ", 1, false) then return out end
+    local group = tostring(out.group or "")
+    if group ~= "" and group ~= "Forsaken Armor" then return out end
+    local id_seen, name_seen = seed_id_seen(out), seed_name_seen(out)
+    if mold.id then add_ids(out, { mold.id }, id_seen) end
+    add_names(out, { mold.name }, name_seen)
+    return out
+end
+
+function M.sebilis_forsaken_mold_for_slot(slot)
+    return ({
+        Arms = { name = "Ruined Shadowy Armguards", id = 150774 },
+        Chest = { name = "Ruined Shadowy Breastplate" },
+        Feet = { name = "Ruined Shadowy Boots", id = 150775 },
+        Hands = { name = "Ruined Shadowy Gauntlets", id = 150778 },
+        Head = { name = "Ruined Shadowy Helm" },
+        Legs = { name = "Ruined Shadowy Greaves" },
+        Wrist = { name = "Ruined Shadowy Bracer" },
+    })[tostring(slot or "")]
+end
+
 function M.groups()
     return catalog.groups or {}
 end
@@ -692,6 +728,8 @@ local function resolve_entry_uncached(list_id, class_name, slot)
         expand_don_scales_chain(out, class_name)
     elseif list_id == "bagitems" then
         expand_tattered_sack_chain(out)
+    elseif list_id == "sebilis" then
+        M.expand_sebilis_forsaken_chain(out)
     end
     return out
 end
@@ -2023,6 +2061,8 @@ local function collect_template_announce_entries_for_link(item_name, item_id)
                             expand_don_shadow_chain(list, bucket, entry)
                         elseif list_id == "bagitems" then
                             expand_tattered_sack_chain(entry)
+                        elseif list_id == "sebilis" then
+                            M.expand_sebilis_forsaken_chain(entry)
                         end
                         if bis.link_matches_entry(entry, item_name, item_id) then
                             local dedupe = list_id .. "\31" .. tostring(slot)
@@ -2241,6 +2281,8 @@ local function compact_apply_expansions(list_id, list, bucket, entry, class_name
         expand_don_scales_chain(entry, class_name)
     elseif list_id == "bagitems" then
         expand_tattered_sack_chain(entry)
+    elseif list_id == "sebilis" then
+        M.expand_sebilis_forsaken_chain(entry)
     end
 end
 
@@ -3093,6 +3135,17 @@ local function shared_raw_match_keys(raw, slot, list_id, build)
                 if mat.id then shared_add_id(out, mat.id) end
             end
         end)
+    elseif list_id == "sebilis" then
+        shared_phase_time(build, "match_ref_sebilis_forsaken_alias", function()
+            local mold = M.sebilis_forsaken_mold_for_slot(slot)
+            local raw_item = tostring(raw.item or raw.name or "")
+            local raw_group = tostring(raw.group or "")
+            if mold and raw_item:lower():find("^forsaken ", 1, false)
+                and (raw_group == "" or raw_group == "Forsaken Armor") then
+                shared_add_name(out, mold.name)
+                shared_add_id(out, mold.id)
+            end
+        end)
     end
 
     out._seen_names, out._seen_ids, out._seen_spell_names, out._seen_spell_ids = nil, nil, nil, nil
@@ -3242,6 +3295,10 @@ shared_apply_expansions_measured = function(build, list_id, list, bucket, entry,
     elseif list_id == "bagitems" then
         shared_phase_time(build, "expand_tattered_sack", function()
             expand_tattered_sack_chain(entry)
+        end)
+    elseif list_id == "sebilis" then
+        shared_phase_time(build, "expand_sebilis_forsaken", function()
+            M.expand_sebilis_forsaken_chain(entry)
         end)
     end
 end
@@ -4477,6 +4534,8 @@ local function paint_need_walk(snap, item_name, item_id, opts)
                                 expand_don_shadow_chain(list, bucket, entry)
                             elseif list_id == 'bagitems' then
                                 expand_tattered_sack_chain(entry)
+                            elseif list_id == 'sebilis' then
+                                M.expand_sebilis_forsaken_chain(entry)
                             end
                             if names_hit(entry, nil, raw) then
                                 local row = M.evaluate_slot(list_id, snap, slot, nil)
