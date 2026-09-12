@@ -359,7 +359,46 @@ end
 local function diag_heap_delta(label, before_kb)
     if before_kb == nil then return end
     local after_kb = collectgarbage("count")
-    diag.sample(label, after_kb - before_kb)
+    -- gauge(), not sample(): these are KB, not ms. Through sample() every delta
+    -- over slow_threshold_ms was pushed into the 160-entry slow-events ring,
+    -- crowding out the real slow timings that ring exists for.
+    if diag.gauge then
+        diag.gauge(label, after_kb - before_kb)
+    else
+        diag.sample(label, after_kb - before_kb)
+    end
+end
+
+-- Phase 0 diagnostics: locate the first differing token between two content
+-- signatures. snapshot_content_sig joins top-level fields with \31 and the
+-- per-item sigs inside a list with \30, so splitting on both yields the item
+-- token that actually moved -- which separates "a stack qty changed" from "an
+-- item moved slot" from "a row appeared/vanished". Works from the two sig
+-- strings alone, so it does not need the previous snapshot (which
+-- merge_snapshot may already have mutated by the time this runs).
+local function first_sig_diff(old_sig, new_sig)
+    old_sig, new_sig = tostring(old_sig or ""), tostring(new_sig or "")
+    if old_sig == new_sig then return "none" end
+    local function tokens(s)
+        local out = {}
+        for field in (s .. "\31"):gmatch("(.-)\31") do
+            for item in (field .. "\30"):gmatch("(.-)\30") do
+                out[#out + 1] = item
+            end
+        end
+        return out
+    end
+    local a, b = tokens(old_sig), tokens(new_sig)
+    if #a ~= #b then
+        return string.format("tokens %d->%d", #a, #b)
+    end
+    for i = 1, #a do
+        if a[i] ~= b[i] then
+            return string.format("[%d] %s => %s", i,
+                tostring(a[i]):sub(1, 60), tostring(b[i]):sub(1, 60))
+        end
+    end
+    return "reordered"
 end
 
 local function note_content_change(source, key, snap, old_sig, new_sig)
@@ -380,12 +419,15 @@ local function note_content_change(source, key, snap, old_sig, new_sig)
         -- count identical, so without this the two are indistinguishable in a
         -- trace of why a row was written.
         don = don_count(snap and snap.lockouts),
+        -- Phase 0: only computed under debug; it walks ~600 tokens.
+        sig_diff = (diag.is_enabled and diag.is_enabled())
+            and first_sig_diff(old_sig, new_sig) or "",
     }
     Store.last_content_change = change
     Store.last_content_change_by_key[tostring(key or "?")] = change
     diag.count("store.content_changed")
     diag.event("store.content_changed", string.format(
-        "%s key=%s name=%s depth=%s eq=%d bag=%d bank=%d locked=%d don=%d oldLen=%d newLen=%d v=%d",
+        "%s key=%s name=%s depth=%s eq=%d bag=%d bank=%d locked=%d don=%d oldLen=%d newLen=%d v=%d sigdiff=%s",
         change.source,
         change.key,
         change.name,
@@ -397,7 +439,8 @@ local function note_content_change(source, key, snap, old_sig, new_sig)
         change.don,
         change.old_len,
         change.new_len,
-        change.version))
+        change.version,
+        change.sig_diff))
 end
 
 local function snapshot_content_sig(snap)
@@ -827,12 +870,23 @@ function Store.put(snap, kind)
         if not snap or not snap.name or not snap.server then return end
         local key = snap.server .. "_" .. snap.name
         local existing = Store.sources[key]
+        -- Phase 0: store.put runs 2-4ms on non-looting boxes and spikes to
+        -- seconds on the box doing bag scans. Split the two candidates (deep
+        -- merge vs full content signature) and record heap movement across the
+        -- call so "GC fallout from the scan" can be confirmed or dropped.
+        local gc_kb0 = diag_heap_kb()
         if existing then
-            snap = merge_snapshot(existing, snap)
+            snap = diag.time("store.put.merge", function()
+                return merge_snapshot(existing, snap)
+            end)
         end
         snap.inventoryUpdated = snapshot_inventory_stamp(snap) or os.time()
         snap.metaUpdated = snap.metaUpdated or (existing and existing.metaUpdated)
-        local sig = snapshot_content_sig(snap)
+        local sig = diag.time("store.put.content_sig", function()
+            return snapshot_content_sig(snap)
+        end)
+        -- Negative = a collection ran during this put.
+        diag_heap_delta("store.put.gc_kb", gc_kb0)
         snap.status = "online"; snap.last_seen = os.time(); snap.kind = kind or "client"
         if (kind or "client") == "client" then snap.actorSeenAt = os.time() end
         Store.sources[key] = snap

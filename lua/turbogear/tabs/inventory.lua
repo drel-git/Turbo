@@ -36,13 +36,14 @@ local STOCK_DRY_TTL_S = 60.0
 local STOCK_DRY_MAX_LINES = 14
 local STOCK_SHORT_COLOR = { 0.95, 0.62, 0.30, 1.0 }
 local STOCK_ITEM_COL_W = 300.0
-local STOCK_SPACER_W = 16.0
 local STOCK_GROUP_BG = { 0.13, 0.19, 0.24, 0.98 }
 local STOCK_GROUP_TEXT = { 0.52, 0.76, 0.82, 1.0 }
+local STOCK_INDEX_CACHE_LIMIT = 32
 
 local anim_items
 local rows_key, rows_cache, rows_meta = nil, {}, {}
 local stock_rows_key, stock_rows_cache, stock_board_index = nil, {}, nil
+local stock_rule_id_cache = {}
 local stock_board_state = {
     pending_key = nil,
     pending_records = nil,
@@ -74,6 +75,7 @@ characters.set_on_changed(function()
     rows_key = nil
     stock_rows_key = nil
     stock_board_index = nil
+    stock_rule_id_cache = {}
     stock_board_state.pending_key = nil
     stock_board_state.pending_records = nil
     stock_board_state.status = "stale"
@@ -281,6 +283,10 @@ local function records_signature(records)
     return table.concat(parts, "|")
 end
 
+local function stock_key_norm(s)
+    return tostring(s or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+end
+
 local function stat(item, key)
     local stats = item and item.stats
     return type(stats) == "table" and (tonumber(stats[key]) or 0) or 0
@@ -407,6 +413,106 @@ local function flatten_snapshot(snap, source_key)
     return rows
 end
 
+local function stock_rules_signature(rules)
+    local parts = {}
+    for _, rule in ipairs(rules or {}) do
+        if type(rule) == "table" then
+            local id = math.floor(tonumber(rule.id) or 0)
+            local name = stock_key_norm(rule.name)
+            if id > 0 then
+                parts[#parts + 1] = "id:" .. tostring(id)
+            elseif name ~= "" then
+                parts[#parts + 1] = "name:" .. name
+            end
+        end
+    end
+    table.sort(parts)
+    return table.concat(parts, "|")
+end
+
+local function stock_rule_matchers(rules)
+    local ids, names = {}, {}
+    for _, rule in ipairs(rules or {}) do
+        if type(rule) == "table" then
+            local id = math.floor(tonumber(rule.id) or 0)
+            if id > 0 then ids[tostring(id)] = true end
+            local name = stock_key_norm(rule.name)
+            if name ~= "" then names[name] = true end
+        end
+    end
+    return ids, names
+end
+
+local function stock_count_bump(bucket, key, owner_key, owner_name, owner_class, qty, loc)
+    if not key or key == "" or owner_key == "" then return end
+    local owners = bucket[key]
+    if not owners then
+        owners = {}
+        bucket[key] = owners
+    end
+    local rec = owners[owner_key]
+    if not rec then
+        rec = { owner = owner_name, have = 0, class = owner_class, locations = {} }
+        owners[owner_key] = rec
+    end
+    rec.have = rec.have + math.max(1, math.floor(tonumber(qty) or 1))
+    if rec.class == "" and owner_class ~= "" then rec.class = owner_class end
+    if loc and loc ~= "" and #rec.locations < 6 then
+        rec.locations[#rec.locations + 1] = loc
+    end
+end
+
+local function stock_count_item(index, rule_ids, rule_names, owner_key, owner_name, owner_class, item, where)
+    if type(item) ~= "table" or item.empty then return end
+    local name = tostring(item.name or "")
+    if name == "" or name == "Empty" then return end
+    local qty = math.max(1, math.floor(tonumber(item.qty) or 1))
+    local id = math.floor(tonumber(item.id) or 0)
+    local id_key = id > 0 and tostring(id) or ""
+    local name_key = stock_key_norm(name)
+    local loc = where or tostring(item.location or item.where or "")
+    if qty > 1 then loc = string.format("%s x%d", loc ~= "" and loc or "inventory", qty) end
+
+    if id_key ~= "" and rule_ids[id_key] then
+        stock_count_bump(index.by_id, id_key, owner_key, owner_name, owner_class, qty, loc)
+    end
+    if name_key ~= "" and rule_names[name_key] then
+        stock_count_bump(index.by_name, name_key, owner_key, owner_name, owner_class, qty, loc)
+        if id > 0 and not index.ids_by_name[name_key] then index.ids_by_name[name_key] = id end
+    end
+end
+
+local function stock_count_snapshot(index, rule_ids, rule_names, rec)
+    local snap = rec and rec.snap
+    if type(snap) ~= "table" then return end
+    local owner_name = source_owner(rec.key, snap)
+    local owner_key = stock_key_norm(owner_name)
+    if owner_key == "" then return end
+    local owner_class = tostring(snap.class or "")
+
+    for _, item in ipairs(snap.equipped or {}) do
+        stock_count_item(index, rule_ids, rule_names, owner_key, owner_name, owner_class, item,
+            tostring(item.slotname or item.where or "Equipped"))
+    end
+    for _, item in ipairs(snap.bags or {}) do
+        stock_count_item(index, rule_ids, rule_names, owner_key, owner_name, owner_class, item,
+            tostring(item.location or item.where or "Bags"))
+    end
+    for _, item in ipairs(snap.bank or {}) do
+        stock_count_item(index, rule_ids, rule_names, owner_key, owner_name, owner_class, item,
+            tostring(item.location or item.where or "Bank"))
+    end
+end
+
+local function stock_build_count_index(records, rules)
+    local rule_ids, rule_names = stock_rule_matchers(rules)
+    local index = { by_id = {}, by_name = {}, ids_by_name = {} }
+    for _, rec in ipairs(records or {}) do
+        stock_count_snapshot(index, rule_ids, rule_names, rec)
+    end
+    return index
+end
+
 local function matches_filter(row)
     local loc = tostring(Settings.inventoryLocationFilter or "all")
     if loc == "equipped" and row.locationGroup ~= "equipped" then return false end
@@ -457,9 +563,10 @@ local function visible_rows(records)
 end
 
 local function stock_rows_for_records(records)
+    local rules = keep_qty.rules()
     local key = table.concat({
         records_signature(records),
-        tostring(Store and Store.content_version or 0),
+        stock_rules_signature(rules),
         tostring(Settings.inventoryShowAugs),
     }, "\1")
     if stock_rows_key == key and stock_board_index then
@@ -469,6 +576,7 @@ local function stock_rows_for_records(records)
     if stock_board_state.pending_key ~= key then
         stock_board_state.pending_key = key
         stock_board_state.pending_records = records or {}
+        stock_board_state.pending_rules = rules or {}
         stock_board_state.status = stock_board_index and "stale" or "building"
     end
     return stock_rows_cache, stock_board_index
@@ -478,21 +586,21 @@ local function stock_build_pending_board()
     local key = stock_board_state.pending_key
     if not key or key == stock_rows_key then return false end
     local records = stock_board_state.pending_records or {}
+    local rules = stock_board_state.pending_rules or keep_qty.rules()
     stock_board_state.building = true
     stock_board_state.status = stock_board_index and "stale" or "building"
     local t0 = os.clock()
-    local flat = {}
-    for _, rec in ipairs(records) do
-        local rows = flatten_snapshot(rec.snap, rec.key)
-        for _, row in ipairs(rows) do flat[#flat + 1] = row end
-    end
-    ui_table.stable_sort(flat, ui_table.stable_row_less)
-    local index = keep_qty.build_board_index(flat)
+    local time_stock = diag.time_pair or diag.time
+    local index = time_stock("stock.board.count_index", function()
+        return stock_build_count_index(records, rules)
+    end)
     stock_rows_key = key
-    stock_rows_cache = flat
+    stock_rows_cache = {}
+    stock_rule_id_cache = index.ids_by_name or {}
     stock_board_index = index
     stock_board_state.pending_key = nil
     stock_board_state.pending_records = nil
+    stock_board_state.pending_rules = nil
     stock_board_state.building = false
     stock_board_state.status = "ready"
     stock_board_state.built_at = os.clock()
@@ -858,6 +966,18 @@ local function stock_draw_header_cell(text, color)
     views.col_text_centered(color or Theme.header or Theme.item, tostring(text or ""), tonumber(w) or 48.0)
 end
 
+local function stock_soft_class_color(class)
+    local color = views.class_color(class)
+    if type(color) ~= "table" then return Theme.header or Theme.item end
+    local base = Theme.header or Theme.item or { 0.75, 0.82, 0.92, 1.0 }
+    return {
+        (tonumber(color[1]) or 1.0) * 0.55 + (tonumber(base[1]) or 0.75) * 0.45,
+        (tonumber(color[2]) or 1.0) * 0.55 + (tonumber(base[2]) or 0.82) * 0.45,
+        (tonumber(color[3]) or 1.0) * 0.55 + (tonumber(base[3]) or 0.92) * 0.45,
+        1.0,
+    }
+end
+
 local function stock_draw_center_cell(color, text)
     local w = ImGui.GetColumnWidth and ImGui.GetColumnWidth() or nil
     if type(w) == "table" then w = tonumber(w.x or w[1]) end
@@ -939,6 +1059,8 @@ local function stock_selected_rule_label()
     return nil
 end
 
+local stock_board_want
+
 local function stock_selected_rule_summary(board_index, roster)
     if not stock_selected_rule_key or stock_selected_rule_key == "" then return nil end
     for _, rule in ipairs(keep_qty.rules() or {}) do
@@ -981,12 +1103,8 @@ local function stock_id_for_rule(rule)
     if id > 0 then return id end
     local want = stock_norm(rule and rule.name)
     if want == "" then return 0 end
-    for _, row in ipairs(stock_rows_cache or {}) do
-        if stock_norm(row.name) == want then
-            local rid = math.floor(tonumber(row.id) or 0)
-            if rid > 0 then return rid end
-        end
-    end
+    local cached = math.floor(tonumber(stock_rule_id_cache and stock_rule_id_cache[want]) or 0)
+    if cached > 0 then return cached end
     return 0
 end
 
@@ -1370,26 +1488,41 @@ local function draw_stock_toolbar(roster, records, board_index)
     end
 end
 
-local function draw_stock_group_header(label, nCols)
-    ImGui.TableNextRow()
-    if ImGui.TableSetBgColor and ImGuiTableBgTarget and ImGuiTableBgTarget.RowBg0 and theme.color_u32 then
-        pcall(ImGui.TableSetBgColor, ImGuiTableBgTarget.RowBg0, theme.color_u32(Theme.sectionBg or Theme.steel))
-    end
-    ImGui.TableSetColumnIndex(0)
-    col_text(Theme.category or Theme.section or Theme.cyan, tostring(label or ""))
-    for c = 1, (nCols or 1) - 1 do
-        ImGui.TableSetColumnIndex(c)
-        ImGui.Dummy(1, 1)
-    end
-end
-
-local function stock_board_want(board, fallback)
+function stock_board_want(board, fallback)
     local max_want = tonumber(fallback) or 0
     for _, cell in ipairs((board and board.cells) or {}) do
         local want = tonumber(cell.want) or 0
         if want > max_want then max_want = want end
     end
     return max_want
+end
+
+local STOCK_SECTION_STYLES = {
+    ["draughts i"] = {
+        line = { 0.46, 0.72, 0.88, 1.0 },
+        bg = { 0.09, 0.15, 0.20, 0.96 },
+    },
+    ["draughts ii"] = {
+        line = { 0.86, 0.62, 0.36, 1.0 },
+        bg = { 0.16, 0.12, 0.08, 0.96 },
+    },
+    ["orbs"] = {
+        line = { 0.68, 0.58, 0.84, 1.0 },
+        bg = { 0.14, 0.11, 0.18, 0.96 },
+    },
+    ["vendor"] = {
+        line = { 0.55, 0.82, 0.62, 1.0 },
+        bg = { 0.09, 0.17, 0.11, 0.96 },
+    },
+    ["currency"] = {
+        line = { 0.48, 0.78, 0.94, 1.0 },
+        bg = { 0.09, 0.19, 0.25, 0.96 },
+    },
+}
+
+local function stock_section_style(group)
+    return STOCK_SECTION_STYLES[stock_key_norm(group)]
+        or { line = STOCK_GROUP_TEXT, bg = STOCK_GROUP_BG }
 end
 
 local function stock_cell_color(cell)
@@ -1406,26 +1539,341 @@ local function stock_selected_row_bg()
     if not (ImGui.TableSetBgColor and ImGuiTableBgTarget and ImGuiTableBgTarget.RowBg0 and theme.color_u32) then
         return
     end
-    pcall(ImGui.TableSetBgColor, ImGuiTableBgTarget.RowBg0, theme.color_u32({ 0.15, 0.24, 0.36, 1.0 }))
+    pcall(ImGui.TableSetBgColor, ImGuiTableBgTarget.RowBg0, theme.color_u32({ 0.12, 0.19, 0.28, 1.0 }))
 end
 
-local function stock_draw_group_header(nChars)
-    ImGui.TableNextRow()
-    if ImGui.TableSetBgColor and ImGuiTableBgTarget and ImGuiTableBgTarget.RowBg0 and theme.color_u32 then
-        pcall(ImGui.TableSetBgColor, ImGuiTableBgTarget.RowBg0, theme.color_u32(STOCK_GROUP_BG))
+local function stock_group_entries(rules, board_index, roster)
+    local groups, order = {}, {}
+    for i, rule in ipairs(rules or {}) do
+        if stock_rule_matches_search(rule) then
+            local board = keep_qty.evaluate_board_from_index(rule, board_index, roster)
+            local need = tonumber(board and board.need) or 0
+            if not (Settings.stockShortOnly == true and need <= 0) then
+                local group = tostring(rule.group or "")
+                if group == "" then group = "Other" end
+                if not groups[group] then
+                    groups[group] = {}
+                    order[#order + 1] = group
+                end
+                groups[group][#groups[group] + 1] = {
+                    rule = rule,
+                    rule_index = i,
+                    board = board,
+                    need = need,
+                }
+            end
+        end
     end
-    ImGui.TableSetColumnIndex(0)
-    stock_draw_header_cell("Item", STOCK_GROUP_TEXT)
-    ImGui.TableSetColumnIndex(1)
-    ImGui.Dummy(1, 1)
-    ImGui.TableSetColumnIndex(3)
-    stock_draw_header_cell("Stock", STOCK_GROUP_TEXT)
-    ImGui.TableSetColumnIndex(5)
-    ImGui.Dummy(1, 1)
-    if nChars > 0 then
-        ImGui.TableSetColumnIndex(6 + math.floor((nChars - 1) * 0.5))
-        stock_draw_header_cell("Toons", STOCK_GROUP_TEXT)
+    return order, groups
+end
+
+local function stock_target_color(board)
+    local need = tonumber(board and board.need) or 0
+    if need <= 0 then return Theme.green or Theme.online end
+    return Theme.stockShort or STOCK_SHORT_COLOR
+end
+
+local function stock_draw_section(group, entries, roster)
+    local style = stock_section_style(group)
+    local nChars = #roster
+    local nCols = nChars + 4 -- Item | spacer | toons... | All | Target
+    local char_w = nChars >= 7 and 52.0 or 60.0
+    local table_id = "InventoryStockSection_" .. stock_key_norm(group):gsub("%W+", "_")
+    local flags = (ImGuiTableFlags.Borders or 0)
+        + (ImGuiTableFlags.RowBg or 0)
+        + (ImGuiTableFlags.NoSavedSettings or 0)
+        + (ImGuiTableFlags.SizingStretchProp or 0)
+
+    if ImGui.BeginTable(table_id, nCols, flags) then
+        ImGui.TableSetupColumn("Item", ImGuiTableColumnFlags.WidthStretch, 1.4)
+        ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 8.0)
+        for _, member in ipairs(roster) do
+            ImGui.TableSetupColumn(stock_short_header(member.name), ImGuiTableColumnFlags.WidthFixed, char_w)
+        end
+        ImGui.TableSetupColumn("All", ImGuiTableColumnFlags.WidthFixed, 58.0)
+        ImGui.TableSetupColumn("Target", ImGuiTableColumnFlags.WidthFixed, 70.0)
+
+        ImGui.TableNextRow()
+        if ImGui.TableSetBgColor and ImGuiTableBgTarget and ImGuiTableBgTarget.RowBg0 and theme.color_u32 then
+            pcall(ImGui.TableSetBgColor, ImGuiTableBgTarget.RowBg0, theme.color_u32(style.bg or STOCK_GROUP_BG))
+        end
+        ImGui.TableSetColumnIndex(0); stock_draw_header_cell(tostring(group or "Items"), style.line or STOCK_GROUP_TEXT)
+        ImGui.TableSetColumnIndex(1); ImGui.Dummy(1, 1)
+        for c, member in ipairs(roster) do
+            ImGui.TableSetColumnIndex(c + 1)
+            stock_draw_header_cell(stock_short_header(member.name), stock_soft_class_color(member.class))
+            if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
+                ImGui.SetTooltip(string.format("%s (%s)", tostring(member.name or "?"), keep_qty.class_abbrev(member.class)))
+            end
+        end
+        ImGui.TableSetColumnIndex(nChars + 2); stock_draw_header_cell("All", style.line or STOCK_GROUP_TEXT)
+        ImGui.TableSetColumnIndex(nChars + 3); stock_draw_header_cell("Target", style.line or STOCK_GROUP_TEXT)
+
+        for _, entry in ipairs(entries or {}) do
+            local rule, board, need = entry.rule, entry.board, entry.need
+            ImGui.TableNextRow()
+            local rule_key = stock_rule_ui_key(rule)
+            local selected = rule_key ~= "" and rule_key == stock_selected_rule_key
+            if selected then stock_selected_row_bg() end
+
+            ImGui.TableSetColumnIndex(0)
+            local full = rule.name ~= "" and rule.name or ("item " .. tostring(rule.id))
+            local label = keep_qty.display_name(full)
+            theme.colored_text(label, need > 0 and (Theme.item or Theme.cyan) or (Theme.green or Theme.online))
+            if ImGui.IsItemClicked and ImGui.IsItemClicked() and rule_key ~= "" then
+                stock_selected_rule_key = rule_key
+            end
+            if ImGui.IsItemHovered() and ImGui.SetTooltip then
+                local tip = full .. "\nClick to select for Remove."
+                local hint = keep_qty.hint_label(rule)
+                if hint ~= "" then tip = tip .. "\n" .. hint end
+                if need > 0 then tip = tip .. string.format("\nShort %d across roster", need) end
+                ImGui.SetTooltip(tip)
+            end
+            item_actions.draw_context(full, rule.id, "inv_stock_" .. tostring(entry.rule_index),
+                item_actions.context_opts({}, { name = full, id = rule.id }))
+
+            ImGui.TableSetColumnIndex(1)
+            ImGui.Dummy(1, 1)
+
+            for c, cell in ipairs((board and board.cells) or {}) do
+                ImGui.TableSetColumnIndex(c + 1)
+                stock_draw_center_cell(stock_cell_color(cell), tostring(cell.have or 0))
+                if ImGui.IsItemHovered() then stock_cell_tooltip(cell, full) end
+            end
+
+            local total_have = tonumber(board and board.total) or 0
+            local want_v = stock_board_want(board, rule.qty)
+
+            ImGui.TableSetColumnIndex(nChars + 2)
+            stock_draw_center_cell(stock_target_color(board), tostring(total_have))
+            if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
+                if need > 0 then
+                    ImGui.SetTooltip(string.format("%d total. Short %d across selected characters.", total_have, need))
+                else
+                    ImGui.SetTooltip(string.format("%d total. Target met across selected characters.", total_have))
+                end
+            end
+
+            ImGui.TableSetColumnIndex(nChars + 3)
+            ImGui.SetNextItemWidth(-1)
+            if ImGui.InputInt then
+                local next_v, changed = ImGui.InputInt("##stock_want_" .. tostring(entry.rule_index), want_v, 0)
+                next_v = math.max(0, math.floor(tonumber(next_v) or want_v))
+                if next_v ~= (tonumber(rule.qty) or 0) and (changed == nil or changed) then
+                    local ok, err = keep_qty.set_qty(entry.rule_index, next_v)
+                    item_actions.status_msg = ok and "Stock Target updated." or tostring(err or "Could not save Target.")
+                    stock_rows_key = nil
+                end
+            else
+                col_text(Theme.dim, tostring(want_v))
+            end
+            if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
+                ImGui.SetTooltip("Target count per eligible character. Click to edit.")
+            end
+        end
+        ImGui.EndTable()
     end
+    return #(entries or {})
+end
+
+local function stock_collect_recipient(roster)
+    local cur = tostring(Settings.stockCollectRecipient or "")
+    if cur ~= "" then
+        for _, member in ipairs(roster or {}) do
+            if stock_clean_name(member.name) == stock_clean_name(cur) then return member.name end
+        end
+    end
+    local me = stock_me_name()
+    for _, member in ipairs(roster or {}) do
+        if stock_clean_name(member.name) == stock_clean_name(me) then return member.name end
+    end
+    return roster and roster[1] and roster[1].name or me
+end
+
+local function stock_safe_name_arg(name)
+    return tostring(name or ""):match("^[%w_]+") or ""
+end
+
+local function stock_sender_list(roster, recipient)
+    local out, seen = {}, {}
+    local recipient_key = stock_clean_name(recipient)
+    for _, member in ipairs(roster or {}) do
+        local name = stock_safe_name_arg(member.name)
+        local key = stock_clean_name(name)
+        if key ~= "" and key ~= recipient_key and not seen[key] then
+            seen[key] = true
+            out[#out + 1] = name
+        end
+    end
+    return out
+end
+
+local function stock_launch_collect(script, recipient, label, roster, extra_args)
+    local name = stock_safe_name_arg(recipient)
+    if name == "" then
+        item_actions.status_msg = "Choose a collect recipient first."
+        return
+    end
+    local senders = stock_sender_list(roster, name)
+    if #senders == 0 then
+        item_actions.status_msg = string.format("%s: no selected senders for %s.", label, name)
+        return
+    end
+    local suffix = tostring(extra_args or "")
+    if suffix ~= "" then suffix = " " .. suffix end
+    mq.cmdf("/squelch /lua run %s list %s to %s%s", script, table.concat(senders, ","), name, suffix)
+    item_actions.status_msg = string.format("%s started: %d selected character(s) -> %s.", label, #senders, name)
+end
+
+local function stock_stop_collectors()
+    for _, script in ipairs({ "turbo_collect_dc", "turbo_collect_cash", "turbo_collect_crests", "turbo_collect_items", "turbo_reclaim_lotto" }) do
+        mq.cmdf("/squelch /lua stop %s", script)
+    end
+    item_actions.status_msg = "Stop sent for stock collection helpers."
+end
+
+local function draw_collect_view()
+    stock_ensure_defaults()
+    local roster = stock_roster_and_records()
+    local section_styles = {
+        collect = {
+            bg = { 0.11, 0.22, 0.20, 0.96 },
+            text = { 0.56, 0.84, 0.74, 1.0 },
+            button = { 0.25, 0.40, 0.36, 1.0 },
+        },
+        currency = {
+            bg = { 0.24, 0.18, 0.08, 0.96 },
+            text = { 0.95, 0.70, 0.30, 1.0 },
+            button = { 0.42, 0.32, 0.16, 1.0 },
+        },
+        armor = {
+            bg = { 0.10, 0.18, 0.27, 0.96 },
+            text = { 0.52, 0.76, 0.92, 1.0 },
+            button = { 0.25, 0.38, 0.56, 1.0 },
+        },
+        misc = {
+            bg = { 0.18, 0.13, 0.25, 0.96 },
+            text = { 0.72, 0.58, 0.92, 1.0 },
+            button = { 0.37, 0.31, 0.53, 1.0 },
+        },
+    }
+
+    local function section_header(label, style)
+        if ImGui.Spacing then ImGui.Spacing() end
+        local flags = (ImGuiTableFlags.Borders or 0)
+            + (ImGuiTableFlags.NoSavedSettings or 0)
+            + (ImGuiTableFlags.SizingStretchProp or 0)
+        if ImGui.BeginTable("##collect_section_" .. tostring(label), 1, flags) then
+            ImGui.TableSetupColumn("section", ImGuiTableColumnFlags.WidthStretch, 1.0)
+            ImGui.TableNextRow()
+            if ImGui.TableSetBgColor and ImGuiTableBgTarget and ImGuiTableBgTarget.RowBg0 and theme.color_u32 then
+                pcall(ImGui.TableSetBgColor, ImGuiTableBgTarget.RowBg0, theme.color_u32(style.bg or Theme.sectionBg or Theme.steel))
+            end
+            ImGui.TableSetColumnIndex(0)
+            stock_draw_header_cell(label, style.text or Theme.category or Theme.cyan)
+            ImGui.EndTable()
+        else
+            col_text(style.text or Theme.category or Theme.cyan, tostring(label or ""))
+        end
+    end
+
+    local function action_button(label, color, width, fn, tip)
+        if theme.themed_button(label, color or Theme.blue or Theme.steel, width or 112, 0) then
+            fn()
+        end
+        if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip and tip then
+            ImGui.SetTooltip(tip)
+        end
+    end
+
+    local recipient = stock_collect_recipient(roster)
+    section_header("Collect To", section_styles.collect)
+    for _, member in ipairs(roster or {}) do
+        local name = tostring(member.name or "")
+        if name ~= "" then
+            local selected = stock_clean_name(name) == stock_clean_name(recipient)
+            if theme.themed_button(name .. "##stock_collect_to_" .. name,
+                    selected and (Theme.blue or { 0.25, 0.40, 0.62, 1.0 }) or section_styles.collect.button, 92, 0) then
+                Settings.stockCollectRecipient = name
+                SaveSettings()
+                recipient = name
+            end
+            if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
+                ImGui.SetTooltip("Use this character as the recipient for collection helpers.")
+            end
+            ImGui.SameLine()
+        end
+    end
+    if ImGui.NewLine then ImGui.NewLine() end
+
+    section_header("Currencies", section_styles.currency)
+    action_button("Diamond Coins##stock_collect_dc", section_styles.currency.button, 116, function()
+        stock_launch_collect("turbo_collect_dc", recipient, "Diamond Coins", roster)
+    end, "/lua run turbo_collect_dc list <selected roster> to <recipient>")
+    ImGui.SameLine()
+    action_button("Platinum##stock_collect_cash", section_styles.currency.button, 88, function()
+        stock_launch_collect("turbo_collect_cash", recipient, "Platinum", roster)
+    end, "/lua run turbo_collect_cash list <selected roster> to <recipient>")
+    ImGui.SameLine()
+    action_button("Celestial Crests##stock_collect_crests", section_styles.currency.button, 132, function()
+        stock_launch_collect("turbo_collect_crests", recipient, "Celestial Crests", roster)
+    end, "/lua run turbo_collect_crests list <selected roster> to <recipient>")
+    ImGui.SameLine()
+    action_button("Lucky Ticket##collect_lucky_ticket", section_styles.currency.button, 104, function()
+        stock_launch_collect("turbo_collect_items", recipient, "Lucky Ticket", roster, "preset lucky_ticket")
+    end, "Collects A Lucky Ticket.")
+
+    local function preset_button(label, preset, width, tip, style)
+        style = style or section_styles.armor
+        if theme.themed_button(label .. "##collect_" .. preset, style.button or Theme.blue or Theme.steel, width or 116, 0) then
+            stock_launch_collect("turbo_collect_items", recipient, label, roster, "preset " .. preset)
+        end
+        if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip and tip then
+            ImGui.SetTooltip(tip)
+        end
+    end
+
+    section_header("Armor Sets", section_styles.armor)
+    preset_button("Anguish Armor", "anguish_armor", 124,
+        "Collects Anguish armor quest materials.", section_styles.armor)
+    ImGui.SameLine()
+    preset_button("DoN Armor", "don_armor", 102,
+        "Collects Draconic Silk Webbing, Leather Scales, Alloy Rings, and Sheet Metal.", section_styles.armor)
+    ImGui.SameLine()
+    preset_button("Sebilis Armor", "sebilis_armor", 124,
+        "Collects Corrosive Bile, Gem of Swirling Shadows, Sebilisian Seal of Command, and Variegated Powder.",
+        section_styles.armor)
+    ImGui.SameLine()
+    preset_button("Veksar Armor", "veksar_armor", 112,
+        "Collects Veksar armor quest pieces.", section_styles.armor)
+
+    section_header("Misc", section_styles.misc)
+    preset_button("Radiant + Void", "radiant_void", 120,
+        "Collects A Radiant Morsel and A Placid Void.", section_styles.misc)
+    ImGui.SameLine()
+    preset_button("Mephit Bloods", "mephit_bloods", 118,
+        "Collects Air, Earth, Fire, and Water Mephit Blood.", section_styles.misc)
+    ImGui.SameLine()
+    preset_button("Tradeskills", "tradeskill_items", 108,
+        "Collects configured tradeskill materials.", section_styles.misc)
+    ImGui.SameLine()
+    preset_button("NVS Items", "nvs_items", 96,
+        "Collects tradeable NVS quest items. No Drop items are excluded.", section_styles.misc)
+
+    if ImGui.Separator then ImGui.Separator() end
+    local stop_w = 220.0
+    local avail_w = 0
+    if ImGui.GetContentRegionAvail then
+        local avail = { ImGui.GetContentRegionAvail() }
+        avail_w = tonumber(avail[1]) or 0
+    end
+    if avail_w > stop_w and ImGui.SetCursorPosX and ImGui.GetCursorPosX then
+        ImGui.SetCursorPosX(ImGui.GetCursorPosX() + math.floor((avail_w - stop_w) * 0.5))
+    end
+    action_button("Stop Collectors##stock_collect_stop", Theme.danger or { 0.55, 0.20, 0.24, 1.0 }, stop_w, function()
+        stock_stop_collectors()
+    end, "Stops Diamond Coin, Platinum, Celestial Crest, item preset, and lotto helper Lua scripts.")
 end
 
 local function draw_stock_view()
@@ -1448,126 +1896,15 @@ local function draw_stock_view()
         col_text(Theme.amber, "No characters selected. Open the Characters pill (Source + Show Columns), then Sync Now.")
         return
     end
-    local nChars = #roster
-    local nCols = 1 + 1 + 3 + 1 + nChars -- Item | spacer | Have | Target | Short | spacer | chars...
-    local char_w = nChars >= 7 and 52.0 or 58.0
+
+    local order, groups = stock_group_entries(rules, board_index, roster)
     local shown = 0
-    local last_group = nil
-    -- Fill remaining window height (small reserve for legend). Prior min_h=420
-    -- forced a tall table into a shorter region -> cut off + empty chrome below.
-    local table_id = "InventoryStockBoardV2"
-    local extra_flags = (ImGuiTableFlags.ScrollX or 0)
-        + (ImGuiTableFlags.BordersOuter or 0)
-        + (ImGuiTableFlags.NoSavedSettings or 0)
-    local flags = views.scroll_table_flags(extra_flags)
-    if views.begin_scroll_table(table_id, nCols, flags, 22.0, 160.0) then
-        ImGui.TableSetupColumn("Item", ImGuiTableColumnFlags.WidthFixed, STOCK_ITEM_COL_W)
-        ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, STOCK_SPACER_W)
-        ImGui.TableSetupColumn("Have", ImGuiTableColumnFlags.WidthFixed, 56.0)
-        ImGui.TableSetupColumn("Target", ImGuiTableColumnFlags.WidthFixed, 64.0)
-        ImGui.TableSetupColumn("Short", ImGuiTableColumnFlags.WidthFixed, 58.0)
-        ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, STOCK_SPACER_W)
-        for _, member in ipairs(roster) do
-            ImGui.TableSetupColumn(stock_short_header(member.name), ImGuiTableColumnFlags.WidthFixed, char_w)
+    for _, group in ipairs(order) do
+        if shown > 0 and ImGui.Spacing then
+            ImGui.Spacing()
+            ImGui.Spacing()
         end
-        views.setup_scroll_freeze(table_id, 6, 2)
-        stock_draw_group_header(nChars)
-        ImGui.TableNextRow()
-        ImGui.TableSetColumnIndex(0); stock_draw_header_cell("", Theme.header or Theme.item)
-        ImGui.TableSetColumnIndex(1); stock_draw_header_cell("", Theme.dim)
-        ImGui.TableSetColumnIndex(2); stock_draw_header_cell("Have", Theme.header or Theme.item)
-        ImGui.TableSetColumnIndex(3); stock_draw_header_cell("Target", Theme.header or Theme.item)
-        ImGui.TableSetColumnIndex(4); stock_draw_header_cell("Short", Theme.header or Theme.item)
-        ImGui.TableSetColumnIndex(5); stock_draw_header_cell("", Theme.dim)
-        for c, member in ipairs(roster) do
-            ImGui.TableSetColumnIndex(c + 5)
-            stock_draw_header_cell(stock_short_header(member.name), views.class_color(member.class))
-            if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
-                ImGui.SetTooltip(string.format("%s (%s)", tostring(member.name or "?"), keep_qty.class_abbrev(member.class)))
-            end
-        end
-
-        for i, rule in ipairs(rules) do
-            if stock_rule_matches_search(rule) then
-                local board = keep_qty.evaluate_board_from_index(rule, board_index, roster)
-                local need = board and board.need or 0
-                if not (Settings.stockShortOnly == true and need <= 0) then
-                    local group = tostring(rule.group or "")
-                    if group == "" then group = "Other" end
-                    if group ~= last_group then
-                        draw_stock_group_header(group, nCols)
-                        last_group = group
-                    end
-
-                    shown = shown + 1
-                    ImGui.TableNextRow()
-                    local rule_key = stock_rule_ui_key(rule)
-                    local selected = rule_key ~= "" and rule_key == stock_selected_rule_key
-                    if selected then stock_selected_row_bg() end
-                    ImGui.TableSetColumnIndex(0)
-                    local full = rule.name ~= "" and rule.name or ("item " .. tostring(rule.id))
-                    local label = keep_qty.display_name(full)
-                    local hint = keep_qty.hint_label(rule)
-                    local color = Theme.item or Theme.cyan
-                    theme.colored_text(label, color)
-                    if ImGui.IsItemClicked and ImGui.IsItemClicked() and rule_key ~= "" then
-                        stock_selected_rule_key = rule_key
-                    end
-                    if ImGui.IsItemHovered() and ImGui.SetTooltip then
-                        local tip = full
-                        tip = tip .. "\nClick to select for Remove."
-                        if hint ~= "" then tip = tip .. "\n" .. hint end
-                        if need > 0 then tip = tip .. string.format("\nShort %d across roster", need) end
-                        ImGui.SetTooltip(tip)
-                    end
-                    item_actions.draw_context(full, rule.id, "inv_stock_" .. tostring(i),
-                        item_actions.context_opts({}, { name = full, id = rule.id }))
-
-                    local total_have = tonumber(board and board.total) or 0
-                    local want_v = stock_board_want(board, rule.qty)
-
-                    ImGui.TableSetColumnIndex(1)
-                    ImGui.Dummy(1, 1)
-
-                    ImGui.TableSetColumnIndex(2)
-                    stock_draw_center_cell(need > 0 and (Theme.value or Theme.neutral or Theme.dim) or (Theme.green or Theme.online), tostring(total_have))
-
-                    ImGui.TableSetColumnIndex(3)
-                    ImGui.SetNextItemWidth(-1)
-                    if ImGui.InputInt then
-                        local next_v, changed = ImGui.InputInt("##stock_want_" .. tostring(i), want_v, 0)
-                        next_v = math.max(0, math.floor(tonumber(next_v) or want_v))
-                        if next_v ~= (tonumber(rule.qty) or 0) and (changed == nil or changed) then
-                            local ok, err = keep_qty.set_qty(i, next_v)
-                            item_actions.status_msg = ok and "Stock Target updated." or tostring(err or "Could not save Target.")
-                        end
-                    else
-                        col_text(Theme.dim, tostring(want_v))
-                    end
-                    if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
-                        ImGui.SetTooltip("Target count per eligible toon. Click to edit.")
-                    end
-
-                    ImGui.TableSetColumnIndex(4)
-                    if need > 0 then
-                        stock_draw_center_cell(Theme.stockShort or STOCK_SHORT_COLOR, tostring(need))
-                    else
-                        stock_draw_center_cell(Theme.green or Theme.online, "Met")
-                    end
-
-                    ImGui.TableSetColumnIndex(5)
-                    ImGui.Dummy(1, 1)
-
-                    for c, cell in ipairs((board and board.cells) or {}) do
-                        ImGui.TableSetColumnIndex(c + 5)
-                        local text = tostring(cell.have or 0)
-                        stock_draw_center_cell(stock_cell_color(cell), text)
-                        if ImGui.IsItemHovered() then stock_cell_tooltip(cell, full) end
-                    end
-                end
-            end
-        end
-        ImGui.EndTable()
+        shown = shown + stock_draw_section(group, groups[group], roster)
     end
 
     if shown == 0 then
@@ -2221,20 +2558,23 @@ local function draw_stock_body()
     stock_ensure_defaults()
     -- No nested scroll child: the board table owns ScrollY and fills avail height.
     -- A wrapping BeginChild(0,0) left empty chrome under a min-height table.
-    local rule_count = #keep_qty.rules()
-    col_text(Theme.header or Theme.neutral, string.format(
-        "Stock Up - %d rule%s. Target = per eligible toon.",
-        rule_count, rule_count == 1 and "" or "s"))
     draw_stock_view()
 end
 
 function M.draw_stock()
-    return diag.time("ui.stock.draw", draw_stock_body)
+    return (diag.time_pair or diag.time)("ui.stock.draw", draw_stock_body)
+end
+
+function M.draw_collect()
+    return (diag.time_pair or diag.time)("ui.collect.draw", function()
+        ensure_defaults()
+        draw_collect_view()
+    end)
 end
 
 function M.tick()
     if stock_board_state.pending_key then
-        diag.time("stock.board_build", stock_build_pending_board)
+        (diag.time_pair or diag.time)("stock.board_build", stock_build_pending_board)
     end
 end
 

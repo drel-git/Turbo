@@ -706,7 +706,7 @@ end
 
 local function gear_to_legacy_aug_tab(tab)
     if tab == "stored" then return "stored" end
-    if tab == "stats" or tab == "effects" or tab == "focus" then return Settings.augsSubTab or "equipped" end
+    if tab == "stats" or tab == "effects" or tab == "focus" or tab == "stock" then return Settings.augsSubTab or "equipped" end
     return "equipped"
 end
 
@@ -820,6 +820,7 @@ local function characters_tab_for_main(main)
         return "inventory"
     end
     if main == "stock" then return "stock" end
+    if main == "collect" then return "stock" end
     if main == "type12" then return "type12" end
     return nil
 end
@@ -1005,6 +1006,7 @@ local function draw_main_tab_chrome()
         { key = "spells", label = "Spells" },
         { key = "lockouts", label = "Lockouts" },
         { key = "stock", label = "Stock Up" },
+        { key = "collect", label = "Collect" },
         { key = "setup", label = "Setup" },
     }
     cur = draw_tab_buttons(tabs, cur, "tg_main", false, function(tab_key)
@@ -1051,10 +1053,15 @@ local function draw_main_tab_body(cur, secondary)
         elseif cur == "type12" then
             sync_current_view_if_needed()
             diag.time("ui.type12", type12_tab.draw)
-        elseif cur == "lockouts" then draw_lockouts_body(secondary)
         elseif cur == "stock" then
             sync_current_view_if_needed()
-            diag.time("ui.stock", inventory.draw_stock)
+            local time_stock = diag.time_pair or diag.time
+            time_stock("ui.stock", inventory.draw_stock)
+        elseif cur == "collect" then
+            sync_current_view_if_needed()
+            local time_collect = diag.time_pair or diag.time
+            time_collect("ui.collect", inventory.draw_collect)
+        elseif cur == "lockouts" then draw_lockouts_body(secondary)
         else
             sync_current_view_if_needed()
             if cur == "spells" then spells_tab.draw()
@@ -1135,7 +1142,22 @@ function M.main_window_rect()
     return M._last_main_rect
 end
 
+-- Phase 0 diagnostics: interval between consecutive ImGui callbacks. If the
+-- run loop really blocks for the duration loop.frame_work reports, that block
+-- lands between two draws and appears here as a matching gap. This does NOT by
+-- itself settle whether announce.tick blocks -- the idle-path child timers do
+-- that -- it is a cheap cross-check on frame_work. gauge(), not sample(): this
+-- runs every client frame and must not allocate or flood the slow ring.
+local last_draw_clock = 0
+
 function M.draw_ui()
+    if diag.gauge and diag.is_enabled and diag.is_enabled() then
+        local now_draw = os.clock()
+        if last_draw_clock > 0 then
+            diag.gauge("ui.draw.gap_ms", (now_draw - last_draw_clock) * 1000)
+        end
+        last_draw_clock = now_draw
+    end
     return diag.time("ui.draw", function()
     -- Background responder draws nothing until shown (/tgear show sets state.show,
     -- promoting the hidden instance to a visible window without a new process).

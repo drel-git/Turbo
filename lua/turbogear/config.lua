@@ -35,7 +35,7 @@ M.CFG = {
     script_name  = 'TurboGear',    -- display/settings/cache name
     lua_name     = 'turbogear',     -- folder/module name used by /lua run and /lua stop
     bg_lua_name  = 'turbogear_bg',  -- wrapper responder name; leaves /lua run turbogear free for UI
-    version      = '1.2.143',
+    version      = '1.2.144',
     mailbox      = 'turbogear',     -- shared actor mailbox name across all boxes
     proto        = 1,              -- snapshot protocol version (guards mismatched boxes)
     frame_round  = 5.0,
@@ -548,7 +548,7 @@ function M.sanitize_ui_settings()
 
     local valid_main = {
         gear = true, upgrade = true, bis = true, type12 = true,
-        spells = true, lockouts = true, stock = true, setup = true,
+        spells = true, lockouts = true, stock = true, collect = true, setup = true,
     }
     if not valid_main[tostring(M.Settings.mainTab or "")] then
         M.Settings.mainTab = "bis"

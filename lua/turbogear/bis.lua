@@ -90,6 +90,55 @@ local function normalize_names(names, primary)
     return out
 end
 
+local FORSAKEN_SHADOWY_BY_SLOT = {
+    Arms = "Ruined Shadowy Armguards",
+    Chest = "Ruined Shadowy Chestguard",
+    Feet = "Ruined Shadowy Boots",
+    Hands = "Ruined Shadowy Gauntlets",
+    Head = "Ruined Shadowy Helm",
+    Legs = "Ruined Shadowy Leggings",
+    Wrist = "Ruined Shadowy Bracer",
+}
+
+local function add_name_alias_once(names, alias)
+    alias = trim(alias)
+    if alias == "" then return end
+    local key = norm(alias)
+    for _, name in ipairs(names or {}) do
+        if norm(name) == key then return end
+    end
+    names[#names + 1] = alias
+end
+
+local function forsaken_shadowy_alias_for_entry(entry)
+    local alias = FORSAKEN_SHADOWY_BY_SLOT[trim(entry and entry.slot or "")]
+    if not alias then return nil end
+    local item = trim(entry and (entry.item or entry.name) or "")
+    if item:match("^Forsaken%s+") then return alias end
+    return nil
+end
+
+local function add_forsaken_shadowy_aliases(entry, names)
+    -- Sebilis Forsaken class armor is completed from a Ruined Shadowy base
+    -- piece. Treat either the finished class item or its base piece as owned.
+    local alias = forsaken_shadowy_alias_for_entry(entry)
+    if alias then add_name_alias_once(names, alias) end
+end
+
+local function forsaken_status_for_match(entry, matched_name, status)
+    local alias = forsaken_shadowy_alias_for_entry(entry)
+    if not alias then return status end
+    local matched = norm_item_name(matched_name)
+    if matched ~= "" and matched == norm_item_name(alias) then
+        return "forsaken_base"
+    end
+    if matched ~= "" and matched == norm_item_name(entry and entry.item or "") then
+        if status == "equipped" then return status end
+        return "forsaken_complete"
+    end
+    return status
+end
+
 function M.normalize_entry(e)
     if type(e) ~= "table" then e = { item = tostring(e or "") } end
     local item = trim(e.item or e.name or "")
@@ -119,9 +168,11 @@ function M.normalize_entry(e)
         end
         if #spell_ids == 0 then spell_ids = nil end
     end
+    local names = normalize_names(e.names, item)
+    add_forsaken_shadowy_aliases(e, names)
     return {
         item = item,
-        names = normalize_names(e.names, item),
+        names = names,
         ids = normalize_ids(e.ids),
         slot = trim(e.slot or ""),
         group = trim(e.group or ""),
@@ -130,6 +181,7 @@ function M.normalize_entry(e)
         spell = spell,
         spells = spells,
         spell_ids = spell_ids,
+        progression_id_match = e.progression_id_match == true,
     }
 end
 
@@ -335,23 +387,6 @@ function M.ensure_snapshot_index(snap)
     return snapshot_index(snap)
 end
 
-local function entry_matches_item(entry, it)
-    if not entry or not it then return false end
-    local item_name = norm_item_name(it.name)
-    if item_name ~= "" then
-        for _, name in ipairs(entry.names or { entry.item }) do
-            if norm_item_name(name) == item_name and not ownership_index.name_is_id_only(name) then
-                return true
-            end
-        end
-    end
-    local iid = tonumber(it.id)
-    if iid and iid > 0 then
-        for _, id in ipairs(entry.ids or {}) do if tonumber(id) == iid then return true end end
-    end
-    return false
-end
-
 local function jonas_bare(name)
     name = norm_item_name(name)
     if name == "" then return "" end
@@ -368,6 +403,38 @@ local function names_match_owned(a, b)
     if a == b then return true end
     local ca, cb = jonas_bare(a), jonas_bare(b)
     return ca ~= "" and ca == cb
+end
+
+local function entry_name_matches_actual(entry, actual_name)
+    actual_name = tostring(actual_name or "")
+    if trim(actual_name) == "" then return true end
+    if entry and entry.progression_id_match == true then return true end
+    local saw_named_target = false
+    for _, name in ipairs(entry and (entry.names or { entry.item }) or {}) do
+        if not ownership_index.name_is_id_only(name) and norm_item_name(name) ~= "" then
+            saw_named_target = true
+            if names_match_owned(actual_name, name) then return true end
+        end
+    end
+    -- ID-only/custom rows have no reliable name contract to verify.
+    return not saw_named_target
+end
+
+local function entry_matches_item(entry, it)
+    if not entry or not it then return false end
+    local item_name = norm_item_name(it.name)
+    if item_name ~= "" then
+        for _, name in ipairs(entry.names or { entry.item }) do
+            if norm_item_name(name) == item_name and not ownership_index.name_is_id_only(name) then
+                return true
+            end
+        end
+    end
+    local iid = tonumber(it.id)
+    if iid and iid > 0 and entry_name_matches_actual(entry, it.name) then
+        for _, id in ipairs(entry.ids or {}) do if tonumber(id) == iid then return true end end
+    end
+    return false
 end
 
 -- BiS-style live ownership check (FindItem + FindItemBank).
@@ -484,8 +551,8 @@ local function owned_in_store_bank(entry, item_name, item_id)
     for _, n in ipairs(entry.names or {}) do note_name(n) end
     for _, it in ipairs(bank) do
         local bid = tonumber(it and it.id) or 0
-        if bid > 0 and ids[bid] then return true end
         local bname = tostring(it and it.name or "")
+        if bid > 0 and ids[bid] and entry_name_matches_actual(entry, bname) then return true end
         for _, n in ipairs(names) do
             if names_match_owned(bname, n) then return true end
         end
@@ -496,31 +563,48 @@ end
 --- Returns "equipped", "carried", or nil (not owned on this box).
 function M.live_item_status(entry, item_name, item_id)
     entry = entry and M.normalize_entry(entry) or {}
-    local function try(v)
+    local function try(v, verify_name)
         local fi = find_item_tlo(v, false)
-        if fi then return live_status_from_fi(fi, false) end
+        if fi then
+            local actual = ""
+            pcall(function() actual = tostring(fi.Name() or "") end)
+            if not verify_name or entry_name_matches_actual(entry, actual) then
+                return live_status_from_fi(fi, false)
+            end
+        end
         fi = find_item_tlo(v, true)
-        if fi then return live_status_from_fi(fi, true) end
+        if fi then
+            local actual = ""
+            pcall(function() actual = tostring(fi.Name() or "") end)
+            if not verify_name or entry_name_matches_actual(entry, actual) then
+                return live_status_from_fi(fi, true)
+            end
+        end
         return nil
     end
     for _, id in ipairs(entry.ids or {}) do
-        local st = try(tonumber(id) or 0)
+        local st = try(tonumber(id) or 0, true)
         if st then return st end
     end
     item_id = tonumber(item_id) or 0
     if item_id > 0 then
-        local st = try(item_id)
+        local st = try(item_id, true)
         if st then return st end
     end
     item_name = trim(item_name)
     if item_name ~= "" and not ownership_index.name_is_id_only(item_name) then
         local st = try(item_name)
-        if st then return st end
+        if st then return forsaken_status_for_match(entry, item_name, st) end
     end
     local canonical = trim(entry.item)
     if canonical ~= "" and canonical ~= item_name and not ownership_index.name_is_id_only(canonical) then
         local st = try(canonical)
-        if st then return st end
+        if st then return forsaken_status_for_match(entry, canonical, st) end
+    end
+    local shadowy_alias = forsaken_shadowy_alias_for_entry(entry)
+    if shadowy_alias and not ownership_index.name_is_id_only(shadowy_alias) then
+        local st = try(shadowy_alias)
+        if st then return "forsaken_base" end
     end
     local worn = live_worn_slot_status(entry)
     if worn then return worn end
@@ -717,11 +801,15 @@ local function match_entry(entry, snap)
     end
     for _, id in ipairs(entry.ids or {}) do
         local rec = idx.by_id[tonumber(id)]
-        if rec then return rec.item, rec.status, entry end
+        local matched_name = rec and (rec.item and rec.item.name or rec.item) or nil
+        if rec and entry_name_matches_actual(entry, matched_name) then
+            return rec.item, forsaken_status_for_match(entry, matched_name, rec.status), entry
+        end
     end
     for _, name in ipairs(entry.names or { entry.item }) do
         local rec = not ownership_index.name_is_id_only(name) and idx.by_name[norm_item_name(name)] or nil
-        if rec then return rec.item, rec.status, entry end
+        local matched_name = rec and (rec.item and rec.item.name or rec.item) or name
+        if rec then return rec.item, forsaken_status_for_match(entry, matched_name, rec.status), entry end
     end
     -- Spell-aware packs: own the pack item OR know every listed spell/disc.
     -- Glyphs and normal gear omit spell metadata and stay item-only.
@@ -802,7 +890,7 @@ function M.evaluate_entry(entry, snap, opts)
             end
         end
         local live = live_status_cached(entry)
-        if live == "equipped" or live == "carried" then
+        if status_is_have(live) then
             return {
                 entry = entry,
                 have = true,

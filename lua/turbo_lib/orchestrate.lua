@@ -25,6 +25,19 @@ function M.add_unique(out_list, seen, name)
     out_list[#out_list + 1] = name
 end
 
+function M.parse_sender_list(text)
+    local out_list, seen = {}, {}
+    for raw in tostring(text or ''):gmatch('[^,;|]+') do
+        local name = tostring(raw or ''):match('^%s*([%w_]+)%s*$') or ''
+        local key = M.clean_name(name)
+        if key ~= '' and not seen[key] then
+            seen[key] = true
+            out_list[#out_list + 1] = name
+        end
+    end
+    return out_list
+end
+
 function M.group_members()
     local out_list, seen = {}, {}
     local n = core.safe_num(function() return mq.TLO.Group.Members() end)
@@ -68,13 +81,14 @@ function M.active_members(scope)
     return active
 end
 
---- Parse collector args: all/e3, from Name, to Name, and optional max amount.
--- @return scope, max_amount, recipient ('' if unset), from_only ('' if unset)
+--- Parse collector args: all/e3, from Name, list A,B,C, to Name, and optional max amount.
+-- @return scope, max_amount, recipient ('' if unset), from_only ('' if unset), explicit_senders
 function M.parse_scope_args(args)
     local scope = 'group'
     local max_amount = 0
     local recipient = ''
     local from_only = ''
+    local explicit_senders = nil
     local i = 1
     args = args or {}
     while i <= #args do
@@ -85,6 +99,9 @@ function M.parse_scope_args(args)
         elseif low == 'from' and args[i + 1] then
             from_only = tostring(args[i + 1]):match('^[%w_]+') or ''
             i = i + 1
+        elseif (low == 'list' or low == 'senders') and args[i + 1] then
+            explicit_senders = M.parse_sender_list(args[i + 1])
+            i = i + 1
         elseif low == 'to' and args[i + 1] then
             recipient = tostring(args[i + 1]):match('^[%w_]+') or ''
             i = i + 1
@@ -93,10 +110,10 @@ function M.parse_scope_args(args)
         end
         i = i + 1
     end
-    return scope, max_amount, recipient, from_only
+    return scope, max_amount, recipient, from_only, explicit_senders
 end
 
-function M.resolve_active_senders(scope, recipient, from_only)
+function M.resolve_active_senders(scope, recipient, from_only, explicit_senders)
     recipient = tostring(recipient or '')
     from_only = tostring(from_only or '')
     local active = {}
@@ -108,6 +125,14 @@ function M.resolve_active_senders(scope, recipient, from_only)
             return active, 'from_missing'
         end
         active[1] = from_only
+        return active, nil
+    end
+    if type(explicit_senders) == 'table' and #explicit_senders > 0 then
+        for _, name in ipairs(explicit_senders) do
+            if M.clean_name(name) ~= M.clean_name(recipient) and M.spawn_exists(name) then
+                active[#active + 1] = name
+            end
+        end
         return active, nil
     end
     local members = scope == 'all' and M.e3_members() or M.group_members()

@@ -275,6 +275,7 @@ local function expand_fungal_chain(list, class_bucket, out)
     local family, rank = fungal_family_rank_cached(out.item)
     if not family then family, rank = fungal_family_rank_cached(out.slot) end
     if not family or rank == nil then return out end
+    out.progression_id_match = true
     local id_seen, name_seen = seed_id_seen(out), seed_name_seen(out)
     for slot, raw in pairs(class_bucket or {}) do
         local e = norm_entry_cached(raw)
@@ -344,6 +345,7 @@ local function expand_tattered_sack_chain(out)
     local mat = TATTERED_SACK_MATERIALS[slot]
     local min_rank = rank or (mat and mat.min_rank) or nil
     if not min_rank then return out end
+    out.progression_id_match = true
     if mat and mat.id then add_ids(out, { mat.id }, id_seen) end
     for _, row in ipairs(TATTERED_SACK_RANKS) do
         if row.rank >= min_rank then
@@ -374,6 +376,46 @@ local function add_jonas_aliases(out, names, name_seen)
     end
 end
 
+function M._expand_final_slot_chain(list, class_bucket, out, final_slots, component_slots)
+    local slot = tostring(out and out.slot or "")
+    if not component_slots[slot] then return out end
+    local id_seen, name_seen = seed_id_seen(out), seed_name_seen(out)
+    local added = false
+    for final_slot in pairs(final_slots) do
+        local final = (class_bucket and class_bucket[final_slot])
+            or (list and list.template and list.template[final_slot])
+            or (list and list.visible and list.visible[final_slot])
+        if final then
+            local e = norm_entry_cached(final)
+            add_ids(out, e.ids, id_seen)
+            add_names(out, e.names, name_seen)
+            add_names(out, { e.item }, name_seen)
+            added = true
+        end
+    end
+    if added then out.progression_id_match = true end
+    return out
+end
+
+function M._expand_ancient_bauble_chain(list, class_bucket, out)
+    return M._expand_final_slot_chain(list, class_bucket, out, { Final = true }, {
+        ["Base (Trash)"] = true,
+        ["Gem1 (Minis)"] = true,
+        ["Gem2 (Gamus)"] = true,
+        ["Gem3 (Warlocks)"] = true,
+        ["Gem4 (Sythrax)"] = true,
+        ["Gem5 (Brother)"] = true,
+        ["Gem6 (Garudon)"] = true,
+    })
+end
+
+local function mark_dsk_book_progression(out)
+    local slot = tostring(out and out.slot or "")
+    if slot ~= "Book1" and slot ~= "Book2" and slot ~= "Book3" then return out end
+    if #(out.ids or {}) > 0 then out.progression_id_match = true end
+    return out
+end
+
 -- Jonas Hand progression (Hand Aug checklist). LazBiS parity, data-driven:
 -- every row's catalog ids already carry its own bone/finger id plus every
 -- later hand (33167-33171), so a crafted finger or any later hand clears
@@ -382,6 +424,7 @@ end
 -- so a name hit cannot tell tiers apart. Only the "Jonas Dagmire's" prefix
 -- alias is added so bare/prefixed bone names both match.
 local function expand_jonas_hand_chain(list, class_bucket, out)
+    out.progression_id_match = true
     local name_seen = seed_name_seen(out)
     add_jonas_aliases(out, out.names, name_seen)
     add_jonas_aliases_for_name(out, out.item, name_seen)
@@ -397,6 +440,7 @@ local function expand_don_clicky_chain(list, class_bucket, out)
         or (list and list.template and list.template.Clicky3)
     if not final then return out end
     local e = norm_entry_cached(final)
+    out.progression_id_match = true
     local id_seen, name_seen = seed_id_seen(out), seed_name_seen(out)
     add_ids(out, e.ids, id_seen)
     add_names(out, e.names, name_seen)
@@ -415,6 +459,7 @@ local function expand_don_shadow_chain(list, class_bucket, out)
         or (list and list.template and list.template.Shadow)
     if not shadow then return out end
     local e = norm_entry_cached(shadow)
+    out.progression_id_match = true
     local id_seen, name_seen = seed_id_seen(out), seed_name_seen(out)
     add_ids(out, e.ids, id_seen)
     add_names(out, e.names, name_seen)
@@ -446,6 +491,7 @@ local function expand_don_scales_chain(out, class_name)
     if tostring(out.slot or "") ~= "Misc4" then return out end
     local epic = DON_SCALES_EPICS[class_key(class_name)]
     if not epic then return out end
+    out.progression_id_match = true
     local id_seen, name_seen = seed_id_seen(out), seed_name_seen(out)
     add_ids(out, { epic.id }, id_seen)
     add_names(out, { epic.name }, name_seen)
@@ -458,11 +504,11 @@ end
 function M.expand_sebilis_forsaken_chain(out)
     local mold = ({
         Arms = { name = "Ruined Shadowy Armguards", id = 150774 },
-        Chest = { name = "Ruined Shadowy Breastplate" },
+        Chest = { name = "Ruined Shadowy Chestguard" },
         Feet = { name = "Ruined Shadowy Boots", id = 150775 },
         Hands = { name = "Ruined Shadowy Gauntlets", id = 150778 },
         Head = { name = "Ruined Shadowy Helm" },
-        Legs = { name = "Ruined Shadowy Greaves" },
+        Legs = { name = "Ruined Shadowy Leggings" },
         Wrist = { name = "Ruined Shadowy Bracer" },
     })[tostring(out.slot or "")]
     if not mold then return out end
@@ -479,13 +525,169 @@ end
 function M.sebilis_forsaken_mold_for_slot(slot)
     return ({
         Arms = { name = "Ruined Shadowy Armguards", id = 150774 },
-        Chest = { name = "Ruined Shadowy Breastplate" },
+        Chest = { name = "Ruined Shadowy Chestguard" },
         Feet = { name = "Ruined Shadowy Boots", id = 150775 },
         Hands = { name = "Ruined Shadowy Gauntlets", id = 150778 },
         Head = { name = "Ruined Shadowy Helm" },
-        Legs = { name = "Ruined Shadowy Greaves" },
+        Legs = { name = "Ruined Shadowy Leggings" },
         Wrist = { name = "Ruined Shadowy Bracer" },
     })[tostring(slot or "")]
+end
+
+function M.expand_sebilis_originator_chain(out)
+    local slot = tostring(out and out.slot or "")
+    local originator_slots = {
+        PSAug1 = true,
+        PSAug2 = true,
+        PSAug3 = true,
+        PSAugSprings = true,
+        PSAugContainer = true,
+        PSAugFinal = true,
+    }
+    if not originator_slots[slot] then return out end
+    local group = tostring(out.group or "")
+    if group ~= "" and group ~= "Originator's Overlook" then return out end
+    out.progression_id_match = true
+    local id_seen, name_seen = seed_id_seen(out), seed_name_seen(out)
+    add_ids(out, { 39071 }, id_seen)
+    add_names(out, { "Originator's Overlooked Oddity" }, name_seen)
+    return out
+end
+
+function M.expand_sebilis_special_chains(out)
+    M.expand_sebilis_forsaken_chain(out)
+    M.expand_sebilis_originator_chain(out)
+    return out
+end
+
+function M._sebilis_forsaken_norm(name)
+    return tostring(name or ""):lower():gsub("`", "'"):gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
+end
+
+function M._is_sebilis_forsaken_entry(list_id, entry)
+    if tostring(list_id or "") ~= "sebilis" or type(entry) ~= "table" then return false end
+    local item = tostring(entry.item or "")
+    if not item:lower():find("^forsaken ", 1, false) then return false end
+    local group = tostring(entry.group or "")
+    return group == "" or group == "Forsaken Armor"
+end
+
+function M._row_match_name(row)
+    local match = row and row.match
+    if type(match) == "table" then
+        return tostring(match.name or match.item or "")
+    end
+    return tostring(match or "")
+end
+
+function M._row_match_id(row)
+    local match = row and row.match
+    if type(match) == "table" then
+        return tonumber(match.id or match.item_id or match.itemID)
+    end
+    return nil
+end
+
+function M._row_is_owned(row)
+    if type(row) ~= "table" then return false end
+    local status = tostring(row.status or "")
+    return row.have == true and status ~= "missing" and status ~= "unknown"
+end
+
+function M._completed_entry_for_forsaken(entry, mold)
+    local out = {}
+    for k, v in pairs(entry or {}) do out[k] = v end
+    out.names = { entry.item }
+    local ids = {}
+    for _, raw in ipairs(entry.ids or {}) do
+        local id = tonumber(raw)
+        if id and (not mold.id or id ~= tonumber(mold.id)) then ids[#ids + 1] = id end
+    end
+    out.ids = ids
+    return out
+end
+
+function M._mold_entry_for_forsaken(entry, mold)
+    local out = {}
+    for k, v in pairs(entry or {}) do out[k] = v end
+    out.item = mold.name
+    out.names = { mold.name }
+    out.ids = mold.id and { mold.id } or {}
+    return out
+end
+
+function M._apply_sebilis_forsaken_status(list_id, entry, snap, row)
+    if not M._row_is_owned(row) or not M._is_sebilis_forsaken_entry(list_id, entry) then return row end
+    local mold = M.sebilis_forsaken_mold_for_slot(entry.slot)
+    if not mold then return row end
+
+    local match_name = M._sebilis_forsaken_norm(M._row_match_name(row))
+    local match_id = M._row_match_id(row)
+    if (mold.id and match_id == tonumber(mold.id)) or match_name == M._sebilis_forsaken_norm(mold.name) then
+        row.status = "forsaken_base"
+        row.have = true
+        row.forsaken_base_name = mold.name
+        return row
+    end
+    if match_name == M._sebilis_forsaken_norm(entry.item) then
+        if row.status ~= "equipped" then row.status = "forsaken_complete" end
+        row.have = true
+        return row
+    end
+
+    local complete = bis.evaluate_entry(M._completed_entry_for_forsaken(entry, mold), snap)
+    if M._row_is_owned(complete) then
+        complete.entry = entry
+        complete.category = row.category
+        complete.status = complete.status == "equipped" and "equipped" or "forsaken_complete"
+        return complete
+    end
+
+    local base = bis.evaluate_entry(M._mold_entry_for_forsaken(entry, mold), snap)
+    if M._row_is_owned(base) then
+        base.entry = entry
+        base.category = row.category
+        base.status = "forsaken_base"
+        base.forsaken_base_name = mold.name
+        return base
+    end
+    return row
+end
+
+function M._is_sebilis_originator_entry(list_id, entry)
+    if tostring(list_id or "") ~= "sebilis" or type(entry) ~= "table" then return false end
+    local slot = tostring(entry.slot or "")
+    return slot == "PSAug1" or slot == "PSAug2" or slot == "PSAug3"
+        or slot == "PSAugSprings" or slot == "PSAugContainer" or slot == "PSAugFinal"
+end
+
+function M._apply_sebilis_originator_status(list_id, entry, snap, row)
+    if not M._is_sebilis_originator_entry(list_id, entry) then return row end
+    local originator_name = "Originator's Overlooked Oddity"
+    local match_name = M._sebilis_forsaken_norm(M._row_match_name(row))
+    local match_id = M._row_match_id(row)
+    if M._row_is_owned(row) and (match_id == 39071 or match_name == M._sebilis_forsaken_norm(originator_name)) then
+        row.status = "originator_complete"
+        row.have = true
+        row.originator_complete_name = originator_name
+        return row
+    end
+
+    local complete = bis.evaluate_entry({
+        item = originator_name,
+        names = { originator_name },
+        ids = { 39071 },
+        slot = entry.slot,
+        group = entry.group,
+    }, snap)
+    if M._row_is_owned(complete) then
+        complete.entry = entry
+        complete.category = row.category
+        complete.status = "originator_complete"
+        complete.originator_complete_name = originator_name
+        return complete
+    end
+    return row
 end
 
 function M.groups()
@@ -722,6 +924,10 @@ local function resolve_entry_uncached(list_id, class_name, slot)
     expand_fungal_chain(list, class_bucket or list.template or list.visible, out)
     if list_id == "jonas" then
         expand_jonas_hand_chain(list, class_bucket, out)
+    elseif list_id == "veksar" then
+        M._expand_ancient_bauble_chain(list, class_bucket, out)
+    elseif list_id == "dsk" then
+        mark_dsk_book_progression(out)
     elseif list_id == "don" then
         expand_don_clicky_chain(list, class_bucket, out)
         expand_don_shadow_chain(list, class_bucket, out)
@@ -729,7 +935,7 @@ local function resolve_entry_uncached(list_id, class_name, slot)
     elseif list_id == "bagitems" then
         expand_tattered_sack_chain(out)
     elseif list_id == "sebilis" then
-        M.expand_sebilis_forsaken_chain(out)
+        M.expand_sebilis_special_chains(out)
     end
     return out
 end
@@ -814,6 +1020,11 @@ M._BIS_SEARCH_STATUSES = {
     known = true, ready = true, pack_owned = true,
 }
 
+M._EXPANDED_SLOT_FALLBACK_LISTS = {
+    fungal = true,
+    jonas = true,
+}
+
 function M._snap_has_spell_data(snap)
     if type(snap) ~= "table" then return false end
     if type(snap.spell_ids) == "table" and next(snap.spell_ids) ~= nil then return true end
@@ -852,7 +1063,7 @@ function M.evaluate_slot(list_id, snap, slot, category)
                     slotname = loc,
                     location = loc,
                 }
-                return {
+                local row = {
                     entry = entry,
                     have = status ~= "missing",
                     match = match,
@@ -860,10 +1071,22 @@ function M.evaluate_slot(list_id, snap, slot, category)
                     category = category,
                     from_bis_search = true,
                 }
+                if status == "missing" and (entry.progression_id_match == true or M._EXPANDED_SLOT_FALLBACK_LISTS[tostring(list_id or "")]) then
+                    local fallback = bis.evaluate_entry(entry, snap)
+                    if fallback and fallback.status and fallback.status ~= "missing" then
+                        fallback.category = category
+                        fallback = M._apply_sebilis_forsaken_status(list_id, entry, snap, fallback)
+                        return M._apply_sebilis_originator_status(list_id, entry, snap, fallback)
+                    end
+                end
+                row = M._apply_sebilis_forsaken_status(list_id, entry, snap, row)
+                return M._apply_sebilis_originator_status(list_id, entry, snap, row)
             end
         end
     end
     local row = bis.evaluate_entry(entry, snap)
+    row = M._apply_sebilis_forsaken_status(list_id, entry, snap, row)
+    row = M._apply_sebilis_originator_status(list_id, entry, snap, row)
     row.category = category
     -- A peer DoN ability row with no search answer and no spellbook in the
     -- snapshot is UNKNOWN, not missing (absent data is not "doesn't know").
@@ -2059,10 +2282,14 @@ local function collect_template_announce_entries_for_link(item_name, item_id)
                         if list_id == "don" then
                             expand_don_clicky_chain(list, bucket, entry)
                             expand_don_shadow_chain(list, bucket, entry)
+                        elseif list_id == "veksar" then
+                            M._expand_ancient_bauble_chain(list, bucket, entry)
+                        elseif list_id == "dsk" then
+                            mark_dsk_book_progression(entry)
                         elseif list_id == "bagitems" then
                             expand_tattered_sack_chain(entry)
                         elseif list_id == "sebilis" then
-                            M.expand_sebilis_forsaken_chain(entry)
+                            M.expand_sebilis_special_chains(entry)
                         end
                         if bis.link_matches_entry(entry, item_name, item_id) then
                             local dedupe = list_id .. "\31" .. tostring(slot)
@@ -2275,6 +2502,10 @@ local function compact_apply_expansions(list_id, list, bucket, entry, class_name
     expand_fungal_chain(list, bucket, entry)
     if list_id == "jonas" then
         expand_jonas_hand_chain(list, bucket, entry)
+    elseif list_id == "veksar" then
+        M._expand_ancient_bauble_chain(list, bucket, entry)
+    elseif list_id == "dsk" then
+        mark_dsk_book_progression(entry)
     elseif list_id == "don" then
         expand_don_clicky_chain(list, bucket, entry)
         expand_don_shadow_chain(list, bucket, entry)
@@ -2282,7 +2513,7 @@ local function compact_apply_expansions(list_id, list, bucket, entry, class_name
     elseif list_id == "bagitems" then
         expand_tattered_sack_chain(entry)
     elseif list_id == "sebilis" then
-        M.expand_sebilis_forsaken_chain(entry)
+        M.expand_sebilis_special_chains(entry)
     end
 end
 
@@ -3282,6 +3513,14 @@ shared_apply_expansions_measured = function(build, list_id, list, bucket, entry,
         shared_phase_time(build, "expand_jonas", function()
             expand_jonas_hand_chain(list, bucket, entry)
         end)
+    elseif list_id == "veksar" then
+        shared_phase_time(build, "expand_veksar_bauble", function()
+            M._expand_ancient_bauble_chain(list, bucket, entry)
+        end)
+    elseif list_id == "dsk" then
+        shared_phase_time(build, "mark_dsk_books", function()
+            mark_dsk_book_progression(entry)
+        end)
     elseif list_id == "don" then
         shared_phase_time(build, "expand_don_clicky", function()
             expand_don_clicky_chain(list, bucket, entry)
@@ -3298,7 +3537,7 @@ shared_apply_expansions_measured = function(build, list_id, list, bucket, entry,
         end)
     elseif list_id == "sebilis" then
         shared_phase_time(build, "expand_sebilis_forsaken", function()
-            M.expand_sebilis_forsaken_chain(entry)
+            M.expand_sebilis_special_chains(entry)
         end)
     end
 end
@@ -4532,10 +4771,14 @@ local function paint_need_walk(snap, item_name, item_id, opts)
                             if list_id == 'don' then
                                 expand_don_clicky_chain(list, bucket, entry)
                                 expand_don_shadow_chain(list, bucket, entry)
+                            elseif list_id == 'veksar' then
+                                M._expand_ancient_bauble_chain(list, bucket, entry)
+                            elseif list_id == 'dsk' then
+                                mark_dsk_book_progression(entry)
                             elseif list_id == 'bagitems' then
                                 expand_tattered_sack_chain(entry)
                             elseif list_id == 'sebilis' then
-                                M.expand_sebilis_forsaken_chain(entry)
+                                M.expand_sebilis_special_chains(entry)
                             end
                             if names_hit(entry, nil, raw) then
                                 local row = M.evaluate_slot(list_id, snap, slot, nil)

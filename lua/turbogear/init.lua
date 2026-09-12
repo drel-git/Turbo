@@ -51,9 +51,10 @@ state.bg     = FORCE_BG
 state.show   = not state.bg
     and not (SCRIPT_ARGS[1] == 'mini' or (cfg.Settings.startMinimized == true and SCRIPT_ARGS[1] ~= 'ui'))
 
--- /lua run turbogear stock — open UI on Stock Up (starts bg via normal UI path).
-if not state.bg and tostring(SCRIPT_ARGS[1] or ''):lower() == 'stock' then
-    cfg.Settings.mainTab = 'stock'
+-- /lua run turbogear stock|collect - open UI on that tab (starts bg via normal UI path).
+local startup_tab_arg = tostring(SCRIPT_ARGS[1] or ''):lower()
+if not state.bg and (startup_tab_arg == 'stock' or startup_tab_arg == 'stockup' or startup_tab_arg == 'collect') then
+    cfg.Settings.mainTab = (startup_tab_arg == 'collect') and 'collect' or 'stock'
     state.show = true
 end
 
@@ -712,6 +713,27 @@ local function tick_perfdiag_capture()
     end
 end
 
+-- Uncaught tick errors used to unwind run_loop and unload the script (Lua
+-- error in chat, /lua list empty, UI gone or that toon stuck stale). go-loot
+-- already had this wrap; inventory_watch and announcer did not. Always record
+-- via note_error (shows in perfdiag with debug off). Print at most every 10s
+-- so a broken tick cannot flood chat.
+local tick_error_last_print = {}
+local TICK_ERROR_PRINT_S = 10
+local function run_loop_tick(label, fn)
+    local ok, err = pcall(fn)
+    if ok then return true end
+    if diag.note_error then diag.note_error(label, err) end
+    local now = os.clock()
+    local last = tonumber(tick_error_last_print[label]) or 0
+    if (now - last) >= TICK_ERROR_PRINT_S then
+        tick_error_last_print[label] = now
+        print(string.format("\ar[TurboGear]\ax %s error (loop kept running): %s",
+            tostring(label), tostring(err)))
+    end
+    return false
+end
+
 local INDEX_TICK_MEANINGFUL_MS = 0.5
 local function record_index_tick_diag(label, budget_ms, active_before, tick_fn, active_after_fn)
     if type(tick_fn) ~= "function" then return nil end
@@ -893,10 +915,8 @@ local function tgear_command(...)
             pcall(function() inventory_watch.try_adopt_store_self(true) end)
             request_local_bg_start("note command")
             mq.cmd('/timed 1 /squelch /tgearbg note' .. (full and " full" or ""))
-            print("[TurboGear] note: adopt bg snap (no UI bag scan) + delegated refresh")
         else
             inventory_watch.note_change(true, full)
-            print(full and "[TurboGear] note: urgent full dirty marked" or "[TurboGear] note: urgent lite dirty marked")
         end
     elseif arg == "wallet" then
         -- Fleet $ live path: cheap TLO wallet gather + E3 TurboFW + actor WALLET.
@@ -1156,6 +1176,11 @@ local function tgear_command(...)
         state.show = true
         if not state.bg then request_local_bg_start("stock command") end
         print("[TurboGear] opening Stock Up")
+    elseif arg == "collect" then
+        cfg.Settings.mainTab = "collect"
+        state.show = true
+        if not state.bg then request_local_bg_start("collect command") end
+        print("[TurboGear] opening Collect")
     elseif arg == "show" or arg == "open" or arg == "compare" then
         state.show = true
     else
@@ -1351,6 +1376,10 @@ local function run_loop(inspect_tick, peer_refresh)
     local next_engine_retry = os.clock() + 5.0
     while state.run do
         local frame_t0 = os.clock()
+        -- Phase 0: wall sibling for frame_t0. os.clock() alone cannot separate
+        -- "the loop blocked for 139ms" from "the process burned 139ms of CPU
+        -- across its threads while the loop ran". mq.delay stays outside both.
+        local frame_wall_t0 = diag.now_wall_s()
         if mq.doevents then
             diag.time("loop.mq_doevents", function()
                 mq.doevents()
@@ -1360,6 +1389,7 @@ local function run_loop(inspect_tick, peer_refresh)
         -- or DynamicZone TLOs. That is the crash-as-silent-disconnect path.
         if not Engine.ingame() then
             diag.sample("loop.frame_work", (os.clock() - frame_t0) * 1000)
+            diag.pair_end("loop.frame_work", frame_wall_t0, frame_t0)
             mq.delay(announcer.loop_delay_ms())
         else
         -- Bg self-heal: if the actor mailbox was busy at start, keep retrying so
@@ -1454,31 +1484,37 @@ local function run_loop(inspect_tick, peer_refresh)
                 if suggest.tick_cache_watch then suggest.tick_cache_watch() end
             end)
         end
-        diag.time("loop.inventory_watch_tick", function()
-            inventory_watch.tick()
+        run_loop_tick("loop.inventory_watch_tick", function()
+            diag.time("loop.inventory_watch_tick", function()
+                inventory_watch.tick()
+            end)
         end)
         if announcer.is_passive() then
-            diag.time("loop.announcer_passive", function()
-                -- Generated [TG] does not use needs_index. Only tick it when
-                -- generated authority is off (legacy enrichment).
-                if index_warm_policy.allow_needs_index_tick()
-                    and CFG.needs_index_enabled ~= false and CFG.needs_index_build_peers == true then
-                    pcall(function()
-                        local needs_index = require('needs_index')
-                        local budget = tonumber(CFG.needs_index_budget_bg_ms) or 25
-                        local opts = { allow_peers = true }
-                        local active_before = needs_index.needs_tick and needs_index.needs_tick(opts) == true
-                        record_index_tick_diag("index.needs.bg_passive", budget, active_before, function()
-                            return needs_index.tick(budget, opts)
-                        end, function()
-                            return needs_index.needs_tick and needs_index.needs_tick(opts) == true
+            run_loop_tick("loop.announcer_passive", function()
+                diag.time("loop.announcer_passive", function()
+                    -- Generated [TG] does not use needs_index. Only tick it when
+                    -- generated authority is off (legacy enrichment).
+                    if index_warm_policy.allow_needs_index_tick()
+                        and CFG.needs_index_enabled ~= false and CFG.needs_index_build_peers == true then
+                        pcall(function()
+                            local needs_index = require('needs_index')
+                            local budget = tonumber(CFG.needs_index_budget_bg_ms) or 25
+                            local opts = { allow_peers = true }
+                            local active_before = needs_index.needs_tick and needs_index.needs_tick(opts) == true
+                            record_index_tick_diag("index.needs.bg_passive", budget, active_before, function()
+                                return needs_index.tick(budget, opts)
+                            end, function()
+                                return needs_index.needs_tick and needs_index.needs_tick(opts) == true
+                            end)
                         end)
-                    end)
-                end
+                    end
+                end)
             end)
         else
-            diag.time("loop.announcer_tick", function()
-                announcer.tick()
+            run_loop_tick("loop.announcer_tick", function()
+                diag.time("loop.announcer_tick", function()
+                    announcer.tick()
+                end)
             end)
         end
         -- item_index is Search/Upgrade only. Last-good rows stay published
@@ -1511,14 +1547,11 @@ local function run_loop(inspect_tick, peer_refresh)
         end
         -- Never let a go-loot tick error kill the bg/UI run loop (that left E3
         -- paused and the panel stuck on "sent"/"going" with no finish).
-        local okGo, goErr = pcall(function()
+        run_loop_tick("loop.go_loot_tick", function()
             diag.time("loop.go_loot_tick", function()
                 require('go_loot').tick()
             end)
         end)
-        if not okGo then
-            print(string.format("\ar[TurboGear]\ax go-loot tick error: %s", tostring(goErr)))
-        end
         if inspect_tick then inspect_tick() end
         tick_perfdiag_capture()
         end
@@ -1527,6 +1560,7 @@ local function run_loop(inspect_tick, peer_refresh)
         -- loop.frame_work (last/avg/max) so additive sub-tick budgets can be
         -- checked against real numbers.
         diag.sample("loop.frame_work", (os.clock() - frame_t0) * 1000)
+        diag.pair_end("loop.frame_work", frame_wall_t0, frame_t0)
         mq.delay(announcer.loop_delay_ms())
         end
     end

@@ -164,13 +164,7 @@ local function draw_tool_cluster(g, actions, miniButton, sp4)
                     'windowToggleButton', 34)
             end
             if clicked then activate_tool(tool) end
-            local tip = tool.toggle and tool.toggle ~= ''
-                and string.format(
-                    'Toggle the %s window (starts it if not running). Never stops the script.',
-                    tool.label)
-                or string.format(
-                    'Open %s (starts it if not running). No window-toggle bind yet.',
-                    tool.label)
+            local tip = tool.label
             actions.tip(tip)
             drawn = drawn + 1
         end

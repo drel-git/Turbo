@@ -147,6 +147,44 @@ local function source_color(source)
     return Theme.dim
 end
 
+local function nonempty(v)
+    local s = trim(v)
+    if s ~= "" and s ~= "nil" then return s end
+    return nil
+end
+
+local function match_item_name(match, fallback)
+    if type(match) == "table" then
+        return nonempty(match.name)
+            or nonempty(match.item)
+            or nonempty(match.item_name)
+            or fallback
+    end
+    return nonempty(match) or fallback
+end
+
+local function match_location(match)
+    if type(match) ~= "table" then return nil end
+    local slotname = nonempty(match.slotname)
+    if slotname then return slotname end
+    local loc = nonempty(match.location)
+    local where = nonempty(match.where)
+    if loc and where and loc:lower() ~= where:lower() then
+        return loc .. " - " .. where
+    end
+    return loc or where
+end
+
+local function source_tooltip(cell)
+    local source = tostring((cell and cell.text) or "")
+    local item = match_item_name(cell and cell.match, source .. " Type 12 aug")
+    local loc = match_location(cell and cell.match)
+    if loc then
+        return string.format("Found '%s' in slot (%s)", item, loc)
+    end
+    return string.format("Found '%s'", item)
+end
+
 local function draw_cell_divider()
     if not (ImGui.GetWindowDrawList and ImGui.GetItemRectMin and ImGui.GetItemRectMax and theme.color_u32) then
         return
@@ -183,6 +221,7 @@ local function build(keys)
                 applicable = status.applicable == true,
                 via = status.via,
                 slot = status.slot,
+                match = status.match,
             }
             cells[key] = cell
             if cell.applicable then
@@ -215,9 +254,9 @@ local function cell_tooltip(cell, snap)
     if not (ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip) then return end
     local name = snap and snap.name or "?"
     if cell.text == "DoN" then
-        ImGui.SetTooltip(tostring(name) .. " owns the DoN Type 12 aug for this effect.")
+        ImGui.SetTooltip(source_tooltip(cell))
     elseif cell.text == "DSK" then
-        ImGui.SetTooltip(tostring(name) .. " owns the DSK Type 12 aug, but not the DoN aug.")
+        ImGui.SetTooltip(source_tooltip(cell))
     elseif cell.applicable then
         ImGui.SetTooltip(tostring(name) .. " is missing this Type 12 aug.")
     else

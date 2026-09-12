@@ -20,6 +20,67 @@ local function now()
     return os.clock()
 end
 
+-- Monotonic real-elapsed seconds, mirroring bis_catalog._wall_now_s /
+-- link_sched.elapsed_s. Paired with now() this is the ONLY way to tell real
+-- blocking from CPU burned across the process: on this build os.clock() and
+-- mq.gettime() diverge 2-3x over the same span (see the catalog_load_wall_ms /
+-- catalog_load_cpu_ms pair, e.g. 8.0ms wall vs 24.0ms "cpu"), which is what
+-- process CPU time summed across threads looks like. Every other timing in
+-- this module derives from os.clock() alone and therefore cannot make that
+-- distinction. The mq handle is probed once, not per call: these run per frame.
+local mq_gettime, mq_gettime_probed = nil, false
+function M.now_wall_s()
+    if not mq_gettime_probed then
+        mq_gettime_probed = true
+        local ok, mqmod = pcall(require, "mq")
+        if ok and type(mqmod) == "table" and type(mqmod.gettime) == "function" then
+            mq_gettime = mqmod.gettime
+        end
+    end
+    if mq_gettime then
+        local ok, value = pcall(mq_gettime)
+        if ok and tonumber(value) then return tonumber(value) / 1000 end
+    end
+    return os.clock()
+end
+
+-- last/avg/max/n only. Used by gauge() and by wall/CPU siblings so those
+-- series never flood the 160-entry slow-events ring.
+local function record(key, value)
+    local t = M.timings[key]
+    if not t then
+        t = { count = 0, total = 0, max = 0, last = 0 }
+        M.timings[key] = t
+    end
+    t.count = t.count + 1
+    t.total = t.total + value
+    t.last = value
+    if value > t.max then t.max = value end
+    return t
+end
+
+local function record_sibling(key, ms)
+    record(key, math.max(0, tonumber(ms) or 0))
+end
+
+--- Open a wall/CPU pair. Returns two opaque stamps for M.pair_end; cheap and
+--- allocation-free, for hot inline sites that are not wrapped in a function.
+function M.pair_start()
+    if not M.enabled then return 0, 0 end
+    return M.now_wall_s(), now()
+end
+
+--- Close a pair opened by M.pair_start, recording "<key>.wall_ms" and
+--- "<key>.cpu_ms" via record() (no slow ring). Leaves any existing "<key>"
+--- sample untouched so the old series stays comparable to earlier captures.
+function M.pair_end(key, wall_t0, cpu_t0)
+    if not M.enabled then return end
+    key = tostring(key or "")
+    if key == "" then return end
+    record_sibling(key .. ".wall_ms", (M.now_wall_s() - wall_t0) * 1000)
+    record_sibling(key .. ".cpu_ms", (now() - cpu_t0) * 1000)
+end
+
 local function wall_time()
     return os.date("%H:%M:%S")
 end
@@ -76,15 +137,7 @@ function M.sample(key, ms)
     key = tostring(key or "")
     if key == "" then return end
     ms = tonumber(ms) or 0
-    local t = M.timings[key]
-    if not t then
-        t = { count = 0, total = 0, max = 0, last = 0 }
-        M.timings[key] = t
-    end
-    t.count = t.count + 1
-    t.total = t.total + ms
-    t.last = ms
-    if ms > t.max then t.max = ms end
+    record(key, ms)
     if ms >= (tonumber(M.slow_threshold_ms) or 50) then
         push_ring(M.slow_events, SLOW_MAX, {
             at = wall_time(),
@@ -93,6 +146,35 @@ function M.sample(key, ms)
             context = M.contexts[key] or "",
         })
     end
+end
+
+-- Like sample(), but for values that are NOT durations in ms (byte counts,
+-- queue depths, inter-frame gaps). Recorded in the same last/avg/max/n table,
+-- but never pushed to the slow-events ring: a gauge that routinely exceeds
+-- slow_threshold_ms would otherwise crowd real slow timings out of a ring that
+-- only holds 160 entries. Values may be negative; `max` floors at 0.
+function M.gauge(key, value)
+    if not M.enabled then return end
+    key = tostring(key or "")
+    if key == "" then return end
+    record(key, tonumber(value) or 0)
+end
+
+--- M.time(), plus wall/CPU siblings for the same span. "<key>" keeps exactly
+--- the value it had before (os.clock delta) and is the only one that can
+--- enter the slow ring. "<key>.wall_ms" / "<key>.cpu_ms" are last/avg/max/n
+--- only so a 73ms idle tick does not push three slow-event rows.
+function M.time_pair(key, fn)
+    if not M.enabled then return fn() end
+    local wall_t0, cpu_t0 = M.now_wall_s(), now()
+    local out = { pcall(fn) }
+    local cpu_ms = (now() - cpu_t0) * 1000
+    M.sample(key, cpu_ms)
+    record_sibling(key .. ".wall_ms", (M.now_wall_s() - wall_t0) * 1000)
+    record_sibling(key .. ".cpu_ms", cpu_ms)
+    if not out[1] then error(out[2]) end
+    table.remove(out, 1)
+    return unpack(out)
 end
 
 function M.time(key, fn)

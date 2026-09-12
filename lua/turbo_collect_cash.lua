@@ -87,7 +87,7 @@ local function wait_sender(name, collect_locally, max_pp, recipient)
 end
 
 local function main()
-    local scope, max_amount, recipient, from_only = orch.parse_scope_args(args)
+    local scope, max_amount, recipient, from_only, explicit_senders = orch.parse_scope_args(args)
     local me = core.me_name()
     if recipient == '' then recipient = me end
     local collect_locally = orch.clean_name(recipient) == orch.clean_name(me)
@@ -102,7 +102,7 @@ local function main()
         return false
     end
 
-    local active, resolve_err = orch.resolve_active_senders(scope, recipient, from_only)
+    local active, resolve_err = orch.resolve_active_senders(scope, recipient, from_only, explicit_senders)
     if resolve_err == 'from_to_same' then
         out('\arAborting:\ax from and to cannot be the same (%s).', from_only)
         return false
@@ -113,7 +113,7 @@ local function main()
     end
     if #active == 0 then
         out('\arNo %s members found in-zone to move cash from (recipient %s excluded).',
-            from_only ~= '' and 'named' or (scope == 'all' and 'E3' or 'group'), recipient)
+            from_only ~= '' and 'named' or (explicit_senders and 'selected' or (scope == 'all' and 'E3' or 'group')), recipient)
         return false
     end
 
@@ -121,7 +121,8 @@ local function main()
         collect_locally and 'Collect' or 'Pool',
         recipient,
         #active,
-        from_only ~= '' and ('from ' .. from_only) or (scope == 'all' and 'E3 peers' or 'group'),
+        from_only ~= '' and ('from ' .. from_only)
+            or (explicit_senders and 'selected characters' or (scope == 'all' and 'E3 peers' or 'group')),
         max_amount > 0 and (' limit ' .. tostring(max_amount) .. 'pp each') or '')
 
     orch.register_done_events(done)

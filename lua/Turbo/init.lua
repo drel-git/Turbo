@@ -264,7 +264,7 @@ if cliMode then
     elseif lc == 'rulepacks' or lc == 'rules' or lc == 'packs' then
         guiStartupLayout = 'full'
         TG.activeTab = 'review'
-        TG.reviewWindowOpen = true
+        TG.reviewWindowOpen = false
         TG.skipReviewOpen = true
         TG.reviewSubPage = 'rulepacks'
         TG.rulePacksWindowOpen = false
@@ -287,7 +287,7 @@ if cliMode then
     elseif lc == 'review' or lc == 'turbo-review' then
         guiStartupLayout = 'full'
         TG.activeTab = 'review'
-        TG.reviewWindowOpen = true
+        TG.reviewWindowOpen = false
         TG.skipReviewOpen = true
         TG.reviewSubPage = 'review'
         cliMode = nil
@@ -311,7 +311,7 @@ local scriptName = 'Turbo'
 -- Suite version, parsed from lua/turbogear/CHANGELOG (the same file TurboGear and
 -- TurboPatcher read), so every surface shows one number. The literal is only a
 -- fallback for broken installs; per-file @version tags remain maintenance metadata.
-local TURBO_VERSION = '1.2.143'
+local TURBO_VERSION = '1.2.144'
 do
     local f = io.open((mq.luaDir or 'lua') .. '/turbogear/CHANGELOG', 'r')
     if f then
@@ -5453,8 +5453,9 @@ TG.consumePendingNavigation = function()
     TG.activeTab = UiState.normalizeActiveTab(tab)
     TG.lastRelevantTab = TG.activeTab
     if tab == 'review' then
-        TG.reviewWindowOpen = true
+        TG.reviewWindowOpen = false
         TG.skipReviewOpen = true
+        TG.reviewSubPage = 'review'
     elseif tab == 'tools' then
         TG.activeTab = 'tools'
     end
@@ -6623,9 +6624,9 @@ local function bindTurboRuntimeCommands()
     end
     local okRulePacks, errRulePacks = pcall(function()
         mq.bind('/turborulepacks', function()
-            local isOpen = TG.reviewWindowOpen and TG.reviewSubPage == 'rulepacks'
+            local isOpen = TG.windowOpen and not TG.minimizedGUI and TG.activeTab == 'review' and TG.reviewSubPage == 'rulepacks'
             if isOpen then
-                TG.reviewWindowOpen = false
+                TG.windowOpen = false
                 TG.skipReviewOpen = false
                 TG.statusMessage = 'Rule Packs closed.'
                 return
@@ -6635,7 +6636,7 @@ local function bindTurboRuntimeCommands()
             TG.slimGUI = false
             TG.slimWhenExpanded = false
             TG.activeTab = 'review'
-            TG.reviewWindowOpen = true
+            TG.reviewWindowOpen = false
             TG.skipReviewOpen = true
             TG.reviewSubPage = 'rulepacks'
             TG.rulePacksWindowOpen = false
@@ -6688,9 +6689,9 @@ local function bindTurboRuntimeCommands()
     end
     local okReview, errReview = pcall(function()
         mq.bind('/turboreview', function()
-            local isOpen = TG.reviewWindowOpen and TG.reviewSubPage == 'review'
+            local isOpen = TG.windowOpen and not TG.minimizedGUI and TG.activeTab == 'review' and TG.reviewSubPage == 'review'
             if isOpen then
-                TG.reviewWindowOpen = false
+                TG.windowOpen = false
                 TG.skipReviewOpen = false
                 TG.statusMessage = 'Review closed.'
                 return
@@ -6700,7 +6701,7 @@ local function bindTurboRuntimeCommands()
             TG.slimGUI = false
             TG.slimWhenExpanded = false
             TG.activeTab = 'review'
-            TG.reviewWindowOpen = true
+            TG.reviewWindowOpen = false
             TG.skipReviewOpen = true
             TG.reviewSubPage = 'review'
             TG.statusMessage = 'Review opened.'
@@ -8169,6 +8170,7 @@ local function renderTabBar(g, viewState)
                 g.skipReviewOpen = (tab.id == 'review')
                 if tab.id == 'review' then
                     g.reviewMode = 'quick'
+                    g.reviewSubPage = 'review'
                     g.reviewWindowOpen = false
                     g.rulePacksWindowOpen = false
                 end
@@ -10510,8 +10512,18 @@ local function turboMiniBarActions(ctx)
         end,
         toggleReviewWindowFromMini = function(hasSkips)
             if hasSkips then
-                g.reviewWindowOpen = not g.reviewWindowOpen
-                g.skipReviewOpen = g.reviewWindowOpen
+                g.showMiniLooterPicker = false
+                g.showMiniRosterEditor = false
+                g.windowOpen = true
+                g.minimizedGUI = false
+                g.slimGUI = false
+                g.slimWhenExpanded = false
+                g.activeTab = 'review'
+                g.lastRelevantTab = 'review'
+                g.reviewSubPage = 'review'
+                g.reviewWindowOpen = false
+                g.skipReviewOpen = true
+                if saveSettingsFn then saveSettingsFn() end
             end
         end,
         openTurboPatcher = function(opts)
@@ -10561,7 +10573,8 @@ local function turboMiniBarActions(ctx)
             end
             if openSkips then
                 g.skipReviewOpen = true
-                g.reviewWindowOpen = true
+                g.reviewWindowOpen = false
+                g.reviewSubPage = 'review'
             end
             local expandW = UiState.windowWidthForTab(false, g.activeTab, Theme)
             local expandH = UiState.windowHeightForTab(false, g.activeTab, Theme, {
@@ -12060,53 +12073,130 @@ function TG.renderWindow()
         -- ============ REVIEW TAB ============
         if g.activeTab == 'review' then
             g.reviewMode = g.reviewMode or 'quick'
+            g.reviewSubPage = g.reviewSubPage or 'review'
             if g.showReviewModeButtons ~= false then
-                local reviewCols, reviewW, reviewGap = Ui.adaptiveColumns(3, 74, 4)
-                local fullLabel = string.format('Full (%d)##review_mode_detailed', viewState.skipState.pendingCount or 0)
-                if Ui.buttonVariant(fullLabel, reviewChoiceVariant(g.reviewWindowOpen and g.reviewSubPage == 'review', 'full'), reviewW, ACTION_BTN_H) then
-                    local isOpen = g.reviewWindowOpen and g.reviewSubPage == 'review'
-                    g.reviewWindowOpen = not isOpen
-                    g.skipReviewOpen = g.reviewWindowOpen
-                    if g.reviewWindowOpen then
-                        g.reviewMode = 'detailed'
-                        g.reviewSubPage = 'review'
-                    else
-                        g.reviewMode = 'quick'
+                local reviewGap = math.max(ImGui.GetStyle().ItemSpacing.x, 4)
+                local function renderReviewTargetIniCombo(width)
+                    local profileNow = g.skipIniTargetOverride or 'Auto'
+                    ImGui.PushItemWidth(width)
+                    if ImGui.BeginCombo('##quick_review_target_ini_combo', tostring(profileNow)) then
+                        if ImGui.Selectable('Auto##quick_review_target_auto', g.skipIniTargetOverride == nil) then
+                            g.skipIniTargetOverride = nil
+                            g.skipIniTargetOverridePath = nil
+                        end
+                        local seenProfile = {}
+                        local function profileOpt(p)
+                            p = cleanProfileName(p)
+                            if not p or p == '' or seenProfile[p:lower()] then return end
+                            seenProfile[p:lower()] = true
+                            if ImGui.Selectable(p .. '##quick_review_target_' .. p, g.skipIniTargetOverride == p) then
+                                g.skipIniTargetOverride = p
+                                g.skipIniTargetOverridePath = resolveTurbolootIniPathForProfile
+                                    and (resolveTurbolootIniPathForProfile(p)) or nil
+                                g.skipIniTarget = p
+                            end
+                        end
+                        profileOpt(cleanProfileName(g.reviewTargetProfile or ((getActiveProfile and getActiveProfile()) or 'turboloot.ini')) or 'turboloot.ini')
+                        for _, p in ipairs(g.profileList or {}) do profileOpt(p) end
+                        for _, p in pairs(g.charProfiles or {}) do profileOpt(p) end
+                        ImGui.EndCombo()
                     end
+                    ImGui.PopItemWidth()
+                    tip('Target INI for Review rule writes. Auto uses each row\'s resolved INI.')
                 end
-                tip('Open Full Review for quantity rules, Undo, Ignore all, Clear all skips, filters, nav, and Reloot controls.')
-                Ui.gridSameLine(2, reviewCols, reviewGap)
-                if Ui.buttonVariant('Packs##review_open_rulepacks_window', reviewChoiceVariant(g.reviewWindowOpen and g.reviewSubPage == 'rulepacks', 'packs'), reviewW, ACTION_BTN_H) then
-                    local isOpen = g.reviewWindowOpen and g.reviewSubPage == 'rulepacks'
-                    g.reviewWindowOpen = not isOpen
-                    g.skipReviewOpen = g.reviewWindowOpen
-                    if g.reviewWindowOpen then
+                local reviewAvail = Ui.availX(360)
+                local reasonW = math.max(80, math.floor(reviewAvail * 0.18))
+                local packsW = math.max(78, math.floor(reviewAvail * 0.18))
+                local huntingW = math.max(86, math.floor(reviewAvail * 0.20))
+                local targetW = math.max(116, reviewAvail - reasonW - packsW - huntingW - (reviewGap * 3))
+                local reasonOptions = { 'All', 'Unlisted', 'Below $', 'Lore', 'Other' }
+                local reasonNow = tostring(g.reviewFilterReason or 'All')
+                ImGui.PushItemWidth(reasonW)
+                if ImGui.BeginCombo('##quick_review_reason_filter', reasonNow) then
+                    for _, opt in ipairs(reasonOptions) do
+                        if ImGui.Selectable(opt .. '##quick_review_reason_' .. opt, reasonNow == opt) then
+                            g.reviewFilterReason = opt
+                            g.reviewSubPage = 'review'
+                            reasonNow = opt
+                        end
+                    end
+                    ImGui.EndCombo()
+                end
+                ImGui.PopItemWidth()
+                tip('Filter Review rows by skip reason.')
+                ImGui.SameLine(0, reviewGap)
+                if Ui.buttonVariant('Packs##review_open_rulepacks_page', reviewChoiceVariant(g.reviewSubPage == 'rulepacks', 'packs'), packsW, ACTION_BTN_H) then
+                    local isOpen = g.reviewSubPage == 'rulepacks'
+                    g.reviewWindowOpen = false
+                    g.skipReviewOpen = false
+                    if not isOpen then
                         g.reviewSubPage = 'rulepacks'
                         g.reviewMode = 'detailed'
                     else
+                        g.reviewSubPage = 'review'
                         g.reviewMode = 'quick'
                     end
                     g.rulePacksWindowOpen = false
                     TG.setupSubTab = 'loot'
                 end
-                tip('Show or hide Rule Packs inside the shared pop-out Review window.')
-                Ui.gridSameLine(3, reviewCols, reviewGap)
-                if Ui.buttonVariant('Hunting##review_open_hunting_window', reviewChoiceVariant(g.reviewWindowOpen and g.reviewSubPage == 'hunting', 'hunting'), reviewW, ACTION_BTN_H) then
-                    local isOpen = g.reviewWindowOpen and g.reviewSubPage == 'hunting'
-                    g.reviewWindowOpen = not isOpen
-                    g.skipReviewOpen = g.reviewWindowOpen
-                    if g.reviewWindowOpen then
+                tip('Show Rule Packs in this Review tab.')
+                ImGui.SameLine(0, reviewGap)
+                if Ui.buttonVariant('Hunting##review_open_hunting_page', reviewChoiceVariant(g.reviewSubPage == 'hunting', 'hunting'), huntingW, ACTION_BTN_H) then
+                    local isOpen = g.reviewSubPage == 'hunting'
+                    g.reviewWindowOpen = false
+                    g.skipReviewOpen = false
+                    if not isOpen then
                         g.reviewSubPage = 'hunting'
                         g.reviewMode = 'detailed'
                     else
+                        g.reviewSubPage = 'review'
                         g.reviewMode = 'quick'
                     end
                     g.rulePacksWindowOpen = false
                 end
-                tip('Show or hide Turbo Hunting inside the shared pop-out Review window.')
+                tip('Show Turbo Hunting in this Review tab.')
+                ImGui.SameLine(0, reviewGap)
+                renderReviewTargetIniCombo(targetW)
                 ImGui.Dummy(0, 4)
             end
-            if skipTracker and skipTracker.is_ready and skipTracker.is_ready() then
+            if g.reviewSubPage == 'rulepacks' then
+                local function reviewMutedWrap(text)
+                    ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + ImGui.GetContentRegionAvail())
+                    ImGui.TextColored(0.45, 0.48, 0.55, 1.0, tostring(text or ''))
+                    ImGui.PopTextWrapPos()
+                end
+                local assignTargetRp = g.selectedChar or ((currentLooter and currentLooter ~= 'NOBODY') and currentLooter) or 'selected character'
+                local activeProfRp = getActiveProfile()
+                local showAdvancedSetupRp = g.perCharProfile
+                TG.renderRulePacksPanel(g, activeProfRp, assignTargetRp, showAdvancedSetupRp,
+                    getProfileForMember, reviewMutedWrap, tip, ACTION_BTN_H, rescanProfiles, openProfileExternal)
+                local okRB, RB = pcall(require, 'Turbo.rulepack_browser')
+                if okRB and RB and RB.render then
+                    RB.render({
+                        g = g,
+                        TG = TG,
+                        tip = tip,
+                        mutedWrap = reviewMutedWrap,
+                        ACTION_BTN_H = ACTION_BTN_H,
+                        activeProf = activeProfRp,
+                        assignTarget = assignTargetRp,
+                        showAdvancedSetup = showAdvancedSetupRp,
+                        getProfileForMember = getProfileForMember,
+                        resolveTurbolootIniPathForProfile = resolveTurbolootIniPathForProfile,
+                        profileList = g.profileList,
+                        TurboKeyRGB = TurboKeyRGB,
+                        openProfile = openProfileExternal,
+                        pageMode = true,
+                    })
+                else
+                    reviewMutedWrap('Rule pack browser module failed to load.')
+                end
+            elseif g.reviewSubPage == 'hunting' then
+                ImGui.TextColored(0.45, 0.48, 0.55, 1.0,
+                    'Manage item alerts for drops you are actively hunting. TurboLoot reads this list once per loot run and checks it in memory.')
+                ImGui.Dummy(0, 4)
+                TG.drawHuntingPanel(g, tip, ACTION_BTN_H)
+            elseif skipTracker and skipTracker.is_ready and skipTracker.is_ready() then
                 local rawRows = g.skipDisplayRows or {}
                 local q = tostring(g.quickReviewSearch or ''):lower():match('^%s*(.-)%s*$') or ''
                 ImGui.PushItemWidth(math.max(120, Ui.availX(160)))
@@ -12119,10 +12209,20 @@ function TG.renderWindow()
                 tip('Filter the quick list by item, reason, source, or INI.')
 
                 local quickRows = {}
+                local function quickReasonBucket(reason)
+                    local r = tostring(reason or ''):lower()
+                    if r:find('unlisted', 1, true) then return 'Unlisted' end
+                    if r:find('below', 1, true) then return 'Below $' end
+                    if r:find('lore', 1, true) then return 'Lore' end
+                    return 'Other'
+                end
+                local reasonFilter = tostring(g.reviewFilterReason or 'All')
                 for _, row in ipairs(rawRows) do
                     local hay = (tostring(row.name or '') .. ' ' .. tostring(row.reason or '') .. ' '
                         .. tostring(row.source or '') .. ' ' .. tostring(row.iniFile or '')):lower()
-                    if q == '' or hay:find(q, 1, true) then quickRows[#quickRows + 1] = row end
+                    local textOk = q == '' or hay:find(q, 1, true)
+                    local reasonOk = reasonFilter == 'All' or quickReasonBucket(row.reason) == reasonFilter
+                    if textOk and reasonOk then quickRows[#quickRows + 1] = row end
                 end
                 if g.quickReviewSelectedKey then
                     local foundSel = false
@@ -12190,10 +12290,12 @@ function TG.renderWindow()
                         return
                     end
                     if TG.requireSharedControl and not TG.requireSharedControl('Review rule edit') then return end
-                    local ok = skipTracker.apply_rule(row.name, label, row.iniPath)
+                    local targetPath = g.skipIniTargetOverridePath or row.iniPath
+                    local targetFile = g.skipIniTargetOverride or row.iniFile
+                    local ok = skipTracker.apply_rule(row.name, label, targetPath)
                     g.lastSkipApplyMS = mq.gettime()
                     if ok then
-                        g.statusMessage = string.format('%s = %s in %s', row.name, label, row.iniFile or 'INI')
+                        g.statusMessage = string.format('%s = %s in %s', row.name, label, targetFile or 'INI')
                         g.quickReviewSelectedKey = nil
                         g.skipDisplayRows = nil
                     else
@@ -12259,7 +12361,7 @@ function TG.renderWindow()
                             local selected = g.quickReviewSelectedKey == row.key
                             ImGui.TableNextRow()
                             if selected then
-                                ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg0, IM_COL32(42, 68, 104, 90))
+                                ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg0, IM_COL32(58, 92, 142, 155))
                             end
                             ImGui.TableNextColumn()
                             -- No SpanAllColumns: it stole clicks from Nav/X in the ops column.
@@ -12377,16 +12479,6 @@ function TG.renderWindow()
                     ImGui.TextColored(0.92, 0.45, 0.40, 1.0, 'Select a Review row or put an item on your cursor first.')
                     ImGui.EndTooltip()
                 end
-                -- Compact target line only (Dismiss is per-row X). Keeps Review
-                -- chrome height aligned with Actions / Setup / More.
-                if quickTargetMode == 'cursor' then
-                    ImGui.TextColored(0.62, 0.70, 0.82, 1.0, 'Cursor: ' .. tostring(cursorItem or ''))
-                elseif selectedRow then
-                    ImGui.TextColored(0.62, 0.70, 0.82, 1.0, 'Selected: ' .. tostring(selectedRow.nameDisplay or selectedRow.name or 'item'))
-                else
-                    ImGui.TextDisabled('Select a row (or put an item on cursor) to apply KEEP/SELL/...')
-                end
-                ImGui.Dummy(0, 2)
                 local function quickApply(label)
                     if quickTargetMode == 'cursor' then
                         applyTurboKeyRule(label, { itemName = cursorItem })
@@ -12394,6 +12486,39 @@ function TG.renderWindow()
                         quickApplyReviewRule(selectedRow, label)
                     end
                 end
+                local function quickApplyQuantity()
+                    local num = tonumber(g.turboKeyQty)
+                    if not num or num <= 0 then
+                        g.statusMessage = 'Enter a valid quantity.'
+                        return
+                    end
+                    quickApply(tostring(math.floor(num)))
+                end
+                ImGui.TextDisabled('Qty')
+                ImGui.SameLine(0, 6)
+                ImGui.PushItemWidth(50)
+                g.turboKeyQty = ImGui.InputText('##quick_review_qty_rule', g.turboKeyQty)
+                ImGui.PopItemWidth()
+                ImGui.SameLine(0, 4)
+                if not quickHasTarget then ImGui.BeginDisabled() end
+                if Ui.buttonVariant('Set##quick_review_qty_set', 'secondaryButton', 44, ACTION_BTN_H) then
+                    quickApplyQuantity()
+                end
+                if not quickHasTarget then ImGui.EndDisabled() end
+                if quickHasTarget then
+                    tip('Write a numeric ItemLimits rule for the selected row or cursor item.')
+                else
+                    quickNoTargetTip('Set quantity')
+                end
+                ImGui.SameLine(0, 4)
+                if not quickHasTarget then ImGui.BeginDisabled() end
+                if Ui.buttonVariant('1##quick_review_qty_1', 'secondaryButton', 28, ACTION_BTN_H) then
+                    g.turboKeyQty = '1'
+                    quickApplyQuantity()
+                end
+                if not quickHasTarget then ImGui.EndDisabled() end
+                if quickHasTarget then tip('Set quantity to 1 and apply it.') else quickNoTargetTip('Quantity 1') end
+                ImGui.Dummy(0, 2)
                 local TK = TurboKeyRGB or Theme.col.turboKeyRGB or {}
                 local qAvail = Ui.availX(240)
                 local qSp = math.max(ImGui.GetStyle().ItemSpacing.x, 4)

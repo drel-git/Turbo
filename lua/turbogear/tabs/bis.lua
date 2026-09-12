@@ -154,6 +154,7 @@ local ULTRA_CELL_BG = {
     equipped = { 0.10, 0.20, 0.14, 0.94 },
     carried  = { 0.10, 0.15, 0.26, 0.94 },
     pack     = { 0.22, 0.18, 0.08, 0.94 },
+    base     = { 0.22, 0.17, 0.06, 0.94 },
 }
 
 -- Friendlier slot labels for the frozen column (catalog keys -> display).
@@ -1026,8 +1027,8 @@ local function don_learned_from(row)
 end
 
 local function row_color(row)
-    if row and row.status == "equipped" then return BIS_GREEN end
-    if row and row.status == "known" then return BIS_GREEN end
+    if row and (row.status == "equipped" or row.status == "known" or row.status == "forsaken_complete" or row.status == "originator_complete") then return BIS_GREEN end
+    if row and row.status == "forsaken_base" then return BIS_PACK end
     if row and (row.status == "carried" or row.status == "ready") then return BIS_BAG end
     if row and row.status == "pack_owned" then return BIS_PACK end
     if row and row.status == "unknown" then return BIS_UNKNOWN end
@@ -1038,7 +1039,8 @@ end
 local function apply_ultra_cell_bg(row)
     if not row or row.empty or row.status == "unknown" or (row.status == "missing" and not (show_elsewhere() and row.elsewhere)) then return end
     local bg = ULTRA_CELL_BG.carried
-    if row.status == "equipped" or row.status == "known" then bg = ULTRA_CELL_BG.equipped
+    if row.status == "equipped" or row.status == "known" or row.status == "forsaken_complete" or row.status == "originator_complete" then bg = ULTRA_CELL_BG.equipped
+    elseif row.status == "forsaken_base" then bg = ULTRA_CELL_BG.base
     elseif row.status == "pack_owned" then bg = ULTRA_CELL_BG.pack end
     if not (ImGui.TableSetBgColor and ImGuiTableBgTarget and theme.color_u32) then return end
     local target = ImGuiTableBgTarget.CellBg or ImGuiTableBgTarget.RowBg0
@@ -1136,7 +1138,8 @@ end
 
 local function status_glyph(row)
     if not row or row.empty then return "-" end
-    if row.status == "equipped" or row.status == "known" then return "W" end
+    if row.status == "equipped" or row.status == "known" or row.status == "forsaken_complete" or row.status == "originator_complete" then return "W" end
+    if row.status == "forsaken_base" then return "Q" end
     if row.status == "carried" or row.status == "ready" then return "B" end
     if row.status == "pack_owned" then return "P" end
     if row.status == "unknown" then return "?" end
@@ -1146,6 +1149,9 @@ end
 
 local function row_label(row)
     if row and row.status == "equipped" then return "Equipped" end
+    if row and row.status == "forsaken_complete" then return "Complete" end
+    if row and row.status == "originator_complete" then return "Complete" end
+    if row and row.status == "forsaken_base" then return "Quest Piece" end
     if row and row.status == "carried" then return "Carried" end
     if row and row.status == "known" then return "Known" end
     if row and row.status == "ready" then return "Ready to Learn" end
@@ -1159,6 +1165,9 @@ local function row_location(row)
     if row and row.status == "known" then return "Spell book / discs" end
     if row and row.status == "ready" then return "Ready to learn" end
     if row and row.status == "pack_owned" then return "Pack owned" end
+    if row and row.status == "forsaken_base" then return "Ruined Shadowy base piece" end
+    if row and row.status == "forsaken_complete" then return "Completed Forsaken armor" end
+    if row and row.status == "originator_complete" then return "Originator's Overlooked Oddity complete" end
     if row and row.status == "unknown" then return "No spell data yet (Refresh)" end
     local m = row.match
     if not m then return "-" end
@@ -2254,8 +2263,8 @@ local function process_roster_build_job(cache_key)
                     if row and not row.header and not row.empty and not row.pad then
                         any_real = true
                         local c = job.counts[key]
-                        if row.status == "equipped" then c[1] = (c[1] or 0) + 1
-                        elseif row.status == "carried" or row.status == "known"
+                        if row.status == "equipped" or row.status == "forsaken_complete" or row.status == "originator_complete" then c[1] = (c[1] or 0) + 1
+                        elseif row.status == "carried" or row.status == "known" or row.status == "forsaken_base"
                             or row.status == "ready" or row.status == "pack_owned" then
                             c[2] = (c[2] or 0) + 1
                         elseif row.status ~= "unknown" then c[3] = (c[3] or 0) + 1 end
@@ -2410,15 +2419,15 @@ end
 -- this chunk sits near LuaJIT's 200-local main-chunk limit.
 M.bis_legend_tooltip = function(layout)
     local lines = {
-        "Green = equipped / Known (scribed)",
+        "Green = equipped / completed / Known (scribed)",
         "Blue = carried / Ready to Learn",
-        "Amber = Pack Owned (DoN spells)",
+        "Amber = quest base piece / Pack Owned",
     }
     if show_elsewhere() then lines[#lines + 1] = "Gold = elsewhere" end
     lines[#lines + 1] = "Grey-red = missing"
     if layout == "ultra" then
         lines[#lines + 1] = ""
-        lines[#lines + 1] = "Ultra cells: W = equipped/known, B = carried/ready, P = pack"
+        lines[#lines + 1] = "Ultra cells: W = equipped/known/complete, B = carried/ready, Q = quest base, P = pack"
             .. (show_elsewhere() and ", E = elsewhere" or "") .. ", X = missing"
     end
     lines[#lines + 1] = ""

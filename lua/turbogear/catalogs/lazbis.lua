@@ -162,7 +162,7 @@ return {
         Bard = {
           Arms = {
             ids = {
-              32489,
+              70903,
             },
             item = "Farseeker's Plate Armbands of Harmony",
             names = {
@@ -194,7 +194,7 @@ return {
           },
           Chest = {
             ids = {
-              32532,
+              70907,
             },
             item = "Farseeker's Plate Chestguard of Harmony",
             names = {
@@ -271,7 +271,7 @@ return {
           },
           Feet = {
             ids = {
-              32490,
+              70906,
             },
             item = "Farseeker's Plate Boots of Harmony",
             names = {
@@ -304,7 +304,7 @@ return {
           },
           Hands = {
             ids = {
-              32533,
+              70905,
             },
             item = "Farseeker's Plate Gloves of Harmony",
             names = {
@@ -315,7 +315,7 @@ return {
           },
           Head = {
             ids = {
-              33000,
+              70902,
             },
             item = "Farseeker's Plate Helm of Harmony",
             names = {
@@ -326,7 +326,7 @@ return {
           },
           Legs = {
             ids = {
-              33001,
+              70908,
             },
             item = "Farseeker's Plate Legguards of Harmony",
             names = {
@@ -411,8 +411,7 @@ return {
           },
           Wrists = {
             ids = {
-              31648,
-              33002,
+              70904,
             },
             item = "Farseeker's Plate Wristguard of Harmony",
             names = {
@@ -425,7 +424,7 @@ return {
         Beastlord = {
           Arms = {
             ids = {
-              32487,
+              70952,
             },
             item = "Savagesoul Sleeves of the Wilds",
             names = {
@@ -457,7 +456,7 @@ return {
           },
           Chest = {
             ids = {
-              32484,
+              70956,
             },
             item = "Savagesoul Jerkin of the Wilds",
             names = {
@@ -534,7 +533,7 @@ return {
           },
           Feet = {
             ids = {
-              32486,
+              70955,
             },
             item = "Savagesoul Sandals of the Wilds",
             names = {
@@ -567,7 +566,7 @@ return {
           },
           Hands = {
             ids = {
-              32483,
+              70954,
             },
             item = "Savagesoul Gloves of the Wilds",
             names = {
@@ -578,7 +577,7 @@ return {
           },
           Head = {
             ids = {
-              32482,
+              70951,
             },
             item = "Savagesoul Cap of the Wilds",
             names = {
@@ -589,7 +588,7 @@ return {
           },
           Legs = {
             ids = {
-              32485,
+              70957,
             },
             item = "Savagesoul Legguards of the Wilds",
             names = {
@@ -675,8 +674,7 @@ return {
           },
           Wrists = {
             ids = {
-              31647,
-              32488,
+              70953,
             },
             item = "Savagesoul Wristband of the Wilds",
             names = {
@@ -689,7 +687,7 @@ return {
         Berserker = {
           Arms = {
             ids = {
-              31710,
+              70959,
             },
             item = "Wrathbringer's Chain Sleeves of the Vindicator",
             names = {
@@ -721,7 +719,7 @@ return {
           },
           Chest = {
             ids = {
-              31706,
+              70963,
             },
             item = "Wrathbringer's Chain Chestguard of the Vindicator",
             names = {
@@ -786,7 +784,7 @@ return {
           },
           Feet = {
             ids = {
-              31688,
+              70962,
             },
             item = "Wrathbringer's Chain Boots of the Vindicator",
             names = {
@@ -819,7 +817,7 @@ return {
           },
           Hands = {
             ids = {
-              31707,
+              70961,
             },
             item = "Wrathbringer's Chain Gloves of the Vindicator",
             names = {
@@ -830,7 +828,7 @@ return {
           },
           Head = {
             ids = {
-              31708,
+              70958,
             },
             item = "Wrathbringer's Chain Helm of the Vindicator",
             names = {
@@ -841,7 +839,7 @@ return {
           },
           Legs = {
             ids = {
-              31709,
+              70964,
             },
             item = "Wrathbringer's Chain Leggings of the Vindicator",
             names = {
@@ -916,8 +914,7 @@ return {
           },
           Wrists = {
             ids = {
-              30583,
-              31711,
+              70960,
             },
             item = "Wrathbringer's Chain Wristguard of the Vindicator",
             names = {
@@ -930,7 +927,7 @@ return {
         Cleric = {
           Arms = {
             ids = {
-              31712,
+              70861,
             },
             item = "Faithbringer's Armguards of Conviction",
             names = {
@@ -953,7 +950,7 @@ return {
           },
           Chest = {
             ids = {
-              32251,
+              70865,
             },
             item = "Faithbringer's Breastplate of Conviction",
             names = {
@@ -1017,7 +1014,7 @@ return {
           },
           Feet = {
             ids = {
-              32250,
+              70864,
             },
             item = "Faithbringer's Boots of Conviction",
             names = {
@@ -1050,7 +1047,7 @@ return {
           },
           Hands = {
             ids = {
-              32253,
+              70863,
             },
             item = "Faithbringer's Gloves of Conviction",
             names = {
@@ -1061,7 +1058,7 @@ return {
           },
           Head = {
             ids = {
-              32252,
+              70860,
             },
             item = "Faithbringer's Cap of Conviction",
             names = {
@@ -1072,7 +1069,7 @@ return {
           },
           Legs = {
             ids = {
-              32254,
+              70866,
             },
             item = "Faithbringer's Leggings of Conviction",
             names = {
@@ -1158,8 +1155,7 @@ return {
           },
           Wrists = {
             ids = {
-              30771,
-              32255,
+              70862,
             },
             item = "Faithbringer's Wristband of Conviction",
             names = {
@@ -1172,7 +1168,7 @@ return {
         Druid = {
           Arms = {
             ids = {
-              32341,
+              70889,
             },
             item = "Everspring Sleeves of the Tangled Briars",
             names = {
@@ -1195,7 +1191,7 @@ return {
           },
           Chest = {
             ids = {
-              32264,
+              70893,
             },
             item = "Everspring Jerkin of the Tangled Briars",
             names = {
@@ -1270,7 +1266,7 @@ return {
           },
           Feet = {
             ids = {
-              32342,
+              70892,
             },
             item = "Everspring Slippers of the Tangled Briars",
             names = {
@@ -1303,7 +1299,7 @@ return {
           },
           Hands = {
             ids = {
-              32265,
+              70891,
             },
             item = "Everspring Mitts of the Tangled Briars",
             names = {
@@ -1314,7 +1310,7 @@ return {
           },
           Head = {
             ids = {
-              32263,
+              70888,
             },
             item = "Everspring Cap of the Tangled Briars",
             names = {
@@ -1325,7 +1321,7 @@ return {
           },
           Legs = {
             ids = {
-              32266,
+              70894,
             },
             item = "Everspring Pants of the Tangled Briars",
             names = {
@@ -1410,8 +1406,7 @@ return {
           },
           Wrists = {
             ids = {
-              31639,
-              32343,
+              70890,
             },
             item = "Everspring Wristband of the Tangled Briars",
             names = {
@@ -1424,7 +1419,7 @@ return {
         Enchanter = {
           Arms = {
             ids = {
-              32358,
+              70945,
             },
             item = "Mindreaver's Armguards of Coercion",
             names = {
@@ -1447,7 +1442,7 @@ return {
           },
           Chest = {
             ids = {
-              32376,
+              70949,
             },
             item = "Mindreaver's Vest of Coercion",
             names = {
@@ -1511,7 +1506,7 @@ return {
           },
           Feet = {
             ids = {
-              32374,
+              70948,
             },
             item = "Mindreaver's Shoes of Coercion",
             names = {
@@ -1544,7 +1539,7 @@ return {
           },
           Hands = {
             ids = {
-              32360,
+              70947,
             },
             item = "Mindreaver's Handguards of Coercion",
             names = {
@@ -1555,7 +1550,7 @@ return {
           },
           Head = {
             ids = {
-              32375,
+              70944,
             },
             item = "Mindreaver's Skullcap of Coercion",
             names = {
@@ -1566,7 +1561,7 @@ return {
           },
           Legs = {
             ids = {
-              32361,
+              70950,
             },
             item = "Mindreaver's Leggings of Coercion",
             names = {
@@ -1652,8 +1647,7 @@ return {
           },
           Wrists = {
             ids = {
-              31642,
-              32359,
+              70946,
             },
             item = "Mindreaver's Bracer of Coercion",
             names = {
@@ -1666,7 +1660,7 @@ return {
         Magician = {
           Arms = {
             ids = {
-              32354,
+              70938,
             },
             item = "Glyphwielder's Sleeves of the Summoner",
             names = {
@@ -1689,7 +1683,7 @@ return {
           },
           Chest = {
             ids = {
-              32356,
+              70942,
             },
             item = "Glyphwielder's Tunic of the Summoner",
             names = {
@@ -1753,7 +1747,7 @@ return {
           },
           Feet = {
             ids = {
-              32355,
+              70941,
             },
             item = "Glyphwielder's Slippers of the Summoner",
             names = {
@@ -1786,7 +1780,7 @@ return {
           },
           Hands = {
             ids = {
-              32351,
+              70940,
             },
             item = "Glyphwielder's Gloves of the Summoner",
             names = {
@@ -1797,7 +1791,7 @@ return {
           },
           Head = {
             ids = {
-              32352,
+              70937,
             },
             item = "Glyphwielder's Hat of the Summoner",
             names = {
@@ -1808,7 +1802,7 @@ return {
           },
           Legs = {
             ids = {
-              32353,
+              70943,
             },
             item = "Glyphwielder's Leggings of the Summoner",
             names = {
@@ -1894,8 +1888,7 @@ return {
           },
           Wrists = {
             ids = {
-              31641,
-              32357,
+              70939,
             },
             item = "Glyphwielder's Wristband of the Summoner",
             names = {
@@ -1908,7 +1901,7 @@ return {
         Monk = {
           Arms = {
             ids = {
-              31678,
+              70896,
             },
             item = "Fiercehand Sleeves of the Focused",
             names = {
@@ -1950,7 +1943,7 @@ return {
           },
           Chest = {
             ids = {
-              31677,
+              70900,
             },
             item = "Fiercehand Shroud of the Focused",
             names = {
@@ -1993,7 +1986,7 @@ return {
           },
           Feet = {
             ids = {
-              31679,
+              70899,
             },
             item = "Fiercehand Tabis of the Focused",
             names = {
@@ -2026,7 +2019,7 @@ return {
           },
           Hands = {
             ids = {
-              31675,
+              70898,
             },
             item = "Fiercehand Gloves of the Focused",
             names = {
@@ -2037,7 +2030,7 @@ return {
           },
           Head = {
             ids = {
-              31674,
+              70895,
             },
             item = "Fiercehand Cap of the Focused",
             names = {
@@ -2048,7 +2041,7 @@ return {
           },
           Legs = {
             ids = {
-              31676,
+              70901,
             },
             item = "Fiercehand Leggings of the Focused",
             names = {
@@ -2133,8 +2126,7 @@ return {
           },
           Wrists = {
             ids = {
-              29705,
-              31680,
+              70897,
             },
             item = "Fiercehand Wristband of the Focused",
             names = {
@@ -2147,7 +2139,7 @@ return {
         Necromancer = {
           Arms = {
             ids = {
-              32377,
+              70924,
             },
             item = "Blightbringer's Armband of the Grave",
             names = {
@@ -2170,7 +2162,7 @@ return {
           },
           Chest = {
             ids = {
-              32453,
+              70928,
             },
             item = "Blightbringer's Tunic of the Grave",
             names = {
@@ -2256,7 +2248,7 @@ return {
           },
           Feet = {
             ids = {
-              32452,
+              70927,
             },
             item = "Blightbringer's Sandals of the Grave",
             names = {
@@ -2289,7 +2281,7 @@ return {
           },
           Hands = {
             ids = {
-              32380,
+              70926,
             },
             item = "Blightbringer's Handguards of the Grave",
             names = {
@@ -2300,7 +2292,7 @@ return {
           },
           Head = {
             ids = {
-              32379,
+              70923,
             },
             item = "Blightbringer's Cap of the Grave",
             names = {
@@ -2311,7 +2303,7 @@ return {
           },
           Legs = {
             ids = {
-              32381,
+              70929,
             },
             item = "Blightbringer's Pants of the Grave",
             names = {
@@ -2397,8 +2389,7 @@ return {
           },
           Wrists = {
             ids = {
-              31643,
-              32378,
+              70925,
             },
             item = "Blightbringer's Bracer of the Grave",
             names = {
@@ -2410,7 +2401,7 @@ return {
         Paladin = {
           Arms = {
             ids = {
-              32458,
+              70868,
             },
             item = "Dawnseeker's Sleeves of the Defender",
             names = {
@@ -2453,7 +2444,7 @@ return {
           },
           Chest = {
             ids = {
-              32455,
+              70872,
             },
             item = "Dawnseeker's Chestpiece of the Defender",
             names = {
@@ -2528,7 +2519,7 @@ return {
           },
           Feet = {
             ids = {
-              32454,
+              70871,
             },
             item = "Dawnseeker's Boots of the Defender",
             names = {
@@ -2560,7 +2551,7 @@ return {
           },
           Hands = {
             ids = {
-              32457,
+              70870,
             },
             item = "Dawnseeker's Mitts of the Defender",
             names = {
@@ -2571,7 +2562,7 @@ return {
           },
           Head = {
             ids = {
-              32460,
+              70867,
             },
             item = "Dawnseeker's Coif of the Defender",
             names = {
@@ -2582,7 +2573,7 @@ return {
           },
           Legs = {
             ids = {
-              32456,
+              70873,
             },
             item = "Dawnseeker's Leggings of the Defender",
             names = {
@@ -2667,8 +2658,7 @@ return {
           },
           Wrists = {
             ids = {
-              31644,
-              32459,
+              70869,
             },
             item = "Dawnseeker's Wristguard of the Defender",
             names = {
@@ -2681,7 +2671,7 @@ return {
         Ranger = {
           Arms = {
             ids = {
-              32479,
+              70875,
             },
             item = "Bladewhisper Chain Sleeves of Journeys",
             names = {
@@ -2723,7 +2713,7 @@ return {
           },
           Chest = {
             ids = {
-              32480,
+              70879,
             },
             item = "Bladewhisper Chain Vest of Journeys",
             names = {
@@ -2833,7 +2823,7 @@ return {
           },
           Feet = {
             ids = {
-              32475,
+              70878,
             },
             item = "Bladewhisper Chain Boots of Journeys",
             names = {
@@ -2866,7 +2856,7 @@ return {
           },
           Hands = {
             ids = {
-              32477,
+              70877,
             },
             item = "Bladewhisper Chain Gloves of Journeys",
             names = {
@@ -2877,7 +2867,7 @@ return {
           },
           Head = {
             ids = {
-              32476,
+              70874,
             },
             item = "Bladewhisper Chain Cap of Journeys",
             names = {
@@ -2888,7 +2878,7 @@ return {
           },
           Legs = {
             ids = {
-              32478,
+              70880,
             },
             item = "Bladewhisper Chain Legguards of Journeys",
             names = {
@@ -2973,8 +2963,7 @@ return {
           },
           Wrists = {
             ids = {
-              31646,
-              32481,
+              70876,
             },
             item = "Bladewhisper Chain Wristband of Journeys",
             names = {
@@ -2987,7 +2976,7 @@ return {
         Rogue = {
           Arms = {
             ids = {
-              31683,
+              70910,
             },
             item = "Whispering Armguard of Shadows",
             names = {
@@ -3019,7 +3008,7 @@ return {
           },
           Chest = {
             ids = {
-              31682,
+              70914,
             },
             item = "Whispering Tunic of Shadows",
             names = {
@@ -3073,7 +3062,7 @@ return {
           },
           Feet = {
             ids = {
-              31687,
+              70913,
             },
             item = "Whispering Boots of Shadows",
             names = {
@@ -3106,7 +3095,7 @@ return {
           },
           Hands = {
             ids = {
-              31685,
+              70912,
             },
             item = "Whispering Gloves of Shadows",
             names = {
@@ -3117,7 +3106,7 @@ return {
           },
           Head = {
             ids = {
-              31681,
+              70909,
             },
             item = "Whispering Hat of Shadows",
             names = {
@@ -3128,7 +3117,7 @@ return {
           },
           Legs = {
             ids = {
-              31686,
+              70915,
             },
             item = "Whispering Pants of Shadows",
             names = {
@@ -3213,8 +3202,7 @@ return {
           },
           Wrists = {
             ids = {
-              30582,
-              31684,
+              70911,
             },
             item = "Whispering Bracer of Shadows",
             names = {
@@ -3227,7 +3215,7 @@ return {
         ["Shadow Knight"] = {
           Arms = {
             ids = {
-              32461,
+              70882,
             },
             item = "Duskbringer's Plate Armguards of the Hateful",
             names = {
@@ -3270,7 +3258,7 @@ return {
           },
           Chest = {
             ids = {
-              32463,
+              70886,
             },
             item = "Duskbringer's Plate Chestguard of the Hateful",
             names = {
@@ -3345,7 +3333,7 @@ return {
           },
           Feet = {
             ids = {
-              32462,
+              70885,
             },
             item = "Duskbringer's Plate Boots of the Hateful",
             names = {
@@ -3378,7 +3366,7 @@ return {
           },
           Hands = {
             ids = {
-              32464,
+              70884,
             },
             item = "Duskbringer's Plate Gloves of the Hateful",
             names = {
@@ -3389,7 +3377,7 @@ return {
           },
           Head = {
             ids = {
-              32465,
+              70881,
             },
             item = "Duskbringer's Plate Helm of the Hateful",
             names = {
@@ -3400,7 +3388,7 @@ return {
           },
           Legs = {
             ids = {
-              32466,
+              70887,
             },
             item = "Duskbringer's Plate Legguards of the Hateful",
             names = {
@@ -3485,8 +3473,7 @@ return {
           },
           Wrists = {
             ids = {
-              31645,
-              32467,
+              70883,
             },
             item = "Duskbringer's Plate Wristguard of the Hateful",
             names = {
@@ -3499,7 +3486,7 @@ return {
         Shaman = {
           Arms = {
             ids = {
-              32256,
+              70917,
             },
             item = "Ritualchanter's Armguards of the Ancestors",
             names = {
@@ -3522,7 +3509,7 @@ return {
           },
           Chest = {
             ids = {
-              32261,
+              70921,
             },
             item = "Ritualchanter's Tunic of the Ancestors",
             names = {
@@ -3597,7 +3584,7 @@ return {
           },
           Feet = {
             ids = {
-              32257,
+              70920,
             },
             item = "Ritualchanter's Boots of the Ancestors",
             names = {
@@ -3630,7 +3617,7 @@ return {
           },
           Hands = {
             ids = {
-              32260,
+              70919,
             },
             item = "Ritualchanter's Mitts of the Ancestors",
             names = {
@@ -3641,7 +3628,7 @@ return {
           },
           Head = {
             ids = {
-              32258,
+              70916,
             },
             item = "Ritualchanter's Cap of the Ancestors",
             names = {
@@ -3652,7 +3639,7 @@ return {
           },
           Legs = {
             ids = {
-              32259,
+              70922,
             },
             item = "Ritualchanter's Leggings of the Ancestors",
             names = {
@@ -3738,8 +3725,7 @@ return {
           },
           Wrists = {
             ids = {
-              31638,
-              32262,
+              70918,
             },
             item = "Ritualchanter's Wristband of the Ancestors",
             names = {
@@ -3752,7 +3738,7 @@ return {
         Warrior = {
           Arms = {
             ids = {
-              31673,
+              70854,
             },
             item = "Gladiator's Plate Sleeves of War",
             names = {
@@ -3794,7 +3780,7 @@ return {
           },
           Chest = {
             ids = {
-              31669,
+              70858,
             },
             item = "Gladiator's Plate Chestguard of War",
             names = {
@@ -3869,7 +3855,7 @@ return {
           },
           Feet = {
             ids = {
-              31655,
+              70857,
             },
             item = "Gladiator's Plate Boots of War",
             names = {
@@ -3902,7 +3888,7 @@ return {
           },
           Hands = {
             ids = {
-              31670,
+              70856,
             },
             item = "Gladiator's Plate Gloves of War",
             names = {
@@ -3913,7 +3899,7 @@ return {
           },
           Head = {
             ids = {
-              31671,
+              70853,
             },
             item = "Gladiator's Plate Helm of War",
             names = {
@@ -3924,7 +3910,7 @@ return {
           },
           Legs = {
             ids = {
-              31672,
+              70859,
             },
             item = "Gladiator's Plate Legguards of War",
             names = {
@@ -4021,8 +4007,7 @@ return {
           },
           Wrists = {
             ids = {
-              29704,
-              31668,
+              70855,
             },
             item = "Gladiator's Plate Bracer of War",
             names = {
@@ -4035,7 +4020,7 @@ return {
         Wizard = {
           Arms = {
             ids = {
-              32348,
+              70931,
             },
             item = "Academic's Sleeves of the Arcanists",
             names = {
@@ -4058,7 +4043,7 @@ return {
           },
           Chest = {
             ids = {
-              32347,
+              70935,
             },
             item = "Academic's Robe of the Arcanists",
             names = {
@@ -4122,7 +4107,7 @@ return {
           },
           Feet = {
             ids = {
-              32349,
+              70934,
             },
             item = "Academic's Slippers of the Arcanists",
             names = {
@@ -4155,7 +4140,7 @@ return {
           },
           Hands = {
             ids = {
-              32345,
+              70933,
             },
             item = "Academic's Gloves of the Arcanists",
             names = {
@@ -4166,7 +4151,7 @@ return {
           },
           Head = {
             ids = {
-              32344,
+              70930,
             },
             item = "Academic's Cap of the Arcanists",
             names = {
@@ -4177,7 +4162,7 @@ return {
           },
           Legs = {
             ids = {
-              32346,
+              70936,
             },
             item = "Academic's Pants of the Arcanists",
             names = {
@@ -4263,8 +4248,7 @@ return {
           },
           Wrists = {
             ids = {
-              31640,
-              32350,
+              70932,
             },
             item = "Academic's Wristband of the Arcanists",
             names = {
@@ -12742,6 +12726,7 @@ return {
         Bard = {
           Arms = {
             ids = {
+              32489,
             },
             item = "Farseeker's Ascendant Armbands of Harmony",
             names = {
@@ -12784,6 +12769,7 @@ return {
           },
           Chest = {
             ids = {
+              32532,
             },
             item = "Farseeker's Ascendant Chestguard of Harmony",
             names = {
@@ -12834,6 +12820,7 @@ return {
           },
           Feet = {
             ids = {
+              32490,
             },
             item = "Farseeker's Ascendant Boots of Harmony",
             names = {
@@ -12864,6 +12851,7 @@ return {
           },
           Hands = {
             ids = {
+              32533,
             },
             item = "Farseeker's Ascendant Gloves of Harmony",
             names = {
@@ -12874,6 +12862,7 @@ return {
           },
           Head = {
             ids = {
+              33000,
             },
             item = "Farseeker's Ascendant Helm of Harmony",
             names = {
@@ -12884,6 +12873,7 @@ return {
           },
           Legs = {
             ids = {
+              33001,
             },
             item = "Farseeker's Ascendant Legguards of Harmony",
             names = {
@@ -12954,6 +12944,7 @@ return {
           },
           Wrist1 = {
             ids = {
+              33002,
             },
             item = "Farseeker's Ascendant Wristguard of Harmony",
             names = {
@@ -12964,6 +12955,7 @@ return {
           },
           Wrist2 = {
             ids = {
+              31648,
             },
             item = "Farseeker's Eternal Bracer",
             names = {
@@ -12989,6 +12981,7 @@ return {
         Beastlord = {
           Arms = {
             ids = {
+              32487,
             },
             item = "Savagesoul's Ascendant Sleeves of the Wilds",
             names = {
@@ -13039,6 +13032,7 @@ return {
           },
           Chest = {
             ids = {
+              32484,
             },
             item = "Savagesoul's Ascendant Jerkin of the Wilds",
             names = {
@@ -13078,6 +13072,7 @@ return {
           },
           Feet = {
             ids = {
+              32486,
             },
             item = "Savagesoul's Ascendant Sandals of the Wilds",
             names = {
@@ -13107,6 +13102,7 @@ return {
           },
           Hands = {
             ids = {
+              32483,
             },
             item = "Savagesoul's Ascendant Gloves of the Wilds",
             names = {
@@ -13116,6 +13112,7 @@ return {
           },
           Head = {
             ids = {
+              32482,
             },
             item = "Savagesoul's Ascendant Cap of the Wilds",
             names = {
@@ -13125,6 +13122,7 @@ return {
           },
           Legs = {
             ids = {
+              32485,
             },
             item = "Savagesoul's Ascendant Legguards of the Wilds",
             names = {
@@ -13194,6 +13192,7 @@ return {
           },
           Wrist1 = {
             ids = {
+              32488,
             },
             item = "Savagesoul's Ascendant Wristband of the Wilds",
             names = {
@@ -13203,6 +13202,7 @@ return {
           },
           Wrist2 = {
             ids = {
+              31647,
             },
             item = "Savagesoul's Eternal Bracer",
             names = {
@@ -13227,6 +13227,7 @@ return {
         Berserker = {
           Arms = {
             ids = {
+              31710,
             },
             item = "Wrathbringer's Ascendant Sleeves of the Vindicator",
             names = {
@@ -13269,6 +13270,7 @@ return {
           },
           Chest = {
             ids = {
+              31706,
             },
             item = "Wrathbringer's Ascendant Chestguard of the Vindicator",
             names = {
@@ -13309,6 +13311,7 @@ return {
           },
           Feet = {
             ids = {
+              31688,
             },
             item = "Wrathbringer's Ascendant Boots of the Vindicator",
             names = {
@@ -13339,6 +13342,7 @@ return {
           },
           Hands = {
             ids = {
+              31707,
             },
             item = "Wrathbringer's Ascendant Gloves of the Vindicator",
             names = {
@@ -13349,6 +13353,7 @@ return {
           },
           Head = {
             ids = {
+              31708,
             },
             item = "Wrathbringer's Ascendant Helm of the Vindicator",
             names = {
@@ -13359,6 +13364,7 @@ return {
           },
           Legs = {
             ids = {
+              31709,
             },
             item = "Wrathbringer's Ascendant Leggings of the Vindicator",
             names = {
@@ -13429,6 +13435,7 @@ return {
           },
           Wrist1 = {
             ids = {
+              31711,
             },
             item = "Wrathbringer's Ascendant Wristguard of the Vindicator",
             names = {
@@ -13439,6 +13446,7 @@ return {
           },
           Wrist2 = {
             ids = {
+              30583,
             },
             item = "Wrathbringer's Eternal Bracer",
             names = {
@@ -13464,6 +13472,7 @@ return {
         Cleric = {
           Arms = {
             ids = {
+              31712,
             },
             item = "Faithbringer's Ascendant Armguards of Conviction",
             names = {
@@ -13506,6 +13515,7 @@ return {
           },
           Chest = {
             ids = {
+              32251,
             },
             item = "Faithbringer's Ascendant Breastplate of Conviction",
             names = {
@@ -13556,6 +13566,7 @@ return {
           },
           Feet = {
             ids = {
+              32250,
             },
             item = "Faithbringer's Ascendant Boots of Conviction",
             names = {
@@ -13586,6 +13597,7 @@ return {
           },
           Hands = {
             ids = {
+              32253,
             },
             item = "Faithbringer's Ascendant Gloves of Conviction",
             names = {
@@ -13596,6 +13608,7 @@ return {
           },
           Head = {
             ids = {
+              32252,
             },
             item = "Faithbringer's Ascendant Cap of Conviction",
             names = {
@@ -13606,6 +13619,7 @@ return {
           },
           Legs = {
             ids = {
+              32254,
             },
             item = "Faithbringer's Ascendant Leggings of Conviction",
             names = {
@@ -13666,6 +13680,7 @@ return {
           },
           Wrist1 = {
             ids = {
+              32255,
             },
             item = "Faithbringer's Ascendant Wristband of Conviction",
             names = {
@@ -13676,6 +13691,7 @@ return {
           },
           Wrist2 = {
             ids = {
+              30771,
             },
             item = "Faithbringer's Eternal Bracer",
             names = {
@@ -13701,6 +13717,7 @@ return {
         Druid = {
           Arms = {
             ids = {
+              32341,
             },
             item = "Everspring's Ascendant Sleeves of the Tangled Briars",
             names = {
@@ -13752,6 +13769,7 @@ return {
           },
           Chest = {
             ids = {
+              32264,
             },
             item = "Everspring's Ascendant Jerkin of the Tangled Briars",
             names = {
@@ -13792,6 +13810,7 @@ return {
           },
           Feet = {
             ids = {
+              32342,
             },
             item = "Everspring's Ascendant Slippers of the Tangled Briars",
             names = {
@@ -13822,6 +13841,7 @@ return {
           },
           Hands = {
             ids = {
+              32265,
             },
             item = "Everspring's Ascendant Mitts of the Tangled Briars",
             names = {
@@ -13832,6 +13852,7 @@ return {
           },
           Head = {
             ids = {
+              32263,
             },
             item = "Everspring's Ascendant  Cap of the Tangled Briars",
             names = {
@@ -13842,6 +13863,7 @@ return {
           },
           Legs = {
             ids = {
+              32266,
             },
             item = "Everspring's Ascendant Pants of the Tangled Briars",
             names = {
@@ -13913,6 +13935,7 @@ return {
           },
           Wrist1 = {
             ids = {
+              32343,
             },
             item = "Everspring's Ascendant Wristband of the Tangled Briars",
             names = {
@@ -13923,6 +13946,7 @@ return {
           },
           Wrist2 = {
             ids = {
+              31639,
             },
             item = "Everspring's Eternal Bracer",
             names = {
@@ -13948,6 +13972,7 @@ return {
         Enchanter = {
           Arms = {
             ids = {
+              32358,
             },
             item = "Mindreaver's Ascendant Armguards of Coercion",
             names = {
@@ -13999,6 +14024,7 @@ return {
           },
           Chest = {
             ids = {
+              32376,
             },
             item = "Mindreaver's Ascendant Vest of Coercion",
             names = {
@@ -14039,6 +14065,7 @@ return {
           },
           Feet = {
             ids = {
+              32374,
             },
             item = "Mindreaver's Ascendant Shoes of Coercion",
             names = {
@@ -14069,6 +14096,7 @@ return {
           },
           Hands = {
             ids = {
+              32360,
             },
             item = "Mindreaver's Ascendant Handguards of Coercion",
             names = {
@@ -14079,6 +14107,7 @@ return {
           },
           Head = {
             ids = {
+              32375,
             },
             item = "Mindreaver's Ascendant Skullcap of Coercion",
             names = {
@@ -14089,6 +14118,7 @@ return {
           },
           Legs = {
             ids = {
+              32361,
             },
             item = "Mindreaver's Ascendant Leggings of Coercion",
             names = {
@@ -14159,6 +14189,7 @@ return {
           },
           Wrist1 = {
             ids = {
+              32359,
             },
             item = "Mindreaver's Ascendant Bracer of Coercion",
             names = {
@@ -14169,6 +14200,7 @@ return {
           },
           Wrist2 = {
             ids = {
+              31642,
             },
             item = "Mindreaver's Eternal Bracer",
             names = {
@@ -14194,6 +14226,7 @@ return {
         Magician = {
           Arms = {
             ids = {
+              32354,
             },
             item = "Glyphwielder's Ascendant Sleeves of the Summoner",
             names = {
@@ -14245,6 +14278,7 @@ return {
           },
           Chest = {
             ids = {
+              32356,
             },
             item = "Glyphwielder's Ascendant Tunic of the Summoner",
             names = {
@@ -14285,6 +14319,7 @@ return {
           },
           Feet = {
             ids = {
+              32355,
             },
             item = "Glyphwielder's Ascendant Slippers of the Summoner",
             names = {
@@ -14315,6 +14350,7 @@ return {
           },
           Hands = {
             ids = {
+              32351,
             },
             item = "Glyphwielder's Ascendant Gloves of the Summoner",
             names = {
@@ -14325,6 +14361,7 @@ return {
           },
           Head = {
             ids = {
+              32352,
             },
             item = "Glyphwielder's Ascendant Hat of the Summoner",
             names = {
@@ -14335,6 +14372,7 @@ return {
           },
           Legs = {
             ids = {
+              32353,
             },
             item = "Glyphwielder's Ascendant Leggings of the Summoner",
             names = {
@@ -14405,6 +14443,7 @@ return {
           },
           Wrist1 = {
             ids = {
+              32357,
             },
             item = "Glyphwielder's Ascendant Wristband of the Summoner",
             names = {
@@ -14415,6 +14454,7 @@ return {
           },
           Wrist2 = {
             ids = {
+              31641,
             },
             item = "Glyphwielder's Eternal Bracer",
             names = {
@@ -14440,6 +14480,8 @@ return {
         Monk = {
           Arms = {
             ids = {
+              31678,
+              82651,
             },
             item = "Fiercehand's Ascendant Sleeves of the Focused",
             names = {
@@ -14482,6 +14524,8 @@ return {
           },
           Chest = {
             ids = {
+              31677,
+              82650,
             },
             item = "Fiercehand's Ascendant Shroud of the Focused",
             names = {
@@ -14522,6 +14566,8 @@ return {
           },
           Feet = {
             ids = {
+              31679,
+              82652,
             },
             item = "Fiercehand's Ascendant Tabis of the Focused",
             names = {
@@ -14552,6 +14598,8 @@ return {
           },
           Hands = {
             ids = {
+              31675,
+              82648,
             },
             item = "Fiercehand's Ascendant Gloves of the Focused",
             names = {
@@ -14562,6 +14610,8 @@ return {
           },
           Head = {
             ids = {
+              31674,
+              82647,
             },
             item = "Fiercehand's Ascendant Cap of the Focused",
             names = {
@@ -14572,6 +14622,8 @@ return {
           },
           Legs = {
             ids = {
+              31676,
+              82649,
             },
             item = "Fiercehand's Ascendant Leggings of the Focused",
             names = {
@@ -14642,6 +14694,8 @@ return {
           },
           Wrist1 = {
             ids = {
+              31680,
+              82653,
             },
             item = "Fiercehand's Ascendant Wristband of the Focused",
             names = {
@@ -14652,6 +14706,7 @@ return {
           },
           Wrist2 = {
             ids = {
+              29705,
             },
             item = "Fiercehand's Eternal Bracer",
             names = {
@@ -14677,6 +14732,7 @@ return {
         Necromancer = {
           Arms = {
             ids = {
+              32377,
             },
             item = "Blightbringer's Ascendant Armband of the Grave",
             names = {
@@ -14728,6 +14784,7 @@ return {
           },
           Chest = {
             ids = {
+              32453,
             },
             item = "Blightbringer's Ascendant Tunic of the Grave",
             names = {
@@ -14768,6 +14825,7 @@ return {
           },
           Feet = {
             ids = {
+              32452,
             },
             item = "Blightbringer's Ascendant Sandals of the Grave",
             names = {
@@ -14798,6 +14856,7 @@ return {
           },
           Hands = {
             ids = {
+              32380,
             },
             item = "Blightbringer's Ascendant Handguards of the Grave",
             names = {
@@ -14808,6 +14867,7 @@ return {
           },
           Head = {
             ids = {
+              32379,
             },
             item = "Blightbringer's Ascendant Cap of the Grave",
             names = {
@@ -14818,6 +14878,7 @@ return {
           },
           Legs = {
             ids = {
+              32381,
             },
             item = "Blightbringer's Ascendant Pants of the Grave",
             names = {
@@ -14888,6 +14949,7 @@ return {
           },
           Wrist1 = {
             ids = {
+              32378,
             },
             item = "Blightbringer's Ascendant Bracer of the Grave",
             names = {
@@ -14897,6 +14959,7 @@ return {
           },
           Wrist2 = {
             ids = {
+              31643,
             },
             item = "Blightbringer's Eternal Bracer",
             names = {
@@ -14922,6 +14985,7 @@ return {
         Paladin = {
           Arms = {
             ids = {
+              32458,
             },
             item = "Dawnseeker's Ascendant Sleeves of the Defender",
             names = {
@@ -14964,6 +15028,7 @@ return {
           },
           Chest = {
             ids = {
+              32455,
             },
             item = "Dawnseeker's Ascendant Chestpiece of the Defender",
             names = {
@@ -15014,6 +15079,7 @@ return {
           },
           Feet = {
             ids = {
+              32454,
             },
             item = "Dawnseeker's Ascendant Boots of the Defender",
             names = {
@@ -15044,6 +15110,7 @@ return {
           },
           Hands = {
             ids = {
+              32457,
             },
             item = "Dawnseeker's Ascendant Mitts of the Defender",
             names = {
@@ -15054,6 +15121,7 @@ return {
           },
           Head = {
             ids = {
+              32460,
             },
             item = "Dawnseeker's Ascendant Coif of the Defender",
             names = {
@@ -15064,6 +15132,7 @@ return {
           },
           Legs = {
             ids = {
+              32456,
             },
             item = "Dawnseeker's Ascendant Leggings of the Defender",
             names = {
@@ -15144,6 +15213,7 @@ return {
           },
           Wrist1 = {
             ids = {
+              32459,
             },
             item = "Dawnseeker's Ascendant Wristguard of the Defender",
             names = {
@@ -15154,6 +15224,7 @@ return {
           },
           Wrist2 = {
             ids = {
+              31644,
             },
             item = "Dawnseeker's Eternal Bracer",
             names = {
@@ -15179,6 +15250,7 @@ return {
         Ranger = {
           Arms = {
             ids = {
+              32479,
             },
             item = "Deadeye's Ascendant Sleeves of Journeys",
             names = {
@@ -15221,6 +15293,7 @@ return {
           },
           Chest = {
             ids = {
+              32480,
             },
             item = "Deadeye's Ascendant Vest of Journeys",
             names = {
@@ -15261,6 +15334,7 @@ return {
           },
           Feet = {
             ids = {
+              32475,
             },
             item = "Deadeye's Ascendant Boots of Journeys",
             names = {
@@ -15291,6 +15365,7 @@ return {
           },
           Hands = {
             ids = {
+              32477,
             },
             item = "Deadeye's Ascendant Gloves of Journeys",
             names = {
@@ -15301,6 +15376,7 @@ return {
           },
           Head = {
             ids = {
+              32476,
             },
             item = "Deadeye's Ascendant Cap of Journeys",
             names = {
@@ -15311,6 +15387,7 @@ return {
           },
           Legs = {
             ids = {
+              32478,
             },
             item = "Deadeye's Ascendant Legguards of Journeys",
             names = {
@@ -15392,6 +15469,7 @@ return {
           },
           Wrist1 = {
             ids = {
+              32481,
             },
             item = "Deadeye's Ascendant Wristband of Journeys",
             names = {
@@ -15402,6 +15480,7 @@ return {
           },
           Wrist2 = {
             ids = {
+              31646,
             },
             item = "Deadeye's Eternal Bracer",
             names = {
@@ -15427,6 +15506,7 @@ return {
         Rogue = {
           Arms = {
             ids = {
+              31683,
             },
             item = "Whisperer's Ascendant Armguard of Shadows",
             names = {
@@ -15469,6 +15549,7 @@ return {
           },
           Chest = {
             ids = {
+              31682,
             },
             item = "Whisperer's Ascendant Tunic of Shadows",
             names = {
@@ -15509,6 +15590,7 @@ return {
           },
           Feet = {
             ids = {
+              31687,
             },
             item = "Whisperer's Ascendant Boots of Shadows",
             names = {
@@ -15539,6 +15621,7 @@ return {
           },
           Hands = {
             ids = {
+              31685,
             },
             item = "Whisperer's Ascendant Gloves of Shadows",
             names = {
@@ -15549,6 +15632,7 @@ return {
           },
           Head = {
             ids = {
+              31681,
             },
             item = "Whisperer's Ascendant Hat of Shadows",
             names = {
@@ -15559,6 +15643,7 @@ return {
           },
           Legs = {
             ids = {
+              31686,
             },
             item = "Whisperer's Ascendant Pants of Shadows",
             names = {
@@ -15629,6 +15714,7 @@ return {
           },
           Wrist1 = {
             ids = {
+              31684,
             },
             item = "Whisperer's Ascendant Bracer of Shadows",
             names = {
@@ -15639,6 +15725,7 @@ return {
           },
           Wrist2 = {
             ids = {
+              30582,
             },
             item = "Whisperer's Eternal Bracer",
             names = {
@@ -15912,6 +15999,7 @@ return {
           },
           Wrist2 = {
             ids = {
+              31645,
             },
             item = "Duskbringer's Eternal Bracer",
             names = {
@@ -15937,6 +16025,7 @@ return {
         Shaman = {
           Arms = {
             ids = {
+              32256,
             },
             item = "Ritualchanter's Ascendant Armguards of the Ancestors",
             names = {
@@ -15988,6 +16077,7 @@ return {
           },
           Chest = {
             ids = {
+              32261,
             },
             item = "Ritualchanter's Ascendant Tunic of the Ancestors",
             names = {
@@ -16028,6 +16118,7 @@ return {
           },
           Feet = {
             ids = {
+              32257,
             },
             item = "Ritualchanter's Ascendant Boots of the Ancestors",
             names = {
@@ -16058,6 +16149,7 @@ return {
           },
           Hands = {
             ids = {
+              32260,
             },
             item = "Ritualchanter's Ascendant Mitts of the Ancestors",
             names = {
@@ -16068,6 +16160,7 @@ return {
           },
           Head = {
             ids = {
+              32258,
             },
             item = "Ritualchanter's Ascendant Cap of the Ancestors",
             names = {
@@ -16078,6 +16171,7 @@ return {
           },
           Legs = {
             ids = {
+              32259,
             },
             item = "Ritualchanter's Ascendant Leggings of the Ancestors",
             names = {
@@ -16149,6 +16243,7 @@ return {
           },
           Wrist1 = {
             ids = {
+              32262,
             },
             item = "Ritualchanter's Ascendant Wristband of the Ancestors",
             names = {
@@ -16159,6 +16254,7 @@ return {
           },
           Wrist2 = {
             ids = {
+              31638,
             },
             item = "Ritualchanter's Eternal Bracer",
             names = {
@@ -16184,6 +16280,7 @@ return {
         Warrior = {
           Arms = {
             ids = {
+              31673,
             },
             item = "Gladiator's Ascendant Sleeves of War",
             names = {
@@ -16226,6 +16323,7 @@ return {
           },
           Chest = {
             ids = {
+              31669,
             },
             item = "Gladiator's Ascendant Chestguard of War",
             names = {
@@ -16276,6 +16374,7 @@ return {
           },
           Feet = {
             ids = {
+              31655,
             },
             item = "Gladiator's Ascendant Boots of War",
             names = {
@@ -16306,6 +16405,7 @@ return {
           },
           Hands = {
             ids = {
+              31670,
             },
             item = "Gladiator's Ascendant Gloves of War",
             names = {
@@ -16316,6 +16416,7 @@ return {
           },
           Head = {
             ids = {
+              31671,
             },
             item = "Gladiator's Ascendant Helm of War",
             names = {
@@ -16326,6 +16427,7 @@ return {
           },
           Legs = {
             ids = {
+              31672,
             },
             item = "Gladiator's Ascendant Legguards of War",
             names = {
@@ -16396,6 +16498,7 @@ return {
           },
           Wrist1 = {
             ids = {
+              31668,
             },
             item = "Gladiator's Ascendant Bracer of War",
             names = {
@@ -16406,6 +16509,7 @@ return {
           },
           Wrist2 = {
             ids = {
+              29704,
             },
             item = "Gladiator's Eternal Bracer",
             names = {
@@ -16431,6 +16535,7 @@ return {
         Wizard = {
           Arms = {
             ids = {
+              32348,
             },
             item = "Academic's Ascendant Sleeves of the Arcanists",
             names = {
@@ -16473,6 +16578,7 @@ return {
           },
           Chest = {
             ids = {
+              32347,
             },
             item = "Academic's Ascendant Robe of the Arcanists",
             names = {
@@ -16513,6 +16619,7 @@ return {
           },
           Feet = {
             ids = {
+              32349,
             },
             item = "Academic's Ascendant Slippers of the Arcanists",
             names = {
@@ -16543,6 +16650,7 @@ return {
           },
           Hands = {
             ids = {
+              32345,
             },
             item = "Academic's Ascendant Gloves of the Arcanists",
             names = {
@@ -16553,6 +16661,7 @@ return {
           },
           Head = {
             ids = {
+              32344,
             },
             item = "Academic's Ascendant Cap of the Arcanists",
             names = {
@@ -16563,6 +16672,7 @@ return {
           },
           Legs = {
             ids = {
+              32346,
             },
             item = "Academic's Ascendant Pants of the Arcanists",
             names = {
@@ -16633,6 +16743,7 @@ return {
           },
           Wrist1 = {
             ids = {
+              32350,
             },
             item = "Academic's Ascendant Wristband of the Arcanists",
             names = {
@@ -16643,6 +16754,7 @@ return {
           },
           Wrist2 = {
             ids = {
+              31640,
             },
             item = "Academic's Eternal Bracer",
             names = {
@@ -33368,6 +33480,7 @@ return {
         Bard = {
           Arms = {
             ids = {
+              36017,
             },
             item = "Forsaken Singing Steel Vambraces",
             names = {
@@ -33377,6 +33490,7 @@ return {
           },
           Chest = {
             ids = {
+              36033,
             },
             item = "Forsaken Singing Steel Breastplate",
             names = {
@@ -33440,6 +33554,7 @@ return {
           },
           Feet = {
             ids = {
+              39603,
             },
             item = "Forsaken Singing Steel Boots",
             names = {
@@ -33449,6 +33564,7 @@ return {
           },
           Hands = {
             ids = {
+              39628,
             },
             item = "Forsaken Singing Steel Gauntlets",
             names = {
@@ -33458,6 +33574,7 @@ return {
           },
           Head = {
             ids = {
+              39596,
             },
             item = "Forsaken Singing Steel Helm",
             names = {
@@ -33467,6 +33584,7 @@ return {
           },
           Legs = {
             ids = {
+              40388,
             },
             item = "Forsaken Singing Steel Greaves",
             names = {
@@ -33548,6 +33666,7 @@ return {
           },
           Wrist = {
             ids = {
+              33210,
             },
             item = "Forsaken Singing Steel Bracer",
             names = {
@@ -33559,6 +33678,7 @@ return {
         Beastlord = {
           Arms = {
             ids = {
+              36016,
             },
             item = "Forsaken Wild Lord's Sleeves",
             names = {
@@ -33568,6 +33688,7 @@ return {
           },
           Chest = {
             ids = {
+              36032,
             },
             item = "Forsaken Wild Lord's Tunic",
             names = {
@@ -33622,6 +33743,7 @@ return {
           },
           Feet = {
             ids = {
+              39608,
             },
             item = "Forsaken Wild Lord's Sandals",
             names = {
@@ -33631,6 +33753,7 @@ return {
           },
           Hands = {
             ids = {
+              39627,
             },
             item = "Forsaken Wild Lord's Gauntlets",
             names = {
@@ -33640,6 +33763,7 @@ return {
           },
           Head = {
             ids = {
+              39595,
             },
             item = "Forsaken Wild Lord's Crown",
             names = {
@@ -33649,6 +33773,7 @@ return {
           },
           Legs = {
             ids = {
+              40387,
             },
             item = "Forsaken Wild Lord's Trousers",
             names = {
@@ -33766,6 +33891,7 @@ return {
           },
           Wrist = {
             ids = {
+              33209,
             },
             item = "Forsaken Wild Lord's Bracer",
             names = {
@@ -33777,6 +33903,7 @@ return {
         Berserker = {
           Arms = {
             ids = {
+              33214,
             },
             item = "Forsaken Sleeves of Wrath",
             names = {
@@ -33786,6 +33913,7 @@ return {
           },
           Chest = {
             ids = {
+              36021,
             },
             item = "Forsaken Tunic of Wrath",
             names = {
@@ -33840,6 +33968,7 @@ return {
           },
           Feet = {
             ids = {
+              39602,
             },
             item = "Forsaken Boots of Wrath",
             names = {
@@ -33849,6 +33978,7 @@ return {
           },
           Hands = {
             ids = {
+              39616,
             },
             item = "Forsaken Gloves of Wrath",
             names = {
@@ -33858,6 +33988,7 @@ return {
           },
           Head = {
             ids = {
+              39087,
             },
             item = "Forsaken Coif of Wrath",
             names = {
@@ -33867,6 +33998,7 @@ return {
           },
           Legs = {
             ids = {
+              40376,
             },
             item = "Forsaken Leggings of Wrath",
             names = {
@@ -33948,6 +34080,7 @@ return {
           },
           Wrist = {
             ids = {
+              33198,
             },
             item = "Forsaken Bracer of Wrath",
             names = {
@@ -33959,6 +34092,7 @@ return {
         Cleric = {
           Arms = {
             ids = {
+              33215,
             },
             item = "Forsaken Donal's Vambraces of Mourning",
             names = {
@@ -33968,6 +34102,7 @@ return {
           },
           Chest = {
             ids = {
+              36022,
             },
             item = "Forsaken Donal's Chestplate of Mourning",
             names = {
@@ -34022,6 +34157,7 @@ return {
           },
           Feet = {
             ids = {
+              39612,
             },
             item = "Forsaken Donal's Boots of Mourning",
             names = {
@@ -34031,6 +34167,7 @@ return {
           },
           Hands = {
             ids = {
+              39621,
             },
             item = "Forsaken Donal's Gauntlets of Mourning",
             names = {
@@ -34040,6 +34177,7 @@ return {
           },
           Head = {
             ids = {
+              39088,
             },
             item = "Forsaken Donal's Helm of Mourning",
             names = {
@@ -34049,6 +34187,7 @@ return {
           },
           Legs = {
             ids = {
+              40377,
             },
             item = "Forsaken Donal's Leggings of Mourning",
             names = {
@@ -34112,6 +34251,7 @@ return {
           },
           Wrist = {
             ids = {
+              33199,
             },
             item = "Forsaken Donal's Bracer of Mourning",
             names = {
@@ -34123,6 +34263,7 @@ return {
         Druid = {
           Arms = {
             ids = {
+              33217,
             },
             item = "Forsaken Elder Spiritist's Vambraces",
             names = {
@@ -34132,6 +34273,7 @@ return {
           },
           Chest = {
             ids = {
+              36024,
             },
             item = "Forsaken Elder Spiritist's Breastplate",
             names = {
@@ -34186,6 +34328,7 @@ return {
           },
           Feet = {
             ids = {
+              39605,
             },
             item = "Forsaken Elder Spiritist's Boots",
             names = {
@@ -34195,6 +34338,7 @@ return {
           },
           Hands = {
             ids = {
+              39623,
             },
             item = "Forsaken Elder Spiritist's Gauntlets",
             names = {
@@ -34204,6 +34348,7 @@ return {
           },
           Head = {
             ids = {
+              39090,
             },
             item = "Forsaken Elder Spiritist's Helm",
             names = {
@@ -34213,6 +34358,7 @@ return {
           },
           Legs = {
             ids = {
+              40379,
             },
             item = "Forsaken Elder Spiritist's Greaves",
             names = {
@@ -34276,6 +34422,7 @@ return {
           },
           Wrist = {
             ids = {
+              33201,
             },
             item = "Forsaken Elder Spiritist's Bracer",
             names = {
@@ -34287,6 +34434,7 @@ return {
         Enchanter = {
           Arms = {
             ids = {
+              33220,
             },
             item = "Forsaken Illusionist's Sleeves",
             names = {
@@ -34296,6 +34444,7 @@ return {
           },
           Chest = {
             ids = {
+              36027,
             },
             item = "Forsaken Illusionist's Blouse",
             names = {
@@ -34350,6 +34499,7 @@ return {
           },
           Feet = {
             ids = {
+              39611,
             },
             item = "Forsaken Illusionist's Shoes",
             names = {
@@ -34359,6 +34509,7 @@ return {
           },
           Hands = {
             ids = {
+              39619,
             },
             item = "Forsaken Illusionist's Gloves",
             names = {
@@ -34368,6 +34519,7 @@ return {
           },
           Head = {
             ids = {
+              39590,
             },
             item = "Forsaken Illusionist's Cap",
             names = {
@@ -34377,6 +34529,7 @@ return {
           },
           Legs = {
             ids = {
+              40382,
             },
             item = "Forsaken Illusionist's Trousers",
             names = {
@@ -34431,6 +34584,7 @@ return {
           },
           Wrist = {
             ids = {
+              33204,
             },
             item = "Forsaken Illusionist's Bracelet",
             names = {
@@ -34442,6 +34596,7 @@ return {
         Magician = {
           Arms = {
             ids = {
+              33219,
             },
             item = "Forsaken Conjurer's Sleeves",
             names = {
@@ -34451,6 +34606,7 @@ return {
           },
           Chest = {
             ids = {
+              36026,
             },
             item = "Forsaken Conjurer's Blouse",
             names = {
@@ -34505,6 +34661,7 @@ return {
           },
           Feet = {
             ids = {
+              39606,
             },
             item = "Forsaken Conjurer's Shoes",
             names = {
@@ -34514,6 +34671,7 @@ return {
           },
           Hands = {
             ids = {
+              39618,
             },
             item = "Forsaken Conjurer's Gloves",
             names = {
@@ -34523,6 +34681,7 @@ return {
           },
           Head = {
             ids = {
+              39589,
             },
             item = "Forsaken Conjurer's Cap",
             names = {
@@ -34532,6 +34691,7 @@ return {
           },
           Legs = {
             ids = {
+              40381,
             },
             item = "Forsaken Conjurer's Trousers",
             names = {
@@ -34586,6 +34746,7 @@ return {
           },
           Wrist = {
             ids = {
+              33203,
             },
             item = "Forsaken Conjurer's Bracelet",
             names = {
@@ -34597,6 +34758,7 @@ return {
         Monk = {
           Arms = {
             ids = {
+              33212,
             },
             item = "Forsaken Martialist Sleeves",
             names = {
@@ -34606,6 +34768,7 @@ return {
           },
           Chest = {
             ids = {
+              36019,
             },
             item = "Forsaken Martialist Chestguard",
             names = {
@@ -34660,6 +34823,7 @@ return {
           },
           Feet = {
             ids = {
+              39600,
             },
             item = "Forsaken Martialist Sandals",
             names = {
@@ -34669,6 +34833,7 @@ return {
           },
           Hands = {
             ids = {
+              39614,
             },
             item = "Forsaken Martialist Gloves",
             names = {
@@ -34678,6 +34843,7 @@ return {
           },
           Head = {
             ids = {
+              39085,
             },
             item = "Forsaken Martialist Cap",
             names = {
@@ -34687,6 +34853,7 @@ return {
           },
           Legs = {
             ids = {
+              40374,
             },
             item = "Forsaken Martialist Pants",
             names = {
@@ -34768,6 +34935,7 @@ return {
           },
           Wrist = {
             ids = {
+              33196,
             },
             item = "Forsaken Martialist Wristguard",
             names = {
@@ -34779,6 +34947,7 @@ return {
         Necromancer = {
           Arms = {
             ids = {
+              33221,
             },
             item = "Forsaken Graverobber's Sleeves",
             names = {
@@ -34788,6 +34957,7 @@ return {
           },
           Chest = {
             ids = {
+              36028,
             },
             item = "Forsaken Graverobber's Blouse",
             names = {
@@ -34842,6 +35012,7 @@ return {
           },
           Feet = {
             ids = {
+              39607,
             },
             item = "Forsaken Graverobber's Shoes",
             names = {
@@ -34851,6 +35022,7 @@ return {
           },
           Hands = {
             ids = {
+              39620,
             },
             item = "Forsaken Graverobber's Gloves",
             names = {
@@ -34860,6 +35032,7 @@ return {
           },
           Head = {
             ids = {
+              39591,
             },
             item = "Forsaken Graverobber's Cap",
             names = {
@@ -34869,6 +35042,7 @@ return {
           },
           Legs = {
             ids = {
+              40383,
             },
             item = "Forsaken Graverobber's Trousers",
             names = {
@@ -34923,6 +35097,7 @@ return {
           },
           Wrist = {
             ids = {
+              33205,
             },
             item = "Forsaken Graverobber's Bracelet",
             names = {
@@ -34934,6 +35109,7 @@ return {
         Paladin = {
           Arms = {
             ids = {
+              36014,
             },
             item = "Forsaken Deepwater Vambraces",
             names = {
@@ -34943,6 +35119,7 @@ return {
           },
           Chest = {
             ids = {
+              36030,
             },
             item = "Forsaken Deepwater Breastplate",
             names = {
@@ -34997,6 +35174,7 @@ return {
           },
           Feet = {
             ids = {
+              39599,
             },
             item = "Forsaken Deepwater Boots",
             names = {
@@ -35006,6 +35184,7 @@ return {
           },
           Hands = {
             ids = {
+              39625,
             },
             item = "Forsaken Deepwater Gauntlets",
             names = {
@@ -35015,6 +35194,7 @@ return {
           },
           Head = {
             ids = {
+              39593,
             },
             item = "Forsaken Deepwater Helm",
             names = {
@@ -35024,6 +35204,7 @@ return {
           },
           Legs = {
             ids = {
+              40385,
             },
             item = "Forsaken Deepwater Greaves",
             names = {
@@ -35141,6 +35322,7 @@ return {
           },
           Wrist = {
             ids = {
+              33207,
             },
             item = "Forsaken Deepwater Bracer",
             names = {
@@ -35152,6 +35334,7 @@ return {
         Ranger = {
           Arms = {
             ids = {
+              36015,
             },
             item = "Forsaken Tolan's Darkwood Vambraces",
             names = {
@@ -35161,6 +35344,7 @@ return {
           },
           Chest = {
             ids = {
+              36031,
             },
             item = "Forsaken Tolan's Darkwood Breastplate",
             names = {
@@ -35215,6 +35399,7 @@ return {
           },
           Feet = {
             ids = {
+              39609,
             },
             item = "Forsaken Tolan's Darkwood Boots",
             names = {
@@ -35224,6 +35409,7 @@ return {
           },
           Hands = {
             ids = {
+              39626,
             },
             item = "Forsaken Tolan's Darkwood Gauntlets",
             names = {
@@ -35233,6 +35419,7 @@ return {
           },
           Head = {
             ids = {
+              39594,
             },
             item = "Forsaken Tolan's Darkwood Helm",
             names = {
@@ -35242,6 +35429,7 @@ return {
           },
           Legs = {
             ids = {
+              40386,
             },
             item = "Forsaken Tolan's Darkwood Greaves",
             names = {
@@ -35359,6 +35547,7 @@ return {
           },
           Wrist = {
             ids = {
+              33208,
             },
             item = "Forsaken Tolan's Darkwood Bracer",
             names = {
@@ -35370,6 +35559,7 @@ return {
         Rogue = {
           Arms = {
             ids = {
+              33213,
             },
             item = "Forsaken Mrylokar's Vambraces",
             names = {
@@ -35379,6 +35569,7 @@ return {
           },
           Chest = {
             ids = {
+              36020,
             },
             item = "Forsaken Mrylokar's Breastplate",
             names = {
@@ -35433,6 +35624,7 @@ return {
           },
           Feet = {
             ids = {
+              39601,
             },
             item = "Forsaken Mrylokar's Boots",
             names = {
@@ -35442,6 +35634,7 @@ return {
           },
           Hands = {
             ids = {
+              39615,
             },
             item = "Forsaken Mrylokar's Gauntlets",
             names = {
@@ -35451,6 +35644,7 @@ return {
           },
           Head = {
             ids = {
+              39086,
             },
             item = "Forsaken Mrylokar's Helm",
             names = {
@@ -35460,6 +35654,7 @@ return {
           },
           Legs = {
             ids = {
+              40375,
             },
             item = "Forsaken Mrylokar's Greaves",
             names = {
@@ -35541,6 +35736,7 @@ return {
           },
           Wrist = {
             ids = {
+              33197,
             },
             item = "Forsaken Mrylokar's Bracer",
             names = {
@@ -35552,6 +35748,7 @@ return {
         ["Shadow Knight"] = {
           Arms = {
             ids = {
+              36013,
             },
             item = "Forsaken Blood Ember Vambraces",
             names = {
@@ -35561,6 +35758,7 @@ return {
           },
           Chest = {
             ids = {
+              36029,
             },
             item = "Forsaken Blood Ember Breastplate",
             names = {
@@ -35615,6 +35813,7 @@ return {
           },
           Feet = {
             ids = {
+              39598,
             },
             item = "Forsaken Blood Ember Boots",
             names = {
@@ -35624,6 +35823,7 @@ return {
           },
           Hands = {
             ids = {
+              39624,
             },
             item = "Forsaken Blood Ember Gauntlets",
             names = {
@@ -35633,6 +35833,7 @@ return {
           },
           Head = {
             ids = {
+              39592,
             },
             item = "Forsaken Blood Ember Helm",
             names = {
@@ -35642,6 +35843,7 @@ return {
           },
           Legs = {
             ids = {
+              40384,
             },
             item = "Forsaken Blood Ember Greaves",
             names = {
@@ -35759,6 +35961,7 @@ return {
           },
           Wrist = {
             ids = {
+              33206,
             },
             item = "Forsaken Blood Ember Bracer",
             names = {
@@ -35770,6 +35973,7 @@ return {
         Shaman = {
           Arms = {
             ids = {
+              33216,
             },
             item = "Forsaken Jaundiced Bone Vambraces",
             names = {
@@ -35779,6 +35983,7 @@ return {
           },
           Chest = {
             ids = {
+              36023,
             },
             item = "Forsaken Jaundiced Bone Breastplate",
             names = {
@@ -35833,6 +36038,7 @@ return {
           },
           Feet = {
             ids = {
+              39610,
             },
             item = "Forsaken Jaundiced Bone Boots",
             names = {
@@ -35842,6 +36048,7 @@ return {
           },
           Hands = {
             ids = {
+              39622,
             },
             item = "Forsaken Jaundiced Bone Gauntlets",
             names = {
@@ -35851,6 +36058,7 @@ return {
           },
           Head = {
             ids = {
+              39089,
             },
             item = "Forsaken Jaundiced Bone Helm",
             names = {
@@ -35860,6 +36068,7 @@ return {
           },
           Legs = {
             ids = {
+              40378,
             },
             item = "Forsaken Jaundiced Bone Greaves",
             names = {
@@ -35923,6 +36132,7 @@ return {
           },
           Wrist = {
             ids = {
+              33200,
             },
             item = "Forsaken Jaundiced Bone Bracer",
             names = {
@@ -35934,6 +36144,7 @@ return {
         Warrior = {
           Arms = {
             ids = {
+              33211,
             },
             item = "Forsaken Cobalt Vambraces",
             names = {
@@ -35943,6 +36154,7 @@ return {
           },
           Chest = {
             ids = {
+              36018,
             },
             item = "Forsaken Cobalt Breastplate",
             names = {
@@ -35997,6 +36209,7 @@ return {
           },
           Feet = {
             ids = {
+              39597,
             },
             item = "Forsaken Cobalt Boots",
             names = {
@@ -36006,6 +36219,7 @@ return {
           },
           Hands = {
             ids = {
+              39613,
             },
             item = "Forsaken Cobalt Gauntlets",
             names = {
@@ -36015,6 +36229,7 @@ return {
           },
           Head = {
             ids = {
+              39084,
             },
             item = "Forsaken Cobalt Helm",
             names = {
@@ -36024,6 +36239,7 @@ return {
           },
           Legs = {
             ids = {
+              39675,
             },
             item = "Forsaken Cobalt Greaves",
             names = {
@@ -36105,6 +36321,7 @@ return {
           },
           Wrist = {
             ids = {
+              33195,
             },
             item = "Forsaken Cobalt Bracer",
             names = {
@@ -36116,6 +36333,7 @@ return {
         Wizard = {
           Arms = {
             ids = {
+              33218,
             },
             item = "Forsaken Sorcerer's Sleeves",
             names = {
@@ -36125,6 +36343,7 @@ return {
           },
           Chest = {
             ids = {
+              36025,
             },
             item = "Forsaken Sorcerer's Blouse",
             names = {
@@ -36179,6 +36398,7 @@ return {
           },
           Feet = {
             ids = {
+              39604,
             },
             item = "Forsaken Sorcerer's Shoes",
             names = {
@@ -36188,6 +36408,7 @@ return {
           },
           Hands = {
             ids = {
+              39617,
             },
             item = "Forsaken Sorcerer's Gloves",
             names = {
@@ -36197,6 +36418,7 @@ return {
           },
           Head = {
             ids = {
+              39588,
             },
             item = "Forsaken Sorcerer's Cap",
             names = {
@@ -36206,6 +36428,7 @@ return {
           },
           Legs = {
             ids = {
+              40380,
             },
             item = "Forsaken Sorcerer's Trousers",
             names = {
@@ -36260,6 +36483,7 @@ return {
           },
           Wrist = {
             ids = {
+              33202,
             },
             item = "Forsaken Sorcerer's Bracelet",
             names = {

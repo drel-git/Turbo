@@ -1056,7 +1056,8 @@ local function build_snap(depth, opts)
                     end
                 end
             end)
-            diag.time("snapshot.inventory.bags", function()
+            local time_bags = diag.time_pair or diag.time
+            time_bags("snapshot.inventory.bags", function()
                 for inv = 23, 34 do
                     local pack = mq.TLO.Me.Inventory(inv)
                     if pack and pack() then

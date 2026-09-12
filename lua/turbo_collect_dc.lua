@@ -277,11 +277,25 @@ local function spawn_exists(name)
     return safe_num(function() return mq.TLO.Spawn('pc ' .. name).ID() end) > 0
 end
 
+local function parse_sender_list(text)
+    local out_list, seen = {}, {}
+    for raw in tostring(text or ''):gmatch('[^,;|]+') do
+        local name = tostring(raw or ''):match('^%s*([%w_]+)%s*$') or ''
+        local key = clean_name(name)
+        if key ~= '' and not seen[key] then
+            seen[key] = true
+            out_list[#out_list + 1] = name
+        end
+    end
+    return out_list
+end
+
 local function parse_args()
     local scope = 'group'
     local max_amount = 0
     local recipient = ''
     local from_only = ''
+    local explicit_senders = nil
     local i = 1
     while i <= #args do
         local s = tostring(args[i] or '')
@@ -290,6 +304,9 @@ local function parse_args()
             scope = 'all'
         elseif low == 'from' and args[i + 1] then
             from_only = tostring(args[i + 1]):match('^[%w_]+') or ''
+            i = i + 1
+        elseif (low == 'list' or low == 'senders') and args[i + 1] then
+            explicit_senders = parse_sender_list(args[i + 1])
             i = i + 1
         elseif low == 'to' and args[i + 1] then
             recipient = tostring(args[i + 1]):match('^[%w_]+') or ''
@@ -302,7 +319,7 @@ local function parse_args()
     if recipient == '' then
         recipient = me_name()
     end
-    return scope, max_amount, recipient, from_only
+    return scope, max_amount, recipient, from_only, explicit_senders
 end
 
 local function ask_sender(name, recipient, chunk)
@@ -371,7 +388,7 @@ local function wait_sender(name, collect_locally, chunk, recipient)
 end
 
 local function main()
-    local scope, max_amount, recipient, from_only = parse_args()
+    local scope, max_amount, recipient, from_only, explicit_senders = parse_args()
     local me = me_name()
     local collect_locally = clean_name(recipient) == clean_name(me)
 
@@ -408,6 +425,12 @@ local function main()
             return false
         end
         active[1] = from_only
+    elseif type(explicit_senders) == 'table' and #explicit_senders > 0 then
+        for _, name in ipairs(explicit_senders) do
+            if clean_name(name) ~= clean_name(recipient) and spawn_exists(name) then
+                active[#active + 1] = name
+            end
+        end
     else
         local members = scope == 'all' and e3_members() or group_members()
         for _, name in ipairs(members) do
@@ -419,7 +442,7 @@ local function main()
 
     if #active == 0 then
         out('\arNo %s members found in-zone to collect DC from (recipient %s excluded).',
-            from_only ~= '' and 'named' or (scope == 'all' and 'E3' or 'group'), recipient)
+            from_only ~= '' and 'named' or (explicit_senders and 'selected' or (scope == 'all' and 'E3' or 'group')), recipient)
         return false
     end
 
@@ -435,7 +458,7 @@ local function main()
         chunk,
         max_amount > 0 and (' each, limit ' .. tostring(max_amount)) or '',
         from_only ~= '' and ('from ' .. from_only)
-            or (scope == 'all' and 'E3 peers' or 'group'))
+            or (explicit_senders and 'selected characters' or (scope == 'all' and 'E3 peers' or 'group')))
 
     register_done_events()
 
@@ -479,6 +502,7 @@ local function main()
                 empty_passes = 0
             end
         end
+        if not collect_locally then break end
         if empty_passes >= 1 then break end
     end
 

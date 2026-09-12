@@ -5712,7 +5712,7 @@ function M.status()
 end
 
 function M.tick()
-    return diag.time("announce.tick", function()
+    return (diag.time_pair or diag.time)("announce.tick", function()
         if passive then
             diag.count("announce.tick.passive")
             return
@@ -5751,9 +5751,20 @@ function M.tick()
         end
         needs_index_warm = false
 
-        local work = announce_work_pending()
-        local offer_due = announce_ready and link_sched.ownership_offer_due()
-        local warm_pending = link_sched.ownership_warm_pending()
+        -- Phase 0: on a ready box under generated authority the idle tick is
+        -- just these three predicates (the warm/catalog branch above is skipped
+        -- once ready, and needs_tick is gated off). announce.tick averages 73ms
+        -- across ~1400 idle ticks; if these three sum to that, the cost is real
+        -- blocking AND localised in the same capture.
+        local work = diag.time("announce.idle.work_pending", function()
+            return announce_work_pending()
+        end)
+        local offer_due = announce_ready and diag.time("announce.idle.offer_due", function()
+            return link_sched.ownership_offer_due()
+        end)
+        local warm_pending = diag.time("announce.idle.warm_pending", function()
+            return link_sched.ownership_warm_pending()
+        end)
         local shadow = announce_ready and CFG.local_needs_shadow == true
         local legacy = CFG.generated_authority_legacy_validation == true
         local needs_rich = false

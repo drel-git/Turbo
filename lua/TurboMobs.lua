@@ -15969,6 +15969,13 @@ ux.drawFullWindow = function()
                 -- ── ▾ Filters ───────────────────────────────────────────────
                 if ImGui.CollapsingHeader('Filters##qs_adv') then
                     ux.normalizeLevelFilters()
+                    if styledButton(ux.inputsLocked and 'Unlock Filters' or 'Lock Filters', ux.inputsLocked and 'warn' or 'neutral', 7, 3,
+                        ux.inputsLocked and 'Enable editing for the filter text and level boxes.' or 'Lock filter boxes so they cannot accidentally capture movement keys.') then
+                        ux.inputsLocked = not ux.inputsLocked
+                        saveSettings()
+                    end
+                    ImGui.SameLine()
+                    coloredTextWrapped(ux.inputsLocked and 'Filters are locked to prevent keyboard capture.' or 'Filters are editable.', ux.inputsLocked and 'muted' or 'success')
                     local lockInputs = (ux.inputsLocked == true) and (ImGui.BeginDisabled ~= nil) and (ImGui.EndDisabled ~= nil)
                     local function bl() if lockInputs then ImGui.BeginDisabled() end end
                     local function el() if lockInputs then ImGui.EndDisabled() end end

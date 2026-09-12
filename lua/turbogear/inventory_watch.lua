@@ -16,6 +16,7 @@ local M = { registered = false }
 local dirty_at = nil
 local dirty_urgent = false
 local dirty_full = false
+local wallet_dirty_at = nil
 local last_publish_at = 0
 local last_known_sig = nil
 local last_bg_poll_at = 0
@@ -48,6 +49,29 @@ local function bg_poll_s()
     return tonumber(CFG.inventory_watch_bg_poll_s) or 0.0
 end
 
+-- Phase 0 diagnostics: attribute each dirty to the chat pattern that caused
+-- it. The per-tag counter answers "coin line or item line?" on its own and can
+-- never roll over; the event carries the matched text for cases the counter
+-- cannot separate, but the 220-entry event ring can roll on a long capture.
+-- Both are recorded for that reason.
+local function note_dirty_line(tag, line)
+    if not (diag.is_enabled and diag.is_enabled()) then return end
+    tag = tostring(tag or "?")
+    diag.count("inventory_watch.dirty_line." .. tag)
+    diag.event("inventory_watch.dirty_line",
+        tag .. " | " .. tostring(line or ""):sub(1, 110))
+end
+
+-- Wrap an mq.event handler so its matched line is attributed to its pattern.
+-- Purely additive: the handler itself is called unchanged, with every argument
+-- and return value passed through.
+local function tagged(tag, handler)
+    return function(line, ...)
+        note_dirty_line(tag, line)
+        return handler(line, ...)
+    end
+end
+
 local function mark_dirty(urgent, full)
     if not enabled() then return end
     if note_worn_poll_activity then note_worn_poll_activity("dirty") end
@@ -57,7 +81,40 @@ local function mark_dirty(urgent, full)
     diag.count("inventory_watch.dirty")
 end
 
-local function on_inventory_line(_line)
+local function is_coin_only_corpse_loot(line)
+    local text = tostring(line or ""):lower()
+    if not text:find("you receive", 1, true) or not text:find("corpse", 1, true) then return false end
+    local body = text:match("you receive%s+(.+)%s+from%s+.-corpse")
+    if not body or body == "" then return false end
+
+    body = body:gsub("pieces?", "")
+    local matched = false
+    local function strip_coin(s)
+        matched = true
+        return " "
+    end
+    body = body:gsub("%d[%d,]*%s*platinum", strip_coin)
+    body = body:gsub("%d[%d,]*%s*gold", strip_coin)
+    body = body:gsub("%d[%d,]*%s*silver", strip_coin)
+    body = body:gsub("%d[%d,]*%s*copper", strip_coin)
+    body = body:gsub("%f[%a]and%f[%A]", " ")
+    body = body:gsub("[%s,%.]+", "")
+    return matched and body == ""
+end
+
+local function mark_wallet_dirty()
+    if not enabled() then return end
+    wallet_dirty_at = os.clock()
+    diag.count("inventory_watch.wallet_dirty")
+end
+
+local function on_inventory_line(line)
+    if is_coin_only_corpse_loot(line) then
+        diag.count("inventory_watch.dirty_line.coin_only")
+        mark_wallet_dirty()
+        return
+    end
+    diag.count("inventory_watch.dirty_line.item_or_unknown")
     mark_dirty()
 end
 
@@ -479,12 +536,41 @@ local function maybe_spell_republish(snap, baseline)
     return published == true
 end
 
+local function flush_wallet_if_due()
+    if not enabled() or not wallet_dirty_at then return false end
+    -- If an actual inventory dirty is pending, let the full path publish wallet
+    -- fields along with the item state rather than sending a separate wallet row.
+    if dirty_at then return false end
+    local now = os.clock()
+    if (now - wallet_dirty_at) < debounce_s() then return false end
+
+    return (diag.time_pair or diag.time)("inventory_watch.wallet_flush", function()
+        diag.count("inventory_watch.dirty_flush.skipped_coin_only")
+        local snap = snapshot.gather_wallet and snapshot.gather_wallet() or nil
+        if type(snap) ~= "table" then return false end
+        local ok, Engine = pcall(function() return require('engine').Engine end)
+        if not ok or not Engine or not Engine.publish_wallet then return false end
+        if Engine.publish_wallet(snap, {
+            reason = "inventory_watch_coin_only",
+            force = true,
+        }) then
+            wallet_dirty_at = nil
+            last_known_wallet_sig = snapshot.wallet_signature and snapshot.wallet_signature(snap) or last_known_wallet_sig
+            diag.count("inventory_watch.wallet_publish")
+            return true
+        end
+        return false
+    end)
+end
+
 local function flush_if_due()
     if not enabled() or not dirty_at then return false end
     local now = os.clock()
     if (now - dirty_at) < debounce_s() then return false end
-    return diag.time("inventory_watch.dirty_flush", function()
+    return (diag.time_pair or diag.time)("inventory_watch.dirty_flush", function()
+        diag.count("inventory_watch.dirty_flush.full_inventory")
         dirty_at = nil
+        wallet_dirty_at = nil
 
         snapshot.invalidate()
         local urgent = dirty_urgent == true
@@ -511,7 +597,11 @@ local function flush_if_due()
             if snap then last_known_sig = snapshot.lite_signature(snap) end
             return true
         end
-        return publish_snap_if_changed(snap, now, depth, urgent, publish_opts)
+        -- Phase 0: child timer so gather + publish sum against dirty_flush and
+        -- the unattributed remainder is visible instead of inferred.
+        return diag.time("inventory_watch.flush_publish", function()
+            return publish_snap_if_changed(snap, now, depth, urgent, publish_opts)
+        end)
     end)
 end
 
@@ -569,20 +659,20 @@ end
 function M.register()
     if M.registered or not enabled() then return end
     local opts = { keepLinks = false }
-    pcall(function() mq.event('tgearInvLoot1', 'You receive #*#from #*#corpse#*#', on_inventory_line, opts) end)
-    pcall(function() mq.event('tgearInvLoot2', '#*#You have looted #*#from #*#corpse#*#', on_inventory_line, opts) end)
-    pcall(function() mq.event('tgearInvLoot3', 'You have looted #*#', on_inventory_line, opts) end)
-    pcall(function() mq.event('tgearInvTrade', 'You complete the trade#*#', on_gear_line, opts) end)
-    pcall(function() mq.event('tgearInvGive', 'You give #*#to #*#', on_gear_line, opts) end)
-    pcall(function() mq.event('tgearInvBank', 'You put #*#', on_bank_line, opts) end)
-    pcall(function() mq.event('tgearInvPick', 'You pick up #*#', on_bank_line, opts) end)
+    pcall(function() mq.event('tgearInvLoot1', 'You receive #*#from #*#corpse#*#', tagged("loot1_receive_corpse", on_inventory_line), opts) end)
+    pcall(function() mq.event('tgearInvLoot2', '#*#You have looted #*#from #*#corpse#*#', tagged("loot2_looted_corpse", on_inventory_line), opts) end)
+    pcall(function() mq.event('tgearInvLoot3', 'You have looted #*#', tagged("loot3_looted", on_inventory_line), opts) end)
+    pcall(function() mq.event('tgearInvTrade', 'You complete the trade#*#', tagged("trade", on_gear_line), opts) end)
+    pcall(function() mq.event('tgearInvGive', 'You give #*#to #*#', tagged("give", on_gear_line), opts) end)
+    pcall(function() mq.event('tgearInvBank', 'You put #*#', tagged("bank_put", on_bank_line), opts) end)
+    pcall(function() mq.event('tgearInvPick', 'You pick up #*#', tagged("pick_up", on_bank_line), opts) end)
     -- Equip/remove: targeted worn patch (not the bag-walk gear flush).
-    pcall(function() mq.event('tgearInvEquip', 'You equip #*#', on_worn_line, opts) end)
-    pcall(function() mq.event('tgearInvRemove', 'You remove #*#', on_worn_line, opts) end)
-    pcall(function() mq.event('tgearInvDestroy', 'You destroy #*#', on_inventory_line, opts) end)
+    pcall(function() mq.event('tgearInvEquip', 'You equip #*#', tagged("equip", on_worn_line), opts) end)
+    pcall(function() mq.event('tgearInvRemove', 'You remove #*#', tagged("remove", on_worn_line), opts) end)
+    pcall(function() mq.event('tgearInvDestroy', 'You destroy #*#', tagged("destroy", on_inventory_line), opts) end)
     -- Scribe/memorize: scroll vanishes; these lines are the usual tells.
-    pcall(function() mq.event('tgearInvScribe1', '#*#You have learned #*#', on_inventory_line, opts) end)
-    pcall(function() mq.event('tgearInvScribe2', '#*#You have scribed #*#', on_inventory_line, opts) end)
+    pcall(function() mq.event('tgearInvScribe1', '#*#You have learned #*#', tagged("scribe_learned", on_inventory_line), opts) end)
+    pcall(function() mq.event('tgearInvScribe2', '#*#You have scribed #*#', tagged("scribe_scribed", on_inventory_line), opts) end)
     M.registered = true
 end
 
@@ -604,6 +694,7 @@ function M.unregister()
     dirty_at = nil
     dirty_urgent = false
     dirty_full = false
+    wallet_dirty_at = nil
 end
 
 function M.tick()
@@ -632,8 +723,10 @@ function M.tick()
                 dirty_at = nil
                 dirty_urgent = false
                 dirty_full = false
+                wallet_dirty_at = nil
                 return
             end
+            flush_wallet_if_due()
             flush_if_due()
         end)
         return
@@ -642,6 +735,7 @@ function M.tick()
         poll_equipped_if_due()
         maybe_heal_lite_worn(os.clock())
         flush_worn_persist_if_due()
+        flush_wallet_if_due()
         flush_if_due()
         bg_poll_if_due()
     end)
@@ -695,6 +789,7 @@ end
 -- debounce so the next tick can publish a lite snap promptly.
 function M.note_change(urgent, full)
     mark_dirty(urgent == true, full == true)
+    wallet_dirty_at = nil
 end
 
 -- UI: request Store adopt retries after Give Now /tgear note (no sync bag walk).
