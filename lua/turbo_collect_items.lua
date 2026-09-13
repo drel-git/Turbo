@@ -13,6 +13,7 @@
 local mq = require('mq')
 local core = require('turbo_lib.core')
 local orch = require('turbo_lib.orchestrate')
+local transport = require('turbo_lib.transport')
 
 local TAG = '\at[TurboItems]\ax'
 local ITEM_TIMEOUT_MS = 90000
@@ -111,6 +112,13 @@ local PRESETS = {
         label = 'Lucky Ticket',
         items = {
             { id = 150762, name = 'A Lucky Ticket' },
+        },
+    },
+    radiant_crystal_cache_vault = {
+        label = 'Radiant Crystal Cache + Vault',
+        items = {
+            { id = 66902, name = 'Radiant Crystal Caches' },
+            { id = 66901, name = 'Radiant Crystal Vault' },
         },
     },
     radiant_void = {
@@ -226,7 +234,7 @@ local function preset_from_args()
 end
 
 local function parse_sender_args()
-    local recipient, notify = '', ''
+    local recipient, notify, route_hint = '', '', ''
     local i = 1
     while i <= #args do
         local low = tostring(args[i] or ''):lower()
@@ -236,10 +244,13 @@ local function parse_sender_args()
         elseif low == 'notify' and args[i + 1] then
             notify = safe_arg_name(args[i + 1])
             i = i + 1
+        elseif low == 'route' and args[i + 1] then
+            route_hint = tostring(args[i + 1] or ''):match('^[%w_]+$') or ''
+            i = i + 1
         end
         i = i + 1
     end
-    return recipient, notify
+    return recipient, notify, route_hint
 end
 
 local function item_from_args()
@@ -254,19 +265,29 @@ local function item_from_args()
     return 0
 end
 
-local function send_done_signal(notify, sender)
+local function send_done_signal(notify, sender, route_hint)
     notify = safe_arg_name(notify)
     sender = safe_arg_name(sender)
     if sender == '' then return end
     mq.cmdf('/echo %s \\ar[DONE]\\aw %s->LOCAL', TAG, sender)
     if notify ~= '' and clean_name(notify) ~= clean_name(sender) then
-        mq.cmdf('/squelch /e3bct %s /echo %s \\ar[SIGNAL_DONE]\\aw %s', notify, TAG, sender)
+        local route = tostring(route_hint or ''):lower()
+        local ok
+        if route == '' or route == 'e3' or route == 'e3_fallback' then
+            mq.cmdf('/squelch /e3bct %s /echo %s \\ar[SIGNAL_DONE]\\aw %s', notify, TAG, sender)
+            ok = true
+        else
+            ok = transport.send_target(notify, string.format('/echo %s \\ar[SIGNAL_DONE]\\aw %s', TAG, sender))
+        end
+        if not ok then
+            out('\\ayWARNING --\\ax unable to signal completion to %s.', notify)
+        end
     end
 end
 
 local function run_sender()
     local preset, preset_key = preset_from_args()
-    local recipient, notify = parse_sender_args()
+    local recipient, notify, route_hint = parse_sender_args()
     local item_id = item_from_args()
     local me = core.me_name()
     if not preset then
@@ -279,16 +300,16 @@ local function run_sender()
     end
     if item_id <= 0 then
         out('\arAborting:\ax missing item id.')
-        send_done_signal(notify, me)
+        send_done_signal(notify, me, route_hint)
         return false
     end
     if clean_name(recipient) == clean_name(me) then
         out('\arAborting:\ax sender and recipient are both %s.', recipient)
-        send_done_signal(notify, me)
+        send_done_signal(notify, me, route_hint)
         return false
     end
     if not orch.preflight_trade(out) then
-        send_done_signal(notify, me)
+        send_done_signal(notify, me, route_hint)
         return false
     end
 
@@ -301,26 +322,35 @@ local function run_sender()
     end
     if not selected then
         out('\arAborting:\ax item id %d is not in preset %s.', item_id, preset_key)
-        send_done_signal(notify, me)
+        send_done_signal(notify, me, route_hint)
         return false
     end
 
     local qty = core.item_count(selected.name, true)
     if qty <= 0 then
         out('\ay[%s]\ax No %s to send.', preset.label, selected.name)
-        send_done_signal(notify, me)
+        send_done_signal(notify, me, route_hint)
         return true
     end
 
     out('\ao[%s]\ax Sending %dx %s to \ag%s\ax.', preset.label, qty, selected.name, recipient)
-    mq.cmdf('/mac turbogive _sendstack %s %d %d', recipient, tonumber(selected.id) or 0, qty)
+    local notify_suffix = notify ~= '' and (' notify ' .. notify) or ''
+    local route_suffix = route_hint ~= '' and (' route ' .. route_hint)
+        or (transport.route_hint_arg and transport.route_hint_arg() or '')
+    mq.cmdf('/mac turbogive _sendstack %s %d %d%s%s', recipient, tonumber(selected.id) or 0, qty, notify_suffix, route_suffix)
     return true
 end
 
 local function ask_sender_item(name, recipient, preset_key, notify, item_id)
     orch.clear_done(item_done, name)
-    mq.cmdf('/squelch /e3bct %s /lua run turbo_collect_items sendto %s notify %s preset %s item %d',
-        name, recipient, notify, preset_key, tonumber(item_id) or 0)
+    local route = transport.route_hint_arg and transport.route_hint_arg() or ''
+    local ok = transport.send_target(name, string.format('/lua run turbo_collect_items sendto %s notify %s preset %s item %d%s',
+        recipient, notify, preset_key, tonumber(item_id) or 0, route))
+    if not ok then
+        out('\\ayWARNING --\\ax unable to form remote command for %s; skipping.', name)
+        return false
+    end
+    return true
 end
 
 local function ask_local_item(name, recipient, item)
@@ -332,7 +362,8 @@ local function ask_local_item(name, recipient, item)
         return false
     end
     out('\ao[COLLECT ITEMS]\ax Sending local %dx %s to \ag%s\ax.', qty, item.name, recipient)
-    mq.cmdf('/mac turbogive _sendstack %s %d %d', recipient, tonumber(item.id) or 0, qty)
+    local route = transport.route_hint_arg and transport.route_hint_arg() or ''
+    mq.cmdf('/mac turbogive _sendstack %s %d %d%s', recipient, tonumber(item.id) or 0, qty, route)
     return true
 end
 
@@ -349,7 +380,9 @@ local function wait_sender_item(name, recipient, preset_key, notify, collect_loc
             return 0, true
         end
     else
-        ask_sender_item(name, recipient, preset_key, notify, item.id)
+        if not ask_sender_item(name, recipient, preset_key, notify, item.id) then
+            return 0, false
+        end
     end
 
     while true do

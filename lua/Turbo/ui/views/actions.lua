@@ -997,6 +997,16 @@ function M.render(state, actions)
             ImGui.TextColored(0.55, 0.60, 0.68, 1.0, string.format(
                 'GitHub: v%s (you are current)', tostring(g.remoteTurboVersion)))
         end
+        if type(actions.transportStatus) == 'function' then
+            local label = actions.transportStatus()
+            if label and label ~= '' then
+                ImGui.TextColored(0.62, 0.68, 0.78, 1.0, 'Transport: ' .. tostring(label))
+                if ImGui.IsItemHovered() and ImGui.SetTooltip then
+                    ImGui.SetTooltip('Remote command transport used by Turbo Suite targeted commands.')
+                end
+                ImGui.TextColored(0.45, 0.50, 0.60, 1.0, 'Configure in TurboGear -> Setup -> Advanced')
+            end
+        end
     end
 
     if g.activeTab == 'tools' then

@@ -3,6 +3,7 @@
 
 local mq = require('mq')
 local core = require('turbo_lib.core')
+local transport = require('turbo_lib.transport')
 
 local M = {}
 
@@ -196,12 +197,17 @@ function M.is_done(done, name)
     return done[M.clean_name(name)] == true
 end
 
-function M.ask_peer_macro(peer_name, macro, mode, collector_name, amount)
+function M.ask_peer_macro(peer_name, macro, mode, collector_name, amount, notify_name)
+    local cmd
+    local notify = tostring(notify_name or ''):match('^[%w_]+$') or ''
+    local notify_suffix = notify ~= '' and (' notify ' .. notify) or ''
+    local route_suffix = transport.route_hint_arg and transport.route_hint_arg() or ''
     if amount and amount > 0 then
-        mq.cmdf('/squelch /e3bct %s /mac %s %s %s %d', peer_name, macro, mode, collector_name, amount)
+        cmd = string.format('/mac %s %s %s %d%s%s', macro, mode, collector_name, amount, notify_suffix, route_suffix)
     else
-        mq.cmdf('/squelch /e3bct %s /mac %s %s %s', peer_name, macro, mode, collector_name)
+        cmd = string.format('/mac %s %s %s%s%s', macro, mode, collector_name, notify_suffix, route_suffix)
     end
+    return transport.send_target(peer_name, cmd)
 end
 
 function M.preflight_trade(out_fn)

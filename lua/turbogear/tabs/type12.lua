@@ -15,6 +15,8 @@ if not ok_ref or type(dsk_ref) ~= "table" then dsk_ref = {} end
 local M = {}
 
 local search_text = ""
+local SOURCE_CATEGORY_COLOR = { 0.56, 0.84, 0.74, 1.0 }
+local SOURCE_EFFECT_COLOR = { 0.92, 0.94, 0.96, 1.0 }
 
 local function lower(s)
     return tostring(s or ""):lower()
@@ -83,7 +85,7 @@ local function draw_focus_record(row, idx)
     theme.colored_text(tostring(row.focus or row.effect or "?"), Theme.purple or Theme.header)
     if row.effect and row.focus then
         ImGui.SameLine()
-        col_text(Theme.dim, " - " .. tostring(row.effect))
+        col_text(SOURCE_EFFECT_COLOR, " - " .. tostring(row.effect))
     end
 
     if type(row.items) == "table" then
@@ -117,7 +119,7 @@ local function draw_reference()
             if tostring(row.category or "") ~= tostring(current_category or "") then
                 current_category = row.category
                 ImGui.Spacing()
-                col_text(Theme.section or Theme.header or Theme.item, tostring(current_category or "Other"))
+                col_text(SOURCE_CATEGORY_COLOR, tostring(current_category or "Other"))
             end
             shown = shown + 1
             draw_focus_record(row, i)

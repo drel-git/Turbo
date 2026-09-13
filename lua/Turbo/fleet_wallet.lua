@@ -12,6 +12,7 @@ local M = {}
 
 local TG, mq, ImGui, Ui
 local cachedWallet, refreshWalletCache
+local lastGearWalletLaunchMS = 0
 
 local function defaultColumns()
     return { pp = true, dc = true, rc = true, fav = true, cc = true, nvs = true, aa = true }
@@ -976,6 +977,28 @@ function M.close()
     M.setOpen(false)
 end
 
+function M.openLegacy()
+    TG._fwLoadErr = nil
+    TG._fwNextLiveMS = 0
+    pcall(function() ensurePeers(false) end)
+    TG._fwNeedPeerPoke = true
+    armFastPoll(10000)
+    M.setOpen(true)
+end
+
+local function openTurboGearWallet()
+    if TG and TG.luaScriptRunningAny and TG.luaScriptRunningAny({ 'turbogear', 'TurboGear' }) then
+        mq.cmd('/tgear wallettoggle')
+    else
+        local now = (mq.gettime and mq.gettime()) or (os.time() * 1000)
+        if lastGearWalletLaunchMS > 0 and (tonumber(now) or 0) - lastGearWalletLaunchMS < 1500 then
+            return
+        end
+        lastGearWalletLaunchMS = tonumber(now) or 0
+        mq.cmd('/lua run turbogear wallet')
+    end
+end
+
 local function persistWindowPos()
     if not (ImGui.GetWindowPos and TG) then return end
     local wx, wy = ImGui.GetWindowPos()
@@ -1606,25 +1629,11 @@ end
 function M.drawChrome(btnW, btnH)
     if not btnW or btnW <= 0 then return end
     if Ui.buttonVariant('$##topwalletbtn', 'walletButton', btnW, btnH) then
-        local opening = not M.isOpen()
-        M.setOpen(opening)
-        if opening then
-            TG._fwLoadErr = nil
-            TG._fwNextLiveMS = 0
-            pcall(function() ensurePeers(false) end)
-            TG._fwNeedPeerPoke = true -- one ping round; reads are silent after that
-            armFastPoll(10000)
-        end
+        openTurboGearWallet()
     end
     if ImGui.IsItemHovered and ImGui.IsItemHovered() then
         ImGui.BeginTooltip()
-        ImGui.TextColored(0.88, 0.80, 0.35, 1.0, string.format('%12s pp', tostring(cachedWallet.plat)))
-        ImGui.TextColored(0.45, 0.78, 0.82, 1.0, string.format('%12s dc', tostring(cachedWallet.dc)))
-        ImGui.TextColored(0.55, 0.85, 0.75, 1.0, string.format('%12s rc', tostring(cachedWallet.rc or 0)))
-        ImGui.TextColored(0.85, 0.70, 0.40, 1.0, string.format('%12s favor', tostring(cachedWallet.favor or 0)))
-        ImGui.TextColored(0.70, 0.60, 0.90, 1.0, string.format('%12s crests', tostring(cachedWallet.crests or 0)))
-        ImGui.TextColored(0.55, 0.78, 0.95, 1.0, string.format('%12s aa', tostring(cachedWallet.aa or 0)))
-        ImGui.TextColored(0.55, 0.58, 0.68, 1.0, 'TurboWallet - stays open if you Mini Turbo')
+        ImGui.Text('Toggle Fleet Wallet')
         ImGui.EndTooltip()
     end
 

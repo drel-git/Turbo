@@ -35,7 +35,7 @@ M.CFG = {
     script_name  = 'TurboGear',    -- display/settings/cache name
     lua_name     = 'turbogear',     -- folder/module name used by /lua run and /lua stop
     bg_lua_name  = 'turbogear_bg',  -- wrapper responder name; leaves /lua run turbogear free for UI
-    version      = '1.2.144',
+    version      = '1.2.145',
     mailbox      = 'turbogear',     -- shared actor mailbox name across all boxes
     proto        = 1,              -- snapshot protocol version (guards mismatched boxes)
     frame_round  = 5.0,
@@ -357,6 +357,9 @@ M.Settings = {
     stockViewKey = "__all__",
     stockViewSelectedChars = {},
     stockDefaultsSeeded = false,
+    walletRosterScope = "online",
+    walletViewKey = "__all__",
+    walletViewSelectedChars = {},
     inventoryLocationFilter = "all",
     inventorySearch = "",
     inventoryShowAugs = true,
@@ -548,7 +551,7 @@ function M.sanitize_ui_settings()
 
     local valid_main = {
         gear = true, upgrade = true, bis = true, type12 = true,
-        spells = true, lockouts = true, stock = true, collect = true, setup = true,
+        spells = true, lockouts = true, stock = true, collect = true, wallet = true, setup = true,
     }
     if not valid_main[tostring(M.Settings.mainTab or "")] then
         M.Settings.mainTab = "bis"
@@ -576,6 +579,18 @@ function M.sanitize_ui_settings()
     end
     if tostring(M.Settings.stockViewKey or "") == "" then
         M.Settings.stockViewKey = "__all__"
+    end
+    local wallet_roster = tostring(M.Settings.walletRosterScope or "online")
+    if wallet_roster ~= "online" and wallet_roster ~= "group" and wallet_roster ~= "e3" and wallet_roster ~= "all"
+        and not wallet_roster:match("^set:[%w_%-]+$") then
+        wallet_roster = "online"
+    end
+    M.Settings.walletRosterScope = wallet_roster
+    if type(M.Settings.walletViewSelectedChars) ~= "table" then
+        M.Settings.walletViewSelectedChars = {}
+    end
+    if tostring(M.Settings.walletViewKey or "") == "" then
+        M.Settings.walletViewKey = "__all__"
     end
     local valid_inspect = { stats = true, focus = true, live = true }
     if not valid_inspect[tostring(M.Settings.inspectTab or "")] then M.Settings.inspectTab = "stats" end
@@ -822,6 +837,7 @@ function M.apply_linked_roster_scope(scope, source)
     if source ~= "suggestions" then M.Settings.suggestSourceScope = scope end
     if source ~= "inventory" then M.Settings.inventoryRosterScope = scope end
     if source ~= "stock" then M.Settings.stockRosterScope = scope end
+    if source ~= "wallet" then M.Settings.walletRosterScope = scope end
     if source ~= "worn" then M.Settings.augsRosterScope = scope end
     if source ~= "stored" then M.Settings.storedRosterScope = scope end
     if source ~= "stats_search" then M.Settings.statsSearchScope = scope end
@@ -861,6 +877,9 @@ function M.reset_ui_settings()
     M.Settings.stockViewKey = "__all__"
     M.Settings.stockViewSelectedChars = {}
     M.Settings.stockDefaultsSeeded = false
+    M.Settings.walletRosterScope = "online"
+    M.Settings.walletViewKey = "__all__"
+    M.Settings.walletViewSelectedChars = {}
     M.Settings.augsViewMode = "single"
     M.Settings.augsViewKey = "__self__"
     M.Settings.augsRosterScope = "online"

@@ -193,6 +193,32 @@ end
 --- holding a Tier 1 bone showed missing. Shared multi-ID names are skipped.
 local SEARCH_LOOKUP_BUDGET = 16
 local SEARCH_OWN_NAMES = 2
+local function progression_candidate_is_exact(entry, id, name)
+    id = tonumber(id)
+    name = norm_item_name(name)
+    local exact_pairs = type(entry.progression_exact_pairs) == "table" and entry.progression_exact_pairs or nil
+    local exact_ids = type(entry.progression_exact_ids) == "table" and entry.progression_exact_ids or nil
+    local exact_names = type(entry.progression_exact_names) == "table" and entry.progression_exact_names or nil
+    if id and id > 0 and exact_pairs and exact_pairs[id] then
+        if name ~= "" and exact_pairs[id][name] then return true end
+        if name == "" and not exact_ids then return true end
+    end
+    if id and id > 0 and exact_ids and exact_ids[id] then return true end
+    if name ~= "" and exact_names and exact_names[name] then return true end
+    return false
+end
+
+local function has_progression_exact(entry)
+    return type(entry) == "table"
+        and (type(entry.progression_exact_ids) == "table"
+            or type(entry.progression_exact_names) == "table"
+            or type(entry.progression_exact_pairs) == "table")
+end
+
+local function prefer_later_progression(entry)
+    return type(entry) == "table" and entry.progression_prefer_later == true and has_progression_exact(entry)
+end
+
 local function search_entry(entry)
     entry = entry or {}
     local id_only_name = require('ownership_index').name_is_id_only
@@ -206,19 +232,19 @@ local function search_entry(entry)
         local status, loc = status_from_fi(fi, bank)
         local actual = nil
         pcall(function() actual = tostring(fi.Name() or fi() or "") end)
+        local fallback_name = tostring(entry.item or "")
+        if type(v) == "string" then
+            fallback_name = trim((v:gsub("^=", ""):gsub("%s+%(Augmented%)%s*$", "")))
+            if fallback_name == "" then fallback_name = tostring(entry.item or "") end
+        end
         return {
             status = status or "carried",
             location = loc or "",
-            name = (actual and actual ~= "" and actual) or tostring(entry.item or ""),
+            name = (actual and actual ~= "" and actual) or fallback_name,
             count = 1,
         }
     end
     local names = entry.names or {}
-    local own = math.min(#names, SEARCH_OWN_NAMES)
-    for i = 1, own do
-        local hit = try(names[i], false) or try(names[i], true)
-        if hit then return hit end
-    end
     local ids, seen = {}, {}
     for _, id in ipairs(entry.ids or {}) do
         local n = tonumber(id)
@@ -228,6 +254,26 @@ local function search_entry(entry)
         end
     end
     table.sort(ids, function(a, b) return a > b end)
+    if prefer_later_progression(entry) then
+        for _, n in ipairs(ids) do
+            if not progression_candidate_is_exact(entry, n, nil) then
+                local hit = try(n, false) or try(n, true)
+                if hit then return hit end
+            end
+        end
+        local nmax = math.min(#names, 6)
+        for i = 1, nmax do
+            if not progression_candidate_is_exact(entry, nil, names[i]) then
+                local hit = try(names[i], false) or try(names[i], true)
+                if hit then return hit end
+            end
+        end
+    end
+    local own = math.min(#names, SEARCH_OWN_NAMES)
+    for i = 1, own do
+        local hit = try(names[i], false) or try(names[i], true)
+        if hit then return hit end
+    end
     for _, n in ipairs(ids) do
         local hit = try(n, false) or try(n, true)
         if hit then return hit end

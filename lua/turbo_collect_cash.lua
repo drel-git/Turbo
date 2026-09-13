@@ -18,8 +18,11 @@
 local mq = require('mq')
 local core = require('turbo_lib.core')
 local orch = require('turbo_lib.orchestrate')
+local wallet_refresh = require('turbo_lib.wallet_refresh')
 
 local TAG = '\at[TurboCash]\ax'
+local CURRENCY_NAME = 'Platinum'
+local CURRENCY_SHORT = 'PP'
 local CASH_TIMEOUT_MS = 60000
 local IDLE_AFTER_TRADE_MS = 8000
 local IDLE_AFTER_DONE_MS = 3000
@@ -36,20 +39,35 @@ local function out(fmt, ...)
     end
 end
 
+local function fmt_num(n)
+    local s = tostring(math.floor(tonumber(n) or 0))
+    local k
+    repeat
+        s, k = s:gsub("^(-?%d+)(%d%d%d)", "%1,%2")
+    until k == 0
+    return s
+end
+
 local function ask_sender(name, recipient, max_pp)
     orch.clear_done(done, name)
-    orch.ask_peer_macro(name, 'turbogive', '_sendcash', recipient, max_pp)
+    local ok = orch.ask_peer_macro(name, 'turbogive', '_sendcash', recipient, max_pp, core.me_name())
+    if not ok then
+        out('\ayWARNING --\ax unable to form remote command for %s; skipping.', name)
+        return false
+    end
+    return true
 end
 
 local function wait_sender(name, collect_locally, max_pp, recipient)
-    out('\ao[COLLECT CASH]\ax Asking \ag%s\ax...', name)
     local before_pp = collect_locally and core.platinum() or 0
     local start = core.now_ms()
     local last_activity = start
     local saw_trade = false
     local trade_count = 0
 
-    ask_sender(name, recipient, max_pp)
+    if not ask_sender(name, recipient, max_pp) then
+        return 0, 0, false
+    end
 
     while true do
         if mq.doevents then mq.doevents() end
@@ -61,7 +79,7 @@ local function wait_sender(name, collect_locally, max_pp, recipient)
                 trade_count = trade_count + 1
                 last_activity = core.now_ms()
             else
-                out('\ay[COLLECT CASH]\ax Trade with %s did not close cleanly; moving on.', name)
+                out('\ayWARNING --\ax trade with %s did not close cleanly; moving on.', name)
                 break
             end
         end
@@ -71,7 +89,7 @@ local function wait_sender(name, collect_locally, max_pp, recipient)
         elseif saw_trade then
             if core.now_ms() - last_activity >= IDLE_AFTER_TRADE_MS then break end
         elseif core.now_ms() - start >= CASH_TIMEOUT_MS then
-            out('\ay[COLLECT CASH]\ax Timed out waiting for %s (60s). Moving on.', name)
+            out('\ayWARNING --\ax timed out waiting for %s (60s); moving on.', name)
             break
         end
 
@@ -117,13 +135,7 @@ local function main()
         return false
     end
 
-    out('\ao[COLLECT CASH]\ax %s -> \ag%s\ax from %d sender(s) (%s)%s.',
-        collect_locally and 'Collect' or 'Pool',
-        recipient,
-        #active,
-        from_only ~= '' and ('from ' .. from_only)
-            or (explicit_senders and 'selected characters' or (scope == 'all' and 'E3 peers' or 'group')),
-        max_amount > 0 and (' limit ' .. tostring(max_amount) .. 'pp each') or '')
+    out('%s -> \ag%s\ax from %d sender(s)', CURRENCY_NAME, recipient, #active)
 
     orch.register_done_events(done)
 
@@ -134,20 +146,20 @@ local function main()
         if signaled or trades > 0 then responded = responded + 1 end
         total_received = total_received + got
         if got > 0 then
-            out('\ao[COLLECT CASH]\ax %s delivered \ag%d\ax pp. Platinum now: \ag%d\ax.', name, got, core.platinum())
+            out('%s transferred \ag%s\ax %s', name, fmt_num(got), CURRENCY_SHORT)
         end
         mq.delay(350)
     end
 
     orch.unregister_done_events()
     core.clear_cursor('finishing', 4000, out)
+    wallet_refresh.refresh_participants(recipient, active, { settle = true })
 
     if collect_locally then
-        out('\agComplete.\ax \ag%d\ax/\ag%d\ax requests returned activity. Total received: \ag%d\ax pp. Platinum now: \ag%d\ax.',
-            responded, sent_count, total_received, core.platinum())
+        out('\agComplete --\ax \ag%s\ax %s collected to \ag%s\ax',
+            fmt_num(total_received), CURRENCY_SHORT, recipient)
     else
-        out('\agComplete.\ax \ag%d\ax/\ag%d\ax senders signaled. Recipient: \ag%s\ax.',
-            responded, sent_count, recipient)
+        out('\agComplete --\ax collection sent to \ag%s\ax', recipient)
     end
     return true
 end

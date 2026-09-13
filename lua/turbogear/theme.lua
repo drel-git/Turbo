@@ -211,17 +211,28 @@ function M.sync_button(label, w, h)
     return clicked
 end
 
-function M.nav_button(label, active, secondary, w, h)
+function M.nav_button(label, active, secondary, w, h, accent)
     local bg = active and (secondary and { 0.16, 0.20, 0.27, 1.0 } or { 0.13, 0.17, 0.24, 1.0 }) or { 0.07, 0.09, 0.12, 1.0 }
     local hov = active and { 0.20, 0.24, 0.32, 1.0 } or { 0.12, 0.15, 0.20, 1.0 }
     local act = active and { 0.24, 0.26, 0.30, 1.0 } or { 0.10, 0.12, 0.16, 1.0 }
     local txt = active and M.Theme.gold or { 0.68, 0.71, 0.77, 1.0 }
+    local extra_colors, extra_vars = 0, 0
     ImGui.PushStyleColor(ImGuiCol.Button, bg[1], bg[2], bg[3], bg[4])
     ImGui.PushStyleColor(ImGuiCol.ButtonHovered, hov[1], hov[2], hov[3], hov[4])
     ImGui.PushStyleColor(ImGuiCol.ButtonActive, act[1], act[2], act[3], act[4])
     ImGui.PushStyleColor(ImGuiCol.Text, txt[1], txt[2], txt[3], txt[4])
+    if accent and ImGuiCol.Border then
+        local border = active and M.Theme.gold or { 0.22, 0.31, 0.42, 0.92 }
+        ImGui.PushStyleColor(ImGuiCol.Border, border[1], border[2], border[3], border[4])
+        extra_colors = extra_colors + 1
+    end
+    if accent and ImGuiStyleVar and ImGuiStyleVar.FrameBorderSize and ImGui.PushStyleVar then
+        ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, active and 1.35 or 1.0)
+        extra_vars = extra_vars + 1
+    end
     local clicked = ImGui.Button(label, w or 0, h or (secondary and 22.0 or 24.0))
-    ImGui.PopStyleColor(4)
+    if extra_vars > 0 then ImGui.PopStyleVar(extra_vars) end
+    ImGui.PopStyleColor(4 + extra_colors)
     return clicked
 end
 

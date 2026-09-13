@@ -153,19 +153,6 @@ local function draw_list_pill_panel(api)
     end
 
     if ImGui.Separator then ImGui.Separator() end
-    col_text(Theme.dim, "VIEW")
-    if api.is_compact and api.toggle_compact then
-        local compact = api.is_compact() and true or false
-        local new_v, changed = checkbox_value("Compact##tg_list_pill_compact", compact)
-        if changed and new_v ~= compact then api.toggle_compact() end
-        if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
-            ImGui.SetTooltip(compact
-                and "Compact (dense) columns on. Uncheck for full item names."
-                or "Full item names on. Check for compact (dense) columns.")
-        end
-    end
-
-    if ImGui.Separator then ImGui.Separator() end
     col_text(Theme.dim, "CUSTOM LISTS")
     local names = bis.list_names()
     if #names == 0 then
@@ -244,7 +231,7 @@ function M.draw(opts, api)
         end)
     end
     if pill_hovered and ImGui.SetTooltip then
-        ImGui.SetTooltip("Catalog pages, custom lists, Manage Lists, compact view, and visible TurboBiS tabs.")
+        ImGui.SetTooltip("Catalog pages, custom lists, Manage Lists, and visible TurboBiS tabs.")
     end
 
     if close_requested then

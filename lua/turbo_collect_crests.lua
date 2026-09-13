@@ -23,8 +23,12 @@ do
     end
 end
 local bot_pause = require('turbo_lib.bot_pause')
+local wallet_refresh = require('turbo_lib.wallet_refresh')
+local transport = require('turbo_lib.transport')
 
 local TAG = '\at[TurboCrest]\ax'
+local CURRENCY_NAME = 'Celestial Crests'
+local CURRENCY_SHORT = 'Crests'
 local DEFAULT_CHUNK = 7000
 local MAX_PASSES = 200
 local FIRST_ACTIVITY_TIMEOUT_MS = 45000
@@ -46,6 +50,15 @@ local function out(fmt, ...)
     else
         print(TAG .. ' ' .. msg)
     end
+end
+
+local function fmt_num(n)
+    local s = tostring(math.floor(tonumber(n) or 0))
+    local k
+    repeat
+        s, k = s:gsub("^(-?%d+)(%d%d%d)", "%1,%2")
+    until k == 0
+    return s
 end
 
 local function clean_name(name)
@@ -325,15 +338,21 @@ end
 
 local function ask_sender(name, recipient, chunk)
     done[clean_name(name)] = nil
+    local route = transport.route_hint_arg and transport.route_hint_arg() or ''
+    local ok
     if chunk and chunk > 0 then
-        mq.cmdf('/squelch /e3bct %s /mac turbogive _sendcrest %s %d', name, recipient, chunk)
+        ok = transport.send_target(name, string.format('/mac turbogive _sendcrest %s %d notify %s%s', recipient, chunk, me_name(), route))
     else
-        mq.cmdf('/squelch /e3bct %s /mac turbogive _sendcrest %s', name, recipient)
+        ok = transport.send_target(name, string.format('/mac turbogive _sendcrest %s notify %s%s', recipient, me_name(), route))
     end
+    if not ok then
+        out('\ayWARNING --\ax unable to form remote command for %s; skipping.', name)
+        return false
+    end
+    return true
 end
 
 local function wait_sender(name, collect_locally)
-    out('\ao[Crest]\ax Asking \ag%s\ax...', name)
     local before_alt = collect_locally and read_crests() or 0
     local before_inv = collect_locally and item_count() or 0
     local start = now_ms()
@@ -353,7 +372,7 @@ local function wait_sender(name, collect_locally)
                 reclaim_crests()
                 last_activity = now_ms()
             else
-                out('\ay[Crest]\ax Trade with %s did not close cleanly; moving on.', name)
+                out('\ayWARNING --\ax trade with %s did not close cleanly; moving on.', name)
                 break
             end
         end
@@ -369,7 +388,7 @@ local function wait_sender(name, collect_locally)
         elseif saw_trade then
             if now_ms() - last_activity >= IDLE_AFTER_TRADE_MS then break end
         elseif now_ms() - start >= FIRST_ACTIVITY_TIMEOUT_MS then
-            out('\ay[Crest]\ax Timed out waiting for %s.', name)
+            out('\ayWARNING --\ax timed out waiting for %s.', name)
             break
         end
 
@@ -410,7 +429,6 @@ local function main()
     end
 
     if collect_locally and item_count() > 0 then
-        out('\ao[Crest]\ax Reclaiming existing inventory Celestial Crest before collection.')
         reclaim_crests()
     end
 
@@ -450,12 +468,7 @@ local function main()
         out('\ayWarning:\ax no free inventory slots. Incoming Crests may fail if it cannot stack.')
     end
 
-    out('\ao[Crest]\ax %s -> \ag%s\ax from %d sender(s) (%s).',
-        collect_locally and 'Collect' or 'Give',
-        recipient,
-        #active,
-        from_only ~= '' and ('from ' .. from_only)
-            or (explicit_senders and 'selected characters' or (scope == 'all' and 'E3 peers' or 'group')))
+    out('%s -> \ag%s\ax from %d sender(s)', CURRENCY_NAME, recipient, #active)
 
     register_done_events()
 
@@ -467,8 +480,10 @@ local function main()
         local pass_received = 0
         local pass_activity = 0
         for _, name in ipairs(active) do
-            ask_sender(name, recipient, send_chunk)
-            local got, trades, signaled = wait_sender(name, collect_locally)
+            local got, trades, signaled = 0, 0, false
+            if ask_sender(name, recipient, send_chunk) then
+                got, trades, signaled = wait_sender(name, collect_locally)
+            end
             sent_count = sent_count + 1
             if signaled or trades > 0 then
                 responded = responded + 1
@@ -477,10 +492,7 @@ local function main()
             total_received = total_received + got
             pass_received = pass_received + got
             if got > 0 then
-                out('\ao[Crest]\ax Pass %d: %s delivered \ag%d\ax Crests. You now have \ag%d\ax.',
-                    pass, name, got, read_crests())
-            elseif signaled then
-                out('\ao[Crest]\ax Pass %d: %s signaled done.', pass, name)
+                out('%s transferred \ag%s\ax %s', name, fmt_num(got), CURRENCY_SHORT)
             end
             mq.delay(350)
         end
@@ -508,13 +520,13 @@ local function main()
     end
     clear_cursor('finishing', 4000)
     close_inventory()
+    wallet_refresh.refresh_participants(recipient, active)
 
     if collect_locally then
-        out('\agComplete\ax after \ag%d\ax pass(es). \ag%d\ax/\ag%d\ax requests returned activity. Total received/reclaimed: \ag%d\ax Crests. You now have \ag%d\ax.',
-            passes, responded, sent_count, total_received, read_crests())
+        out('\agComplete --\ax \ag%s\ax %s collected to \ag%s\ax',
+            fmt_num(total_received), CURRENCY_SHORT, recipient)
     else
-        out('\agComplete\ax after \ag%d\ax pass(es). \ag%d\ax/\ag%d\ax senders signaled. Recipient: \ag%s\ax.',
-            passes, responded, sent_count, recipient)
+        out('\agComplete --\ax collection sent to \ag%s\ax', recipient)
     end
     return true
 end

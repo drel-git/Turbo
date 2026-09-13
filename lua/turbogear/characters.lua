@@ -264,6 +264,9 @@ local adapters = {
     stock = make_roster_adapter(
         "stockRosterScope", "stockViewKey", "stockViewSelectedChars", "stock",
         {}, "Source + columns + teams drive Stock Up"),
+    wallet = make_roster_adapter(
+        "walletRosterScope", "walletViewKey", "walletViewSelectedChars", "wallet",
+        {}, "Source + columns + teams drive Wallet balances"),
     worn = make_picker_adapter(
         "augsViewKey", "Pick who Worn Augs shows", force_augs_single),
     stored = make_picker_adapter(

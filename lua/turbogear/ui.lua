@@ -29,6 +29,7 @@ local type12_tab = require('tabs.type12')
 local don_tab = require('tabs.don')
 local lockouts_tab = require('tabs.lockouts')
 local spells_tab   = require('tabs.spells')
+local wallet_tab   = require('tabs.wallet')
 local setup   = require('tabs.setup')
 local global_search = require('global_search')
 local index_warm_policy = require('index_warm_policy')
@@ -692,10 +693,13 @@ local function draw_window_chrome()
     end)
 end
 
-local function draw_tab_buttons(defs, current, id, secondary, on_change)
+local function draw_tab_buttons(defs, current, id, secondary, on_change, opts)
+    opts = type(opts) == "table" and opts or {}
+    local h = tonumber(opts.height) or (secondary and 22.0 or 24.0)
+    local accent = opts.accent == true
     for i, tab in ipairs(defs) do
         if i > 1 then ImGui.SameLine() end
-        if nav_button(tab.label .. "##" .. id .. "_" .. tab.key, current == tab.key, secondary, 0, secondary and 22.0 or 24.0)
+        if nav_button(tab.label .. "##" .. id .. "_" .. tab.key, current == tab.key, secondary, 0, h, accent)
             and current ~= tab.key then
             current = tab.key
             on_change(tab.key)
@@ -821,6 +825,7 @@ local function characters_tab_for_main(main)
     end
     if main == "stock" then return "stock" end
     if main == "collect" then return "stock" end
+    if main == "wallet" then return "wallet" end
     if main == "type12" then return "type12" end
     return nil
 end
@@ -967,7 +972,7 @@ local function draw_lockouts_chrome()
     cur = draw_tab_buttons({
         { key = "expeditions", label = "Instances" },
         { key = "don", label = "Dragons of Norrath" },
-    }, cur, "tg_lockouts", true, set_lockouts_tab)
+    }, cur, "tg_lockouts", true, set_lockouts_tab, { height = 28.0, accent = true })
     ImGui.Separator()
     return cur
 end
@@ -977,7 +982,7 @@ local function draw_lockouts_mode_chrome()
     return draw_tab_buttons({
         { key = "expeditions", label = "Instances" },
         { key = "don", label = "Dragons of Norrath" },
-    }, cur, "tg_lockouts_inline", true, set_lockouts_tab)
+    }, cur, "tg_lockouts_inline", true, set_lockouts_tab, { height = 28.0, accent = true })
 end
 
 local function draw_lockouts_body(cur)
@@ -1007,6 +1012,7 @@ local function draw_main_tab_chrome()
         { key = "lockouts", label = "Lockouts" },
         { key = "stock", label = "Stock Up" },
         { key = "collect", label = "Collect" },
+        { key = "wallet", label = "Wallet" },
         { key = "setup", label = "Setup" },
     }
     cur = draw_tab_buttons(tabs, cur, "tg_main", false, function(tab_key)
@@ -1023,7 +1029,9 @@ local function draw_main_tab_chrome()
         inline_secondary = spells_tab.draw_mode_chrome()
         drew = true
     elseif cur == "lockouts" then
-        if drew then ImGui.SameLine() end
+        if drew then
+            if ImGui.NewLine then ImGui.NewLine() else ImGui.Spacing() end
+        end
         inline_secondary = draw_lockouts_mode_chrome()
         drew = true
     end
@@ -1041,7 +1049,8 @@ local function draw_main_tab_body(cur, secondary)
         if cur == "spells" and spells_tab.on_tab_enter then spells_tab.on_tab_enter()
         elseif cur == "lockouts" and tostring(secondary or Settings.lockoutsTab or "expeditions") == "don"
             and don_tab.on_tab_enter then don_tab.on_tab_enter()
-        elseif cur == "lockouts" and lockouts_tab.on_tab_enter then lockouts_tab.on_tab_enter() end
+        elseif cur == "lockouts" and lockouts_tab.on_tab_enter then lockouts_tab.on_tab_enter()
+        elseif cur == "wallet" and wallet_tab.on_tab_enter then wallet_tab.on_tab_enter() end
     end
     last_enter_view_key = enter_key
     last_main_tab = cur
@@ -1061,6 +1070,8 @@ local function draw_main_tab_body(cur, secondary)
             sync_current_view_if_needed()
             local time_collect = diag.time_pair or diag.time
             time_collect("ui.collect", inventory.draw_collect)
+        elseif cur == "wallet" then
+            diag.time("ui.wallet", wallet_tab.draw)
         elseif cur == "lockouts" then draw_lockouts_body(secondary)
         else
             sync_current_view_if_needed()

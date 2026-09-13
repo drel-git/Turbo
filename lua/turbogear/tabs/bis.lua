@@ -139,6 +139,12 @@ local FULL_NAME_CFG = { col_w = nil, slot_w = 124.0, name_max = 36, min_col_w = 
 -- TurboBiS roster colors (slot gold stays on Theme.slot; carried uses bag-blue).
 local BIS_GREEN  = { 0.43, 0.82, 0.58, 1.0 }
 local BIS_BAG    = { 0.52, 0.72, 1.00, 1.0 }  -- owned in bags/bank / Ready to Learn
+M.BIS_PROGRESS = { 0.55, 0.67, 0.59, 1.0 } -- satisfied by a later progression tier
+M.BIS_RANK_COLORS = {
+    [1] = { 0.88, 0.58, 0.26, 1.0 },
+    [2] = { 0.72, 0.48, 0.88, 1.0 },
+    [3] = BIS_GREEN,
+}
 local BIS_MISS   = { 0.62, 0.34, 0.34, 1.0 }
 local BIS_ELSE   = { 0.95, 0.72, 0.30, 1.0 }
 local BIS_PACK   = { 0.95, 0.78, 0.35, 1.0 }  -- DoN Pack Owned
@@ -147,6 +153,12 @@ local BIS_UNKNOWN = { 0.55, 0.55, 0.58, 1.0 }  -- peer DoN ability, no data yet
 -- (no data yet - may well be missing). Ready / Pack count as done.
 local function needs_attention(row)
     return row ~= nil and (row.status == "missing" or row.status == "unknown")
+end
+
+function M.display_item_name(name)
+    name = tostring(name or "?"):gsub("%s*|%d+%s*$", "")
+    if name == "" then return "?" end
+    return name
 end
 local BIS_CYAN   = { 0.36, 0.66, 0.76, 1.0 }
 local BIS_ITEM   = { 0.37, 0.68, 0.80, 1.0 }
@@ -978,9 +990,8 @@ local function toggle_compact_full_names()
     SaveSettings()
 end
 
--- Missing Only (+ Anguish/DSK focus controls when that catalog is active).
+-- Missing Only + Compact view (+ Anguish/DSK focus controls when that catalog is active).
 -- Drawn on the pill row (ui.lua chrome), right of the List pill.
--- Compact/Full view moved into the List pill (VIEW section) in v1.2.40.
 -- Catalog focus widgets are appended in draw_quick_toggles_focus below
 -- (after the dsk_type12 helpers exist as locals).
 function M.draw_quick_toggles()
@@ -997,6 +1008,23 @@ function M.draw_quick_toggles()
         Settings.bisShowMissingOnly = new_val and true or false
         roster_cache.key = nil
         SaveSettings()
+    end
+    ImGui.SameLine()
+    local compact = not view_mode_is_full_names()
+    local cv1, cv2 = ImGui.Checkbox("Compact##biscompact", compact)
+    local new_compact, compact_apply = nil, false
+    if type(cv2) == "boolean" then
+        new_compact, compact_apply = cv1, cv2
+    elseif type(cv1) == "boolean" and cv1 ~= compact then
+        new_compact, compact_apply = cv1, true
+    end
+    if compact_apply and new_compact ~= compact then
+        toggle_compact_full_names()
+    end
+    if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
+        ImGui.SetTooltip(compact
+            and "Compact columns on. Uncheck for full item names."
+            or "Full item names on. Check for compact columns.")
     end
     if M.draw_quick_toggles_focus then
         M.draw_quick_toggles_focus()
@@ -1027,6 +1055,7 @@ local function don_learned_from(row)
 end
 
 local function row_color(row)
+    if row and row.status == "progression_satisfied" then return M.BIS_PROGRESS end
     if row and (row.status == "equipped" or row.status == "known" or row.status == "forsaken_complete" or row.status == "originator_complete") then return BIS_GREEN end
     if row and row.status == "forsaken_base" then return BIS_PACK end
     if row and (row.status == "carried" or row.status == "ready") then return BIS_BAG end
@@ -1138,6 +1167,7 @@ end
 
 local function status_glyph(row)
     if not row or row.empty then return "-" end
+    if row.status == "progression_satisfied" then return "S" end
     if row.status == "equipped" or row.status == "known" or row.status == "forsaken_complete" or row.status == "originator_complete" then return "W" end
     if row.status == "forsaken_base" then return "Q" end
     if row.status == "carried" or row.status == "ready" then return "B" end
@@ -1148,6 +1178,7 @@ local function status_glyph(row)
 end
 
 local function row_label(row)
+    if row and row.status == "progression_satisfied" then return "Satisfied" end
     if row and row.status == "equipped" then return "Equipped" end
     if row and row.status == "forsaken_complete" then return "Complete" end
     if row and row.status == "originator_complete" then return "Complete" end
@@ -1161,7 +1192,38 @@ local function row_label(row)
     return "Need"
 end
 
+M.progression_marker_text = function(row)
+    if not row or not row.progression_rank then return "" end
+    local marker = tostring(row.progression_marker or "")
+    if marker ~= "" then return marker end
+    local rank = tonumber(row.progression_rank) or 0
+    if rank == 1 then return "I" end
+    if rank == 2 then return "II" end
+    if rank == 3 then return "III" end
+    return tostring(rank)
+end
+
+M.progression_marker_color = function(row)
+    local rank = tonumber(row and row.progression_rank) or 0
+    return M.BIS_RANK_COLORS[rank] or M.BIS_PROGRESS or Theme.dim
+end
+
+M.draw_progression_marker = function(row)
+    local marker = M.progression_marker_text(row)
+    if marker == "" then return false end
+    ImGui.SameLine(0, 6)
+    col_text(M.progression_marker_color(row), marker)
+    return true
+end
+
 local function row_location(row)
+    if row and row.status == "progression_satisfied" then
+        local name = M.display_item_name(row.progression_satisfied_name or "")
+        local loc = tostring(row.progression_satisfied_location or "")
+        if name ~= "?" and loc ~= "" then return "Satisfied by " .. name .. " (" .. loc .. ")" end
+        if name ~= "?" then return "Satisfied by " .. name end
+        return "Satisfied by later tier"
+    end
     if row and row.status == "known" then return "Spell book / discs" end
     if row and row.status == "ready" then return "Ready to learn" end
     if row and row.status == "pack_owned" then return "Pack owned" end
@@ -1191,7 +1253,7 @@ end
 
 local function cell_tooltip(row, snap, slot)
     if not row or row.empty or not row.entry then return nil end
-    local parts = { row.entry.item or "?" }
+    local parts = { M.display_item_name(row.entry.item) }
     local notes = row.entry.notes and tostring(row.entry.notes) or ""
     if notes ~= "" then
         notes = notes:gsub("\226\128\147", "-"):gsub("\226\128\148", "-"):gsub("–", "-"):gsub("—", "-")
@@ -1213,7 +1275,7 @@ local function draw_cell_tooltip(row, snap, slot)
     -- DoN abilities: hover shows only "Learned from: <pack or teaching item>".
     if is_don_ability_row(row) then
         local src = don_learned_from(row)
-        if src == "" then src = tostring(row.entry.item or "?") end
+        if src == "" then src = M.display_item_name(row.entry.item) end
         local tip_text = "Learned from: " .. src
         if not (ImGui.BeginTooltip and ImGui.EndTooltip) then
             tip(tip_text)
@@ -1239,7 +1301,7 @@ local function draw_cell_tooltip(row, snap, slot)
     end
     -- Slim hover: name + optional notes + location/elsewhere.
     -- Status/slot/group/owner are already visible in the grid.
-    theme.colored_text(row.entry.item or "?", row_color(row))
+    theme.colored_text(M.display_item_name(row.entry.item), row_color(row))
     do
         local notes = row.entry.notes and tostring(row.entry.notes) or ""
         if notes ~= "" then
@@ -1296,6 +1358,21 @@ local function draw_cell_tooltip(row, snap, slot)
                     theme.colored_text(part, note_color(part))
                 end
             end
+        end
+    end
+    if row.progression_rank then
+        local owned = M.display_item_name(row.progression_owned_name or "")
+        local rank = M.progression_marker_text(row)
+        local max_rank = tonumber(row.progression_max_rank) or tonumber(row.progression_rank) or 0
+        local max_marker = max_rank == 1 and "I" or (max_rank == 2 and "II" or (max_rank == 3 and "III" or tostring(max_rank)))
+        local label = tostring(row.progression_label or "")
+        tooltip_label("Owned:", Theme.dim, owned, M.progression_marker_color(row))
+        tooltip_label("Progression:", Theme.dim,
+            rank .. " / " .. max_marker .. (label ~= "" and (" - " .. label) or ""),
+            M.progression_marker_color(row))
+        local next_name = M.display_item_name(row.progression_next_name or "")
+        if next_name ~= "?" and next_name ~= "" then
+            tooltip_label("Next:", Theme.dim, next_name, Theme.item or Theme.dim)
         end
     end
     if row.match and row.status ~= "missing" then
@@ -1700,7 +1777,7 @@ local function draw_dsk_type12_focus_record(row, idx)
 
     if row.effect and row.focus then
         ImGui.SameLine()
-        col_text(Theme.dim, " - " .. tostring(row.effect))
+        col_text({ 0.92, 0.94, 0.96, 1.0 }, " - " .. tostring(row.effect))
     end
 
     if type(row.items) == "table" then
@@ -1764,7 +1841,7 @@ local function draw_dsk_type12_focus_reference()
             if row.category and row.category ~= current_category then
                 current_category = row.category
                 ImGui.Spacing()
-                col_text(Theme.header or Theme.item, tostring(current_category))
+                col_text({ 0.56, 0.84, 0.74, 1.0 }, tostring(current_category))
             end
             shown = shown + 1
             draw_dsk_type12_focus_record(row, i)
@@ -1846,7 +1923,7 @@ local function draw_single(list, snap, view_key)
                     ImGui.TableNextRow()
                     ImGui.TableSetColumnIndex(0); col_text(row_color(row), row_label(row))
                     ImGui.TableSetColumnIndex(1); ImGui.Text(e.slot or "")
-                    ImGui.TableSetColumnIndex(2); col_text(row_color(row), e.item or "?"); draw_item_context(row, "single_" .. tostring(i), snap, view_key)
+                    ImGui.TableSetColumnIndex(2); col_text(row_color(row), M.display_item_name(e.item)); M.draw_progression_marker(row); draw_item_context(row, "single_" .. tostring(i), snap, view_key)
                     ImGui.TableSetColumnIndex(3)
                     if row.match then
                         ImGui.Text(row_location(row))
@@ -2035,7 +2112,7 @@ local function draw_all_lists_search(needle)
             ImGui.TableSetColumnIndex(0)
             col_text(Theme.dim, hit.list_name or "?")
             ImGui.TableSetColumnIndex(1)
-            col_text(Theme.item, hit.name or "?")
+            col_text(Theme.item, M.display_item_name(hit.name))
             ImGui.TableSetColumnIndex(2)
             col_text(Theme.dim, hit.slot ~= "" and hit.slot or "-")
             ImGui.TableSetColumnIndex(3)
@@ -2077,7 +2154,7 @@ local function draw_catalog_single(list_id, snap, view_key)
                     local slot_name = row.entry.slot or row.slot or ""
                     ImGui.TableNextRow()
                     ImGui.TableSetColumnIndex(0); ImGui.Text(slot_name)
-                    ImGui.TableSetColumnIndex(1); col_text(row_color(row), row.entry.item or "?"); draw_item_context(row, "cat_single_" .. tostring(i), snap, view_key)
+                    ImGui.TableSetColumnIndex(1); col_text(row_color(row), M.display_item_name(row.entry.item)); M.draw_progression_marker(row); draw_item_context(row, "cat_single_" .. tostring(i), snap, view_key)
                     ImGui.TableSetColumnIndex(2); col_text(row_color(row), row_label(row))
                     ImGui.TableSetColumnIndex(3)
                     if row.match then
@@ -2105,7 +2182,7 @@ end
 catalog_cell_text = function(row, layout, name_max)
     if not row or row.empty or not row.entry then return "-" end
     if layout == "ultra" then return status_glyph(row) end
-    local item = row.entry.item or "?"
+    local item = M.display_item_name(row.entry.item)
     if row.status == "equipped" and row.match then return item .. " (" .. compact_location(row) .. ")" end
     if row.status == "carried" and row.match and row.from_bis_search then
         local loc = compact_location(row)
@@ -2246,18 +2323,19 @@ local function process_roster_build_job(cache_key)
             job.index = job.index + 1
             if ref.header then
                 if catalog_row_matches(ref, job.needle or "") then
-                    job.rows[#job.rows + 1] = { header = true, category = ref.category }
+                    job.rows[#job.rows + 1] = { header = true, category = ref.category, source_list_id = ref.source_list_id }
                 end
             else
                 local rows, any_missing, any_match = {}, false, (job.needle or "") == ""
                 local any_real = false
+                local source_list_id = ref.source_list_id or job.list_id
                 for _, key in ipairs(job.keys or {}) do
                     local snap = job.snaps and job.snaps[key]
                     local row
                     if ref.spell_index then
-                        row = catalog.evaluate_spell_index(job.list_id, snap, ref.spell_index, ref.category)
+                        row = catalog.evaluate_spell_index(source_list_id, snap, ref.spell_index, ref.category)
                     else
-                        row = catalog.evaluate_slot(job.list_id, snap, ref.slot, ref.category)
+                        row = catalog.evaluate_slot(source_list_id, snap, ref.slot, ref.category)
                     end
                     rows[key] = row
                     if row and not row.header and not row.empty and not row.pad then
@@ -2278,6 +2356,7 @@ local function process_roster_build_job(cache_key)
                         spell_index = ref.spell_index,
                         hide_slot = ref.hide_slot == true or ref.spell_index ~= nil,
                         category = ref.category,
+                        source_list_id = source_list_id,
                         rows = rows,
                     }
                 end
@@ -2366,17 +2445,18 @@ live_local.catalog_row = function(list_id, key, snap, rec)
     end
     local ck
     if rec.spell_index then
-        ck = "s|" .. tostring(rec.spell_index) .. "|" .. tostring(rec.category or "")
+        ck = "s|" .. tostring(rec.source_list_id or list_id) .. "|" .. tostring(rec.spell_index) .. "|" .. tostring(rec.category or "")
     else
-        ck = "t|" .. tostring(rec.slot or "") .. "|" .. tostring(rec.category or "")
+        ck = "t|" .. tostring(rec.source_list_id or list_id) .. "|" .. tostring(rec.slot or "") .. "|" .. tostring(rec.category or "")
     end
     local hit = live_local.cache[ck]
     if hit ~= nil then return hit end
     local row
+    local source_list_id = rec.source_list_id or list_id
     if rec.spell_index then
-        row = catalog.evaluate_spell_index(list_id, snap, rec.spell_index, rec.category)
+        row = catalog.evaluate_spell_index(source_list_id, snap, rec.spell_index, rec.category)
     elseif rec.slot then
-        row = catalog.evaluate_slot(list_id, snap, rec.slot, rec.category)
+        row = catalog.evaluate_slot(source_list_id, snap, rec.slot, rec.category)
     end
     live_local.cache[ck] = row
     return row
@@ -2399,6 +2479,7 @@ local function draw_catalog_cell(row, layout, layout_cfg, snap, slot, ridx, col_
         else
             local fit_w = column_width_now() or (layout_cfg and layout_cfg.fit_w)
             _, clipped = views.colored_text_fit(row_color(row), txt, fit_w)
+            M.draw_progression_marker(row)
         end
         draw_item_context(row, "cat_roster_" .. tostring(ridx) .. "_" .. tostring(col_idx), snap, nil)
         draw_cell_tooltip(row, snap, slot or (row.entry and row.entry.slot))
@@ -2714,7 +2795,7 @@ end
 -- List pill lives in bis_list_pill.lua (keeps this chunk under the 200-local limit).
 -- Force-reload when VERSION changes so /lua stop+run picks up edits (MQ may keep package.loaded).
 function M.draw_list_pill(opts)
-    local ver = 12
+    local ver = 13
     if rawget(_G, "__TGListPillVer") ~= ver then
         package.loaded["bis_list_pill"] = nil
         _G.__TGListPillVer = ver

@@ -26,8 +26,11 @@
 |        /mac TurboGive collect raid     (collect from all e3 bots)
 |        /mac TurboGive collect cash [#] [all]  (collect plat from group; omit or 0 = all plat+gp+sp+cp; aliases: plat, pp)
 |        /mac TurboGive collect dc [#] [all]    (collect Diamond Coin from group)
+|        /mac TurboGive _senddc CHAR [#] [ack]  (internal: send Diamond Coins to CHAR)
 |        /mac TurboGive _sendrc CHAR [#]        (internal: send Radiant Crystals to CHAR)
 |        /mac TurboGive _sendcrest CHAR [#]     (internal: send Celestial Crests to CHAR)
+|        /mac TurboGive _sendps CHAR [#] [ack]  (internal: send Planar Symbols to CHAR)
+|        /mac TurboGive _sendts CHAR [#] [ack]  (internal: send Taelosian Symbols to CHAR)
 |        /mac TurboGive bank             (tell group to pull from bank; runner does not pull)
 |        /mac TurboGive bank solo        (pull my own items from bank only)
 |        /mac TurboGive bank all         (tell all e3 bots to pull; runner does not pull)
@@ -61,18 +64,47 @@
 #turbo 100
 
 | =====================================================================
+| TARGETED REMOTE COMMAND BRIDGE — delegates routing to TurboGear transport.
+| =====================================================================
+Sub EncodeRemotePayload(string raw)
+    /declare encoded string local ${raw}
+    /varset encoded ${encoded.Replace[%,%25]}
+    /varset encoded ${encoded.Replace[/,%2F]}
+    /varset encoded ${encoded.Replace[ ,%20]}
+/return ${encoded}
+
+Sub RemoteCmd(string targetName, string remoteCommand)
+    /if (!${targetName.Length} || ${targetName.Equal[NULL]}) /return FALSE
+    /if (!${remoteCommand.Length} || ${remoteCommand.Equal[NULL]}) /return FALSE
+    /if (!${Defined[_remoteRouteHint]}) /declare _remoteRouteHint string outer e3
+    /declare remoteRoute string local ${_remoteRouteHint.Lower.Replace[ ,]}
+    /if (!${remoteRoute.Length} || ${remoteRoute.Equal[NULL]} || ${remoteRoute.Equal[e3]} || ${remoteRoute.Equal[e3_fallback]}) {
+        /squelch /e3bct ${targetName} ${remoteCommand}
+        /return TRUE
+    }
+    /call EncodeRemotePayload "${remoteCommand}"
+    /declare encodedCommand string local ${Macro.Return}
+    /if (!${encodedCommand.Length} || ${encodedCommand.Equal[NULL]}) /return FALSE
+    /squelch /lua run turbo_remote_cmd ${targetName} encoded ${encodedCommand}
+/return TRUE
+
+| =====================================================================
 | SEND DONE TO ORCHESTRATOR — used when bot finishes a broadcast task
 | Works whether grouped or not, leader or not. Orchestrator receives via e3bc.
 | =====================================================================
-Sub SendDoneToOrchestrator
+Sub SendDoneToOrchestrator(string notifyName)
     | Echo theme: ${tgTag} then \ar[DONE]\ar / \ar[SIGNAL_DONE]\ar (red; names + -> plain for #event captures).
     | Always /echo locally first: Stock Up / Collect DC on THIS box must see [DONE]
     | even when /squelch /e3bc suppresses the sender's own e3bc line.
     /if (!${Defined[tgTag]}) /declare tgTag string local \at[turboGive]
     /echo ${tgTag} \ar[DONE]\aw ${Me.Name}->LOCAL
+    /if (${notifyName.Length} && !${notifyName.Equal[NULL]} && !${notifyName.Equal[${Me.Name}]}) {
+        /call RemoteCmd "${notifyName}" "/echo ${tgTag} \ar[SIGNAL_DONE]\aw ${Me.Name}"
+        /return
+    }
     /if (${Me.Grouped} && ${Group.Leader.Name.Length} && !${Group.Leader.Name.Equal[NULL]} && !${Group.Leader.Name.Equal[${Me.Name}]}) {
         /squelch /e3bc /echo ${tgTag} \ar[DONE]\aw ${Me.Name}->${Group.Leader.Name}
-        /squelch /e3bct ${Group.Leader.Name} /echo ${tgTag} \ar[SIGNAL_DONE]\aw ${Me.Name}
+        /call RemoteCmd "${Group.Leader.Name}" "/echo ${tgTag} \ar[SIGNAL_DONE]\aw ${Me.Name}"
     } else {
         | Not grouped, or we're group leader — broadcast to ALL so orchestrator receives it
         /squelch /e3bc /echo ${tgTag} \ar[DONE]\aw ${Me.Name}->ALL
@@ -84,13 +116,89 @@ Sub SendDoneToOrchestrator
 | (not on the giver). Based on Hazado's RGMercs integration.
 Sub RemotePauseBot(string targetName)
     /if (!${targetName.Length} || ${targetName.Equal[NULL]}) /return
-    /squelch /e3bct ${targetName} /squelch /lua run turbo_bot_pause pause
+    /call RemoteCmd "${targetName}" "/squelch /lua run turbo_bot_pause pause"
 /return
 
 Sub RemoteResumeBot(string targetName)
     /if (!${targetName.Length} || ${targetName.Equal[NULL]}) /return
-    /squelch /e3bct ${targetName} /squelch /lua run turbo_bot_pause resume
+    /call RemoteCmd "${targetName}" "/squelch /lua run turbo_bot_pause resume"
 /return
+
+| =====================================================================
+| REMOTE CURRENCY RECLAIM ACK — used by sender modes that need recipient reclaim.
+| =====================================================================
+Sub RequestRemoteCurrencyReclaimOnce(string recipientName, string currencyKey, int reclaimSeq)
+    /if (!${recipientName.Length} || ${recipientName.Equal[NULL]}) /return FALSE
+    /if (${recipientName.Equal[${Me.Name}]}) /return TRUE
+    /if (!${currencyKey.Length} || ${currencyKey.Equal[NULL]}) /return FALSE
+
+    /if (!${Defined[_reclaimAckRecipient]}) {
+        /declare _reclaimAckRecipient string outer
+    } else {
+        /varset _reclaimAckRecipient
+    }
+    /if (!${Defined[_reclaimAckKey]}) {
+        /declare _reclaimAckKey string outer
+    } else {
+        /varset _reclaimAckKey
+    }
+    /if (!${Defined[_reclaimAckSeq]}) {
+        /declare _reclaimAckSeq int outer 0
+    } else {
+        /varset _reclaimAckSeq 0
+    }
+    /if (!${Defined[_reclaimAckStatus]}) {
+        /declare _reclaimAckStatus string outer
+    } else {
+        /varset _reclaimAckStatus
+    }
+    /if (!${Defined[_reclaimAckQty]}) {
+        /declare _reclaimAckQty int outer 0
+    } else {
+        /varset _reclaimAckQty 0
+    }
+
+    /call RemoteCmd "${recipientName}" "/squelch /lua run turbo_reclaim_currency ${currencyKey} notify ${Me.Name} seq ${reclaimSeq}"
+
+    /declare reclaimWantRecipient string local ${recipientName.Upper.Replace[ ,]}
+    /declare reclaimWantKey string local ${currencyKey.Lower.Replace[ ,]}
+    /declare reclaimWait int local 0
+    /declare reclaimMaxWait int local 120
+    :WaitReclaimAck
+    /if (${reclaimWait} >= ${reclaimMaxWait}) /goto :ReclaimAckTimeout
+    /doevents
+    /if (${_reclaimAckRecipient.Upper.Equal[${reclaimWantRecipient}]} && ${_reclaimAckKey.Lower.Equal[${reclaimWantKey}]} && ${_reclaimAckSeq} == ${reclaimSeq}) /goto :ReclaimAckReceived
+    /delay 1
+    /varcalc reclaimWait ${reclaimWait}+1
+    /goto :WaitReclaimAck
+
+    :ReclaimAckReceived
+    /if (${_reclaimAckStatus.Upper.Equal[OK]} || ${_reclaimAckStatus.Upper.Equal[EMPTY]}) {
+        /if (${showDebug}) /echo ${tgTag} \ao[RECLAIM]\aw ${recipientName} ${currencyKey} ${_reclaimAckStatus} (${_reclaimAckQty}).
+        /return TRUE
+    }
+    /echo ${tgTag} \ay[RECLAIM]\aw ${recipientName} returned ${_reclaimAckStatus} for ${currencyKey} seq ${reclaimSeq}; stopping this sender.
+    /return FALSE
+
+    :ReclaimAckTimeout
+    /echo ${tgTag} \ay[RECLAIM]\aw Timed out waiting for ${recipientName} ${currencyKey} reclaim ack seq ${reclaimSeq}.
+/return FALSE
+
+Sub RequestRemoteCurrencyReclaim(string recipientName, string currencyKey)
+    /if (!${Defined[_reclaimSeq]}) {
+        /declare _reclaimSeq int outer 0
+    }
+    /varcalc _reclaimSeq ${_reclaimSeq}+1
+    /call RequestRemoteCurrencyReclaimOnce "${recipientName}" "${currencyKey}" ${_reclaimSeq}
+    /if (${Macro.Return.Equal[TRUE]}) /return TRUE
+
+    /echo ${tgTag} \ay[RECLAIM]\aw Retrying ${recipientName} ${currencyKey} reclaim once.
+    /varcalc _reclaimSeq ${_reclaimSeq}+1
+    /call RequestRemoteCurrencyReclaimOnce "${recipientName}" "${currencyKey}" ${_reclaimSeq}
+    /if (${Macro.Return.Equal[TRUE]}) /return TRUE
+
+    /echo ${tgTag} \ar[RECLAIM]\aw ${recipientName} did not acknowledge ${currencyKey} reclaim after retry; aborting this sender's remaining currency.
+/return FALSE
 
 | =====================================================================
 | EVENT HANDLERS
@@ -104,6 +212,7 @@ Sub RemoteResumeBot(string targetName)
 #event CharDone "#*#[SIGNAL_DONE]#*##1#"
 #event CharDoneBC "#*#[DONE]#*##1#->#2#"
 #event CharDoneTell "#1# tells you, 'Done sending you items'"
+#event ReclaimDone "[RECLAIM_DONE] #1# #2# #3# #4# #5#"
 #event TradeCancelled "Trade cancelled."
 #event TradeComplete "The trade has been completed."
 #event TooFar "You are too far away from #1# to trade."
@@ -925,11 +1034,11 @@ Sub FillAndFinalizeStackTrade(string targetName, int maxThisSession, string stac
     /if (${Window[TradeWnd].Open} && !${Cursor.ID}) {
         /notify TradeWnd TRDW_Trade_Button leftmouseup
     }
-    /squelch /e3bct ${targetName} /notify TradeWnd TRDW_Trade_Button LeftMouseUp
+    /call RemoteCmd "${targetName}" "/notify TradeWnd TRDW_Trade_Button LeftMouseUp"
     /delay 30 !${Window[TradeWnd].Open}
 
     /if (${Window[TradeWnd].Open}) {
-        /squelch /e3bct ${targetName} /notify TradeWnd TRDW_Trade_Button LeftMouseUp
+        /call RemoteCmd "${targetName}" "/notify TradeWnd TRDW_Trade_Button LeftMouseUp"
         /delay 30 !${Window[TradeWnd].Open}
     }
 
@@ -978,6 +1087,23 @@ Sub Main(string modeIn, string argIn)
     /varset tgIsBroadcastGiver FALSE
     /if (${modeUpper.Equal[ZONE]}) /varset tgIsBroadcastGiver TRUE
     /if (${modeUpper.Equal[GROUP]}) /varset tgIsBroadcastGiver TRUE
+
+    | Targeted-command route hint from Lua collectors. Defaults to historical E3
+    | direct delivery so manual TurboGive usage keeps old behavior when absent.
+    /if (!${Defined[_remoteRouteHint]}) {
+        /declare _remoteRouteHint string outer e3
+    } else {
+        /varset _remoteRouteHint e3
+    }
+    /if (${modeUpper.Equal[_SENDCASH]} || ${modeUpper.Equal[_SENDDC]} || ${modeUpper.Equal[_SENDCREST]} || ${modeUpper.Equal[_SENDPS]} || ${modeUpper.Equal[_SENDTS]} || ${modeUpper.Equal[_SENDSTACK]}) {
+        /if (${Param2.Length} && ${Param2.Upper.Equal[ROUTE]} && ${Param3.Length}) /varset _remoteRouteHint ${Param3}
+        /if (${Param3.Length} && ${Param3.Upper.Equal[ROUTE]} && ${Param4.Length}) /varset _remoteRouteHint ${Param4}
+        /if (${Param4.Length} && ${Param4.Upper.Equal[ROUTE]} && ${Param5.Length}) /varset _remoteRouteHint ${Param5}
+        /if (${Param5.Length} && ${Param5.Upper.Equal[ROUTE]} && ${Param6.Length}) /varset _remoteRouteHint ${Param6}
+        /if (${Param6.Length} && ${Param6.Upper.Equal[ROUTE]} && ${Param7.Length}) /varset _remoteRouteHint ${Param7}
+        /if (${Param7.Length} && ${Param7.Upper.Equal[ROUTE]} && ${Param8.Length}) /varset _remoteRouteHint ${Param8}
+        /if (${Param8.Length} && ${Param8.Upper.Equal[ROUTE]} && ${Param9.Length}) /varset _remoteRouteHint ${Param9}
+    }
 
     /if (!${Defined[iniFile]}) {
         /declare iniFile string outer ../Config/turboloot.ini
@@ -1420,18 +1546,29 @@ Sub Main(string modeIn, string argIn)
     | ---- INTERNAL: _SENDCASH (broadcast target sends cash to collector) ----
     /if (${modeUpper.Equal[_SENDCASH]}) {
         /declare sendCashAmt int local 0
+        /declare sendCashNotify string local
         /if (${Param2.Length} && ${Int[${Param2}]} > 0) /varset sendCashAmt ${Int[${Param2}]}
+        /if (${Param2.Length} && ${Param2.Upper.Equal[NOTIFY]} && ${Param3.Length}) /varset sendCashNotify ${Param3}
+        /if (${Param3.Length} && ${Param3.Upper.Equal[NOTIFY]} && ${Param4.Length}) /varset sendCashNotify ${Param4}
         /call SendMyCash "${arg}" ${sendCashAmt}
-        /call SendDoneToOrchestrator
+        /call SendDoneToOrchestrator "${sendCashNotify}"
         /return
     }
 
     | ---- INTERNAL: _SENDDC (broadcast target sends DC to collector) ----
     /if (${modeUpper.Equal[_SENDDC]}) {
         /declare sendDcAmt int local 0
+        /declare sendDcAck int local 0
+        /declare sendDcNotify string local
         /if (${Param2.Length} && ${Int[${Param2}]} > 0) /varset sendDcAmt ${Int[${Param2}]}
-        /call SendMyDC "${arg}" ${sendDcAmt}
-        /call SendDoneToOrchestrator
+        /if (${Param2.Length} && ${Param2.Upper.Equal[ACK]}) /varset sendDcAck 1
+        /if (${Param3.Length} && ${Param3.Upper.Equal[ACK]}) /varset sendDcAck 1
+        /if (${Param4.Length} && ${Param4.Upper.Equal[ACK]}) /varset sendDcAck 1
+        /if (${Param2.Length} && ${Param2.Upper.Equal[NOTIFY]} && ${Param3.Length}) /varset sendDcNotify ${Param3}
+        /if (${Param3.Length} && ${Param3.Upper.Equal[NOTIFY]} && ${Param4.Length}) /varset sendDcNotify ${Param4}
+        /if (${Param4.Length} && ${Param4.Upper.Equal[NOTIFY]} && ${Param5.Length}) /varset sendDcNotify ${Param5}
+        /call SendMyDC "${arg}" ${sendDcAmt} ${sendDcAck}
+        /call SendDoneToOrchestrator "${sendDcNotify}"
         /return
     }
 
@@ -1447,9 +1584,46 @@ Sub Main(string modeIn, string argIn)
     | ---- INTERNAL: _SENDCREST (broadcast target sends Celestial Crests to collector) ----
     /if (${modeUpper.Equal[_SENDCREST]}) {
         /declare sendCrestAmt int local 0
+        /declare sendCrestNotify string local
         /if (${Param2.Length} && ${Int[${Param2}]} > 0) /varset sendCrestAmt ${Int[${Param2}]}
+        /if (${Param2.Length} && ${Param2.Upper.Equal[NOTIFY]} && ${Param3.Length}) /varset sendCrestNotify ${Param3}
+        /if (${Param3.Length} && ${Param3.Upper.Equal[NOTIFY]} && ${Param4.Length}) /varset sendCrestNotify ${Param4}
         /call SendMyCrest "${arg}" ${sendCrestAmt}
-        /call SendDoneToOrchestrator
+        /call SendDoneToOrchestrator "${sendCrestNotify}"
+        /return
+    }
+
+    | ---- INTERNAL: _SENDPS (broadcast target sends Planar Symbols to collector) ----
+    /if (${modeUpper.Equal[_SENDPS]}) {
+        /declare sendPsAmt int local 0
+        /declare sendPsAck int local 0
+        /declare sendPsNotify string local
+        /if (${Param2.Length} && ${Int[${Param2}]} > 0) /varset sendPsAmt ${Int[${Param2}]}
+        /if (${Param2.Length} && ${Param2.Upper.Equal[ACK]}) /varset sendPsAck 1
+        /if (${Param3.Length} && ${Param3.Upper.Equal[ACK]}) /varset sendPsAck 1
+        /if (${Param4.Length} && ${Param4.Upper.Equal[ACK]}) /varset sendPsAck 1
+        /if (${Param2.Length} && ${Param2.Upper.Equal[NOTIFY]} && ${Param3.Length}) /varset sendPsNotify ${Param3}
+        /if (${Param3.Length} && ${Param3.Upper.Equal[NOTIFY]} && ${Param4.Length}) /varset sendPsNotify ${Param4}
+        /if (${Param4.Length} && ${Param4.Upper.Equal[NOTIFY]} && ${Param5.Length}) /varset sendPsNotify ${Param5}
+        /call SendMySymbolCurrency "${arg}" ${sendPsAmt} "Planar Symbol" "Planar Symbols" "Planar Symbol" "ps" "Planar Symbols" ${sendPsAck}
+        /call SendDoneToOrchestrator "${sendPsNotify}"
+        /return
+    }
+
+    | ---- INTERNAL: _SENDTS (broadcast target sends Taelosian Symbols to collector) ----
+    /if (${modeUpper.Equal[_SENDTS]}) {
+        /declare sendTsAmt int local 0
+        /declare sendTsAck int local 0
+        /declare sendTsNotify string local
+        /if (${Param2.Length} && ${Int[${Param2}]} > 0) /varset sendTsAmt ${Int[${Param2}]}
+        /if (${Param2.Length} && ${Param2.Upper.Equal[ACK]}) /varset sendTsAck 1
+        /if (${Param3.Length} && ${Param3.Upper.Equal[ACK]}) /varset sendTsAck 1
+        /if (${Param4.Length} && ${Param4.Upper.Equal[ACK]}) /varset sendTsAck 1
+        /if (${Param2.Length} && ${Param2.Upper.Equal[NOTIFY]} && ${Param3.Length}) /varset sendTsNotify ${Param3}
+        /if (${Param3.Length} && ${Param3.Upper.Equal[NOTIFY]} && ${Param4.Length}) /varset sendTsNotify ${Param4}
+        /if (${Param4.Length} && ${Param4.Upper.Equal[NOTIFY]} && ${Param5.Length}) /varset sendTsNotify ${Param5}
+        /call SendMySymbolCurrency "${arg}" ${sendTsAmt} "Taelosian Symbol" "Taelosian Symbols" "Taelosian Symbol" "ts" "Taelosian Symbols" ${sendTsAck}
+        /call SendDoneToOrchestrator "${sendTsNotify}"
         /return
     }
 
@@ -1472,6 +1646,7 @@ Sub Main(string modeIn, string argIn)
     /if (${modeUpper.Equal[_SENDSTACK]}) {
         /declare sendStackId int local 0
         /declare sendStackQty int local 0
+        /declare sendStackNotify string local
         /if (${Param2.Length} && ${Param2.Upper.Equal[ID]} && ${Param3.Length} && ${Int[${Param3}]} > 0) {
             | _sendstack CHAR id ITEMID QTY  (rare)
             /varset sendStackId ${Int[${Param3}]}
@@ -1485,13 +1660,15 @@ Sub Main(string modeIn, string argIn)
             /if (${Param2.Length} && ${Int[${Param2}]} > 0) /varset sendStackId ${Int[${Param2}]}
             /if (${Param3.Length} && ${Int[${Param3}]} > 0) /varset sendStackQty ${Int[${Param3}]}
         }
+        /if (${Param4.Length} && ${Param4.Upper.Equal[NOTIFY]} && ${Param5.Length}) /varset sendStackNotify ${Param5}
+        /if (${Param5.Length} && ${Param5.Upper.Equal[NOTIFY]} && ${Param6.Length}) /varset sendStackNotify ${Param6}
         /if (${sendStackId} <= 0 || ${sendStackQty} <= 0) {
             /echo ${tgTag} \arUsage: /mac turbogive _sendstack CHAR ITEMID QTY\ax
             /echo ${tgTag} \ar   or: /mac turbogive _sendstack CHAR QTY id ITEMID\ax
             /return
         }
         /call SendMyStack "${arg}" ${sendStackId} ${sendStackQty}
-        /call SendDoneToOrchestrator
+        /call SendDoneToOrchestrator "${sendStackNotify}"
         /return
     }
 
@@ -4012,6 +4189,20 @@ Sub Event_CharDoneTell(string line, string charName)
     /if (${Defined[charDone]}) /varset charDone TRUE
 /return
 
+Sub Event_ReclaimDone(string line, string recipientName, string currencyKey, string reclaimSeq, string status, string qty)
+    /declare cleanRecipient string local ${recipientName.Replace[ ,]}
+    /declare cleanKey string local ${currencyKey.Lower.Replace[ ,]}
+    /declare cleanSeq int local ${Int[${reclaimSeq}]}
+    /declare cleanStatus string local ${status.Upper.Replace[ ,]}
+    /declare cleanQty int local ${Int[${qty}]}
+    /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Reclaim ACK from ${cleanRecipient} ${cleanKey} seq ${cleanSeq}: ${cleanStatus} ${cleanQty}"
+    /if (${Defined[_reclaimAckRecipient]}) /varset _reclaimAckRecipient ${cleanRecipient}
+    /if (${Defined[_reclaimAckKey]}) /varset _reclaimAckKey ${cleanKey}
+    /if (${Defined[_reclaimAckSeq]}) /varset _reclaimAckSeq ${cleanSeq}
+    /if (${Defined[_reclaimAckStatus]}) /varset _reclaimAckStatus ${cleanStatus}
+    /if (${Defined[_reclaimAckQty]}) /varset _reclaimAckQty ${cleanQty}
+/return
+
 Sub Event_TradeCancelled
     /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Trade was cancelled"
 /return
@@ -4949,7 +5140,7 @@ Sub SendMyCash(string collectorName, int maxAmount)
     /declare mySilver int local ${Me.Silver}
     /declare myCopper int local ${Me.Copper}
     /if (${myPlat} <= 0 && ${myGold} <= 0 && ${mySilver} <= 0 && ${myCopper} <= 0) {
-        /echo ${tgTag} \awNo coin to send.
+        /if (${showDebug}) /echo ${tgTag} \awNo coin to send.
         /return
     }
 
@@ -5115,7 +5306,7 @@ Sub SendMyCash(string collectorName, int maxAmount)
     | Tell collector to accept — retry up to 3 times
     /declare acceptTry int local 0
     :RetryAcceptSC
-    /squelch /e3bct ${collectorName} /notify TradeWnd TRDW_Trade_Button LeftMouseUp
+    /call RemoteCmd "${collectorName}" "/notify TradeWnd TRDW_Trade_Button LeftMouseUp"
     /delay 20 !${Window[TradeWnd].Open}
     /if (${Window[TradeWnd].Open}) {
         /varcalc acceptTry ${acceptTry}+1
@@ -5139,7 +5330,7 @@ Sub SendMyCash(string collectorName, int maxAmount)
     /if (${afterSilver} < ${mySilver}) /varset sentAny TRUE
     /if (${afterCopper} < ${myCopper}) /varset sentAny TRUE
     /if (${sentAny}) {
-        /echo ${tgTag} \ao[SEND CASH]\aw Sent to ${collectorName}: ${Math.Calc[${myPlat}-${afterPlat}]}pp ${Math.Calc[${myGold}-${afterGold}]}gp ${Math.Calc[${mySilver}-${afterSilver}]}sp ${Math.Calc[${myCopper}-${afterCopper}]}cp.
+        /if (${showDebug}) /echo ${tgTag} \ao[SEND CASH]\aw Sent to ${collectorName}: ${Math.Calc[${myPlat}-${afterPlat}]}pp ${Math.Calc[${myGold}-${afterGold}]}gp ${Math.Calc[${mySilver}-${afterSilver}]}sp ${Math.Calc[${myCopper}-${afterCopper}]}cp.
     } else {
         /echo ${tgTag} \ar[SEND CASH] Trade may have failed - coin unchanged.
     }
@@ -5149,7 +5340,7 @@ Sub SendMyCash(string collectorName, int maxAmount)
 | =====================================================================
 | CURRENCY: SEND MY DC (internal — bot sends Diamond Coins to collector)
 | =====================================================================
-Sub SendMyDC(string collectorName, int maxAmount)
+Sub SendMyDC(string collectorName, int maxAmount, int requireReclaimAck)
     /if (${collectorName.Equal[${Me.Name}]}) /return
 
     /declare dcCount int local ${FindItemCount[=Diamond Coin]}
@@ -5162,7 +5353,7 @@ Sub SendMyDC(string collectorName, int maxAmount)
         /varset dcCount ${FindItemCount[=Diamond Coin]}
     }
     /if (${dcCount} <= 0) {
-        /echo ${tgTag} \awNo Diamond Coin to send.
+        /if (${showDebug}) /echo ${tgTag} \awNo Diamond Coin to send.
         /return
     }
 
@@ -5223,11 +5414,16 @@ Sub SendMyDC(string collectorName, int maxAmount)
     /if (${_dcTradeAborted}) /goto :SendDCDone
     /if (${sessTraded} <= 0) /goto :SendDCDone
 
+    /if (${requireReclaimAck} > 0) {
+        /call RequestRemoteCurrencyReclaim "${collectorName}" "dc"
+        /if (!${Macro.Return.Equal[TRUE]}) /goto :SendDCDone
+    }
+
     /delay 5
     /goto :SendMoreDC
 
     :SendDCDone
-    /echo ${tgTag} \ao[SEND DC]\aw Sent ${dcTraded} Diamond Coin to ${collectorName} in ${outerSess} session(s).
+    /if (${showDebug}) /echo ${tgTag} \ao[SEND DC]\aw Sent ${dcTraded} Diamond Coin to ${collectorName} in ${outerSess} session(s).
     /if (${wasFollowingSD}) /squelch /afollow unpause
 /return
 
@@ -5473,6 +5669,218 @@ Sub ReclaimAltRC
 /return
 
 | =====================================================================
+| CURRENCY: SEND MY PLANAR/TAELOSIAN SYMBOLS (internal)
+| Creates inventory symbol items from alt currency, then stack-trades.
+| =====================================================================
+Sub SymbolAltAmount(string altPlural, string altSingular)
+    /declare sa int local ${Me.AltCurrency[${altPlural}]}
+    /if (${sa} <= 0) /varset sa ${Me.AltCurrency[${altSingular}]}
+/return ${sa}
+
+Sub SendMySymbolCurrency(string collectorName, int maxAmount, string itemName, string altPlural, string altSingular, string currencyKey, string label, int requireReclaimAck)
+    /if (${collectorName.Equal[${Me.Name}]}) /return
+
+    /declare symInv int local ${FindItemCount[=${itemName}]}
+    /call SymbolAltAmount "${altPlural}" "${altSingular}"
+    /declare symAlt int local ${Macro.Return}
+    /if (${symInv} <= 0 && ${symAlt} > 0) {
+        /if (!${Me.FreeInventory}) {
+            /echo ${tgTag} \ay[SEND ${currencyKey}]\aw No open inventory slots to create ${itemName}. Free bag space and re-run.
+            /return
+        }
+        /call ConvertAltSymbol2Currency "${itemName}" "${altPlural}" "${altSingular}" ${If[${maxAmount}>0 && ${maxAmount}<7000,${maxAmount},7000]}
+        /varset symInv ${FindItemCount[=${itemName}]}
+    }
+    /if (${symInv} <= 0) {
+        /if (${showDebug}) /echo ${tgTag} \awNo ${itemName} to send.
+        /return
+    }
+
+    /declare wasFollowingSS bool local FALSE
+    /if (${AdvPath.Following}) {
+        /varset wasFollowingSS TRUE
+        /squelch /afollow pause
+    }
+
+    /call AcquireTradeTarget "${collectorName}"
+    /if (!${_tradeTargetID}) {
+        /echo ${tgTag} \ar[SEND ${currencyKey}]\aw Cannot target ${collectorName} as a PC.
+        /if (${wasFollowingSS}) /squelch /afollow unpause
+        /return
+    }
+
+    /if (${Target.Distance} > 15) {
+        /call NavToIDWithDoorsAndNudges ${_tradeTargetID} 10 300
+    }
+    /face fast
+    /delay 3
+
+    /declare symTraded int local 0
+    /declare outerSessSym int local 0
+    /declare outerCapSym int local 400
+    /declare sessTradedSym int local 0
+    /declare remainingCapSym int local 0
+
+    :SendMoreSymbol
+    /varcalc outerSessSym ${outerSessSym}+1
+    /if (${outerSessSym} > ${outerCapSym}) {
+        /echo ${tgTag} \ar[SEND ${currencyKey}]\ay [SAFETY]\aw Hard cap hit after ${outerCapSym} sessions - re-run for remaining ${label}.
+        /goto :SendSymbolDone
+    }
+    /if (${maxAmount} > 0 && ${symTraded} >= ${maxAmount}) /goto :SendSymbolDone
+    /varset remainingCapSym ${If[${maxAmount}>0,${Math.Calc[${maxAmount}-${symTraded}].Int},0]}
+    /call SymbolAltAmount "${altPlural}" "${altSingular}"
+    /varset symAlt ${Macro.Return}
+    /if (${FindItemCount[=${itemName}]} <= 0 && ${symAlt} > 0) {
+        /if (!${Me.FreeInventory}) {
+            /echo ${tgTag} \ay[SEND ${currencyKey}]\aw No open inventory slots to create more ${itemName}. Stopping after ${symTraded} sent.
+            /goto :SendSymbolDone
+        }
+        /call ConvertAltSymbol2Currency "${itemName}" "${altPlural}" "${altSingular}" ${If[${remainingCapSym}>0 && ${remainingCapSym}<7000,${remainingCapSym},7000]}
+    }
+    /if (${FindItemCount[=${itemName}]} <= 0) /goto :SendSymbolDone
+
+    /varset remainingCapSym ${If[${maxAmount}>0,${Math.Calc[${maxAmount}-${symTraded}].Int},0]}
+
+    /call FillAndFinalizeStackTrade "${collectorName}" ${remainingCapSym} "${itemName}"
+    /varset sessTradedSym ${Macro.Return}
+    /varcalc symTraded ${symTraded}+${sessTradedSym}
+
+    /if (${_dcAbortReceiverFull}) {
+        /echo ${tgTag} \ay[SEND ${currencyKey}]\aw ${collectorName}'s bags/trade slots are full - stopping. Free inventory space on ${collectorName}, then re-run for remaining ${label}.
+        /goto :SendSymbolDone
+    }
+    /if (${_dcTradeAborted}) /goto :SendSymbolDone
+    /if (${sessTradedSym} <= 0) /goto :SendSymbolDone
+
+    /if (${requireReclaimAck} > 0) {
+        /call RequestRemoteCurrencyReclaim "${collectorName}" "${currencyKey}"
+        /if (!${Macro.Return.Equal[TRUE]}) /goto :SendSymbolDone
+    }
+
+    /delay 5
+    /goto :SendMoreSymbol
+
+    :SendSymbolDone
+    /if (${showDebug}) /echo ${tgTag} \ao[SEND ${currencyKey}]\aw Sent ${symTraded} ${itemName} to ${collectorName} in ${outerSessSym} session(s).
+    /if (${wasFollowingSS}) /squelch /afollow unpause
+/return
+
+Sub SelectSymbolAltCurrency(string contextTag, string altPlural, string altSingular)
+    /declare symListID int local 0
+    /declare ctx string local ${contextTag}
+    /if (!${ctx.Length} || ${ctx.Equal[NULL]}) /varset ctx EXCHANGE
+
+    /if (!${Window[InventoryWindow].Open}) {
+        /echo ${tgTag} \ar[${ctx}]\aw Inventory window is not open; cannot select ${altPlural}.
+        /return 0
+    }
+
+    /notify InventoryWindow IW_Subwindows tabselect 5
+    /delay 5
+
+    /varset symListID ${Window[InventoryWindow].Child[IW_AltCurr_PointList].List[=${altPlural},2]}
+    /if (${symListID} <= 0) /varset symListID ${Window[InventoryWindow].Child[IW_AltCurr_PointList].List[=${altSingular},2]}
+    /if (${symListID} <= 0) {
+        /echo ${tgTag} \ar[${ctx}]\aw Could not find ${altPlural} in the Alt Currency list. Open Inventory -> Alt Currency and confirm the row name.
+        /return 0
+    }
+
+    /notify InventoryWindow IW_AltCurr_PointList listselect ${symListID} leftmouseup
+    /delay 3
+/return ${symListID}
+
+Sub ConvertAltSymbol2Currency(string itemName, string altPlural, string altSingular, int maxAmount)
+    /call SymbolAltAmount "${altPlural}" "${altSingular}"
+    /declare altSym int local ${Macro.Return}
+    /if (${altSym} <= 0) {
+        /if (${showDebug}) /echo ${tgTag} \awNo alt-currency ${altPlural} to convert.
+        /return
+    }
+    /declare symCreateStackMax int local 200
+    /declare convertLimit int local ${maxAmount}
+    /if (${convertLimit} <= 0 || ${convertLimit} > ${altSym}) /varset convertLimit ${altSym}
+    /declare convertedSym int local 0
+    /declare beforeAltSym int local 0
+    /declare afterAltSym int local 0
+    /declare madeSym int local 0
+    /declare beforeInvSym int local 0
+    /declare afterInvSym int local 0
+    /declare madeInvSym int local 0
+    /declare createThis int local 0
+
+    /if (${showDebug}) /echo ${tgTag} \am[EXCHANGE]\aw Converting up to ${convertLimit} ${altPlural} to inventory...
+
+    /call OpenInventoryWindowForTrade
+    /if (!${Macro.Return}) {
+        /echo ${tgTag} \ar[EXCHANGE]\aw Could not open inventory window. (Check keybind: Options -> Keys -> Inventory)
+        /return
+    }
+
+    /call SelectSymbolAltCurrency EXCHANGE "${altPlural}" "${altSingular}"
+    /if (${Macro.Return} <= 0) /goto :DoneCreateSymbol
+
+    :CreateMoreSymbol
+    /if (${convertedSym} >= ${convertLimit}) /goto :DoneCreateSymbol
+    /call SymbolAltAmount "${altPlural}" "${altSingular}"
+    /varset altSym ${Macro.Return}
+    /if (${altSym} <= 0) /goto :DoneCreateSymbol
+    /if (!${Me.FreeInventory} && ${FindItemCount[=${itemName}]} <= 0) {
+        /echo ${tgTag} \ay[EXCHANGE]\aw No open inventory slots for ${itemName}. Free bag space and re-run.
+        /goto :DoneCreateSymbol
+    }
+
+    /call SymbolAltAmount "${altPlural}" "${altSingular}"
+    /varset beforeAltSym ${Macro.Return}
+    /varset beforeInvSym ${FindItemCount[=${itemName}]}
+    /varset createThis ${Math.Calc[${convertLimit}-${convertedSym}].Int}
+    /if (${createThis} > ${beforeAltSym}) /varset createThis ${beforeAltSym}
+    /if (${createThis} > ${symCreateStackMax}) /varset createThis ${symCreateStackMax}
+
+    /nomodkey /notify InventoryWindow AltCurr_CreateItemButton LeftMouseUp
+    /delay 5
+
+    /if (${Window[QuantityWnd].Open}) {
+        /if (${createThis} < ${symCreateStackMax}) {
+            /call SetQuantityWndValue ${createThis}
+        }
+        /nomodkey /notify QuantityWnd QTYW_Accept_Button LeftMouseUp
+        /delay 5
+    }
+
+    /if (${Cursor.ID}) {
+        /autoinventory
+        /delay 5 !${Cursor.ID}
+        /if (${Cursor.ID}) {
+            /autoi
+            /delay 5 !${Cursor.ID}
+        }
+    }
+    /if (${Cursor.ID}) {
+        /echo ${tgTag} \ay[EXCHANGE]\aw Inventory is full; could not place ${Cursor.Name}. Stopping conversion.
+        /call ForceClearCursor
+        /goto :DoneCreateSymbol
+    }
+
+    /call SymbolAltAmount "${altPlural}" "${altSingular}"
+    /varset afterAltSym ${Macro.Return}
+    /varset afterInvSym ${FindItemCount[=${itemName}]}
+    /varset madeSym ${Math.Calc[${beforeAltSym}-${afterAltSym}].Int}
+    /varset madeInvSym ${Math.Calc[${afterInvSym}-${beforeInvSym}].Int}
+    /if (${madeSym} <= 0 && ${madeInvSym} > 0) /varset madeSym ${madeInvSym}
+    /if (${madeSym} <= 0 && ${madeInvSym} <= 0) {
+        /echo ${tgTag} \ay[EXCHANGE]\aw No ${itemName} was created this click. Stopping conversion.
+        /goto :DoneCreateSymbol
+    }
+    /varcalc convertedSym ${convertedSym}+${madeSym}
+    /goto :CreateMoreSymbol
+
+    :DoneCreateSymbol
+    /if (${Window[InventoryWindow].Open}) /nomodkey /notify InventoryWindow DoneButton leftmouseup
+    /if (${showDebug}) /echo ${tgTag} \am[EXCHANGE]\aw Done. Inventory ${itemName}: ${FindItemCount[=${itemName}]}
+/return
+
+| =====================================================================
 | CURRENCY: SEND MY CELESTIAL CRESTS (internal — bot sends Crests to collector)
 | Creates inventory "Celestial Crest" from alt currency, then stack-trades.
 | =====================================================================
@@ -5496,7 +5904,7 @@ Sub SendMyCrest(string collectorName, int maxAmount)
         /varset crestInv ${FindItemCount[=Celestial Crest]}
     }
     /if (${crestInv} <= 0) {
-        /echo ${tgTag} \awNo Celestial Crest to send.
+        /if (${showDebug}) /echo ${tgTag} \awNo Celestial Crest to send.
         /return
     }
 
@@ -5561,7 +5969,7 @@ Sub SendMyCrest(string collectorName, int maxAmount)
     /goto :SendMoreCrest
 
     :SendCrestDone
-    /echo ${tgTag} \ao[SEND CREST]\aw Sent ${crestTraded} Celestial Crest to ${collectorName} in ${outerSessSC} session(s).
+    /if (${showDebug}) /echo ${tgTag} \ao[SEND CREST]\aw Sent ${crestTraded} Celestial Crest to ${collectorName} in ${outerSessSC} session(s).
     /if (${wasFollowingSC}) /squelch /afollow unpause
 /return
 
@@ -5593,7 +6001,7 @@ Sub ConvertAltCrest2Currency(int maxAmount)
     /call CrestAltAmount
     /declare altCrest int local ${Macro.Return}
     /if (${altCrest} <= 0) {
-        /echo ${tgTag} \awNo alt-currency Celestial Crests to convert.
+        /if (${showDebug}) /echo ${tgTag} \awNo alt-currency Celestial Crests to convert.
         /return
     }
     /declare crestCreateStackMax int local 200
@@ -5608,7 +6016,7 @@ Sub ConvertAltCrest2Currency(int maxAmount)
     /declare madeInvCrest int local 0
     /declare createThis int local 0
 
-    /echo ${tgTag} \am[EXCHANGE]\aw Converting up to ${convertLimit} Celestial Crests to inventory...
+    /if (${showDebug}) /echo ${tgTag} \am[EXCHANGE]\aw Converting up to ${convertLimit} Celestial Crests to inventory...
 
     /call OpenInventoryWindowForTrade
     /if (!${Macro.Return}) {
@@ -5676,7 +6084,7 @@ Sub ConvertAltCrest2Currency(int maxAmount)
 
     :DoneCreateCrest
     /if (${Window[InventoryWindow].Open}) /nomodkey /notify InventoryWindow DoneButton leftmouseup
-    /echo ${tgTag} \am[EXCHANGE]\aw Done. Inventory Celestial Crest: ${FindItemCount[=Celestial Crest]}
+    /if (${showDebug}) /echo ${tgTag} \am[EXCHANGE]\aw Done. Inventory Celestial Crest: ${FindItemCount[=Celestial Crest]}
 /return
 
 Sub ReclaimAltCrest
@@ -5716,7 +6124,7 @@ Sub ReclaimAltCrest
 | Reuses the hardened trade helpers (AcquireTradeTarget / VerifyTradeTarget /
 | PickupExactBagItemById / NavToIDWithDoorsAndNudges / ForceClearCursor) and the
 | same dual-side finalize the DC trade uses (sender clicks Trade, then the
-| receiver is told to click Trade over /e3bct). On any failure the item is
+| receiver is told to click Trade over the shared targeted bridge). On any failure the item is
 | returned to bags. NO INI rule is written or read for this path.
 |
 | Guards: skips self, missing/no-drop items, occupied cursor, feign. The live
@@ -5731,9 +6139,9 @@ Sub RequestTurboGearTradeSync(string recipientName)
     /squelch /timed 2 /tgearbg note
     /squelch /timed 2 /tgear note
     /if (${recipientName.Length} && !${recipientName.Equal[NULL]} && !${recipientName.Equal[${Me.Name}]}) {
-        /squelch /e3bct ${recipientName} /squelch /lua run turbogear_autostart
-        /squelch /e3bct ${recipientName} /squelch /timed 2 /tgearbg note
-        /squelch /e3bct ${recipientName} /squelch /timed 2 /tgear note
+        /call RemoteCmd "${recipientName}" "/squelch /lua run turbogear_autostart"
+        /call RemoteCmd "${recipientName}" "/squelch /timed 2 /tgearbg note"
+        /call RemoteCmd "${recipientName}" "/squelch /timed 2 /tgear note"
     }
 /return
 
@@ -6212,15 +6620,14 @@ Sub SendMyItem(string recipientName, int wantItemId)
         /return
     }
 
-    | ---- Finalize: accept on both sides (sender, then broadcast receiver) ----
-    | Receiver accept mirrors the DC finalize; it uses /e3bct directly. On
-    | non-E3 setups the recipient simply accepts the trade manually.
+    | ---- Finalize: accept on both sides (sender, then remote receiver) ----
+    | Receiver accept mirrors the DC finalize through the shared targeted bridge.
     /delay 10 ${Window[TradeWnd].Open}
     /if (${Window[TradeWnd].Open} && !${Cursor.ID}) /notify TradeWnd TRDW_Trade_Button leftmouseup
-    /squelch /e3bct ${recipientName} /notify TradeWnd TRDW_Trade_Button LeftMouseUp
+    /call RemoteCmd "${recipientName}" "/notify TradeWnd TRDW_Trade_Button LeftMouseUp"
     /delay 30 !${Window[TradeWnd].Open}
     /if (${Window[TradeWnd].Open}) {
-        /squelch /e3bct ${recipientName} /notify TradeWnd TRDW_Trade_Button LeftMouseUp
+        /call RemoteCmd "${recipientName}" "/notify TradeWnd TRDW_Trade_Button LeftMouseUp"
         /delay 30 !${Window[TradeWnd].Open}
     }
 
@@ -6426,10 +6833,10 @@ Sub SendMyStack(string recipientName, int wantItemId, int wantQty)
 
     /delay 5
     /if (${Window[TradeWnd].Open} && !${Cursor.ID}) /notify TradeWnd TRDW_Trade_Button leftmouseup
-    /squelch /e3bct ${recipientName} /notify TradeWnd TRDW_Trade_Button LeftMouseUp
+    /call RemoteCmd "${recipientName}" "/notify TradeWnd TRDW_Trade_Button LeftMouseUp"
     /delay 40 !${Window[TradeWnd].Open}
     /if (${Window[TradeWnd].Open}) {
-        /squelch /e3bct ${recipientName} /notify TradeWnd TRDW_Trade_Button LeftMouseUp
+        /call RemoteCmd "${recipientName}" "/notify TradeWnd TRDW_Trade_Button LeftMouseUp"
         /delay 30 !${Window[TradeWnd].Open}
     }
     /if (${Window[TradeWnd].Open}) {
@@ -6854,7 +7261,7 @@ Sub SelectDiamondCoinAltCurrency(string contextTag)
 Sub ConvertAltDC2Currency(int maxAmount)
     /declare altDC int local ${Me.AltCurrency[20]}
     /if (${altDC} <= 0) {
-        /echo ${tgTag} \awNo alt-currency DC to convert.
+        /if (${showDebug}) /echo ${tgTag} \awNo alt-currency DC to convert.
         /return
     }
     | Lazarus Diamond Coin inventory stacks cap at 200 per Create click.
@@ -6870,7 +7277,7 @@ Sub ConvertAltDC2Currency(int maxAmount)
     /declare madeInvDC int local 0
     /declare createThis int local 0
 
-    /echo ${tgTag} \am[EXCHANGE]\aw Converting up to ${convertLimit} alt-currency DC to inventory...
+    /if (${showDebug}) /echo ${tgTag} \am[EXCHANGE]\aw Converting up to ${convertLimit} alt-currency DC to inventory...
 
     /call OpenInventoryWindowForTrade
     /if (!${Macro.Return}) {
@@ -6935,7 +7342,7 @@ Sub ConvertAltDC2Currency(int maxAmount)
 
     :DoneCreateDC
     /if (${Window[InventoryWindow].Open}) /nomodkey /notify InventoryWindow DoneButton leftmouseup
-    /echo ${tgTag} \am[EXCHANGE]\aw Done. Inventory DC: ${FindItemCount[=Diamond Coin]}
+    /if (${showDebug}) /echo ${tgTag} \am[EXCHANGE]\aw Done. Inventory DC: ${FindItemCount[=Diamond Coin]}
 /return
 
 | =====================================================================

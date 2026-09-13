@@ -1727,7 +1727,7 @@ local function stock_launch_collect(script, recipient, label, roster, extra_args
 end
 
 local function stock_stop_collectors()
-    for _, script in ipairs({ "turbo_collect_dc", "turbo_collect_cash", "turbo_collect_crests", "turbo_collect_items", "turbo_reclaim_lotto" }) do
+    for _, script in ipairs({ "turbo_collect_dc", "turbo_collect_cash", "turbo_collect_crests", "turbo_collect_symbols", "turbo_collect_items", "turbo_reclaim_lotto" }) do
         mq.cmdf("/squelch /lua stop %s", script)
     end
     item_actions.status_msg = "Stop sent for stock collection helpers."
@@ -1820,9 +1820,22 @@ local function draw_collect_view()
         stock_launch_collect("turbo_collect_crests", recipient, "Celestial Crests", roster)
     end, "/lua run turbo_collect_crests list <selected roster> to <recipient>")
     ImGui.SameLine()
+    action_button("Planar Symbols##stock_collect_planar_symbols", section_styles.currency.button, 128, function()
+        stock_launch_collect("turbo_collect_symbols", recipient, "Planar Symbols", roster, "ps")
+    end, "/lua run turbo_collect_symbols ps list <selected roster> to <recipient>")
+    ImGui.SameLine()
+    action_button("Taelosian Symbols##stock_collect_taelosian_symbols", section_styles.currency.button, 144, function()
+        stock_launch_collect("turbo_collect_symbols", recipient, "Taelosian Symbols", roster, "ts")
+    end, "/lua run turbo_collect_symbols ts list <selected roster> to <recipient>")
+    ImGui.SameLine()
     action_button("Lucky Ticket##collect_lucky_ticket", section_styles.currency.button, 104, function()
         stock_launch_collect("turbo_collect_items", recipient, "Lucky Ticket", roster, "preset lucky_ticket")
     end, "Collects A Lucky Ticket.")
+    ImGui.SameLine()
+    action_button("Radiant Crystal Cache + Vault##collect_radiant_crystal_cache_vault", section_styles.currency.button, 218, function()
+        stock_launch_collect("turbo_collect_items", recipient, "Radiant Crystal Cache + Vault", roster,
+            "preset radiant_crystal_cache_vault")
+    end, "Collects Radiant Crystal Caches and Radiant Crystal Vault.")
 
     local function preset_button(label, preset, width, tip, style)
         style = style or section_styles.armor
@@ -1873,7 +1886,7 @@ local function draw_collect_view()
     end
     action_button("Stop Collectors##stock_collect_stop", Theme.danger or { 0.55, 0.20, 0.24, 1.0 }, stop_w, function()
         stock_stop_collectors()
-    end, "Stops Diamond Coin, Platinum, Celestial Crest, item preset, and lotto helper Lua scripts.")
+    end, "Stops Diamond Coin, Platinum, Celestial Crest, Symbol, item preset, and lotto helper Lua scripts.")
 end
 
 local function draw_stock_view()

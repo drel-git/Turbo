@@ -4490,7 +4490,7 @@ return {
     bagitems = {
       categories = {
         {
-          name = "Farmed Bag",
+          name = "HC Bag",
           slots = {
             "Adventurer's Tattered Sack (Base) (T1 Named)",
             "Reinforced Stitching Frame (T2 Trash)",
@@ -4504,7 +4504,7 @@ return {
           },
         },
         {
-          name = "Upgradable Bags (Djinn Lamp x10)",
+          name = "CC Bag (Djinn Lamp world drops)",
           slots = {
             "Celestial Strongbox (CC) (Base)",
             "Celestial Blessing of the Djinn (UPG ITM)",
@@ -4521,7 +4521,7 @@ return {
           },
         },
         {
-          name = "Upgradable Bags (Shady x4)",
+          name = "VP Bag (Draconic Binding from Shady)",
           slots = {
             "Chromatic Dragonhide Satchel (Base)",
             "Draconic Binding Thread (UPG ITM)",
@@ -4529,6 +4529,12 @@ return {
             "Scaled Dragonhide Satchel (UP2)",
             "Elder Dragonhide Satchel (UP3)",
             "Ascendant Dragonhide Satchel (UP^)",
+          },
+        },
+        {
+          name = "GC Bag",
+          slots = {
+            "The Golden Reliquary",
           },
         },
         {
@@ -4718,9 +4724,9 @@ return {
             50142,
             50143,
           },
-          item = "Blessed Celestial Strongbox|50134",
+          item = "Blessed Celestial Strongbox",
           names = {
-            "Blessed Celestial Strongbox|50134",
+            "Blessed Celestial Strongbox",
           },
           slot = "Blessed Celestial Strongbox (UP1)",
         },
@@ -4735,9 +4741,9 @@ return {
             50142,
             50143,
           },
-          item = "Blessed Celestial Strongbox|50135",
+          item = "Blessed Celestial Strongbox",
           names = {
-            "Blessed Celestial Strongbox|50135",
+            "Blessed Celestial Strongbox",
           },
           slot = "Blessed Celestial Strongbox (UP2)",
         },
@@ -4751,9 +4757,9 @@ return {
             50142,
             50143,
           },
-          item = "Blessed Celestial Strongbox|50136",
+          item = "Blessed Celestial Strongbox",
           names = {
-            "Blessed Celestial Strongbox|50136",
+            "Blessed Celestial Strongbox",
           },
           slot = "Blessed Celestial Strongbox (UP3)",
         },
@@ -4766,9 +4772,9 @@ return {
             50142,
             50143,
           },
-          item = "Blessed Celestial Strongbox|50137",
+          item = "Blessed Celestial Strongbox",
           names = {
-            "Blessed Celestial Strongbox|50137",
+            "Blessed Celestial Strongbox",
           },
           slot = "Blessed Celestial Strongbox (UP4)",
         },
@@ -4780,9 +4786,9 @@ return {
             50142,
             50143,
           },
-          item = "Blessed Celestial Strongbox|50138",
+          item = "Blessed Celestial Strongbox",
           names = {
-            "Blessed Celestial Strongbox|50138",
+            "Blessed Celestial Strongbox",
           },
           slot = "Blessed Celestial Strongbox (UP5)",
         },
@@ -4793,9 +4799,9 @@ return {
             50142,
             50143,
           },
-          item = "Blessed Celestial Strongbox|50139",
+          item = "Blessed Celestial Strongbox",
           names = {
-            "Blessed Celestial Strongbox|50139",
+            "Blessed Celestial Strongbox",
           },
           slot = "Blessed Celestial Strongbox (UP6)",
         },
@@ -4805,9 +4811,9 @@ return {
             50142,
             50143,
           },
-          item = "Blessed Celestial Strongbox|50140",
+          item = "Blessed Celestial Strongbox",
           names = {
-            "Blessed Celestial Strongbox|50140",
+            "Blessed Celestial Strongbox",
           },
           slot = "Blessed Celestial Strongbox (UP7)",
         },
@@ -4816,9 +4822,9 @@ return {
             50142,
             50143,
           },
-          item = "Blessed Celestial Strongbox|50141",
+          item = "Blessed Celestial Strongbox",
           names = {
-            "Blessed Celestial Strongbox|50141",
+            "Blessed Celestial Strongbox",
           },
           slot = "Blessed Celestial Strongbox (UP8)",
         },
@@ -4826,9 +4832,9 @@ return {
           ids = {
             50143,
           },
-          item = "Blessed Celestial Strongbox|50142",
+          item = "Blessed Celestial Strongbox",
           names = {
-            "Blessed Celestial Strongbox|50142",
+            "Blessed Celestial Strongbox",
           },
           slot = "Blessed Celestial Strongbox (UP9)",
         },
@@ -5108,6 +5114,16 @@ return {
           },
           slot = "Glorious Prize Purse (Base)",
         },
+        ["The Golden Reliquary"] = {
+          ids = {
+            50121,
+          },
+          item = "The Golden Reliquary",
+          names = {
+            "The Golden Reliquary",
+          },
+          slot = "The Golden Reliquary",
+        },
         ["Hallowed Celestial Strongbox (UP^)"] = {
           ids = {
           },
@@ -5379,6 +5395,14 @@ return {
             "Materium2",
             "Materium3",
             "Shadow",
+            "Reward",
+          },
+        },
+        {
+          name = "Epic",
+          slots = {
+            "Scales",
+            "2.75",
           },
         },
         {
@@ -5387,7 +5411,6 @@ return {
             "Misc1",
             "Misc2",
             "Misc3",
-            "Misc4",
             "Misc5",
           },
         },
@@ -20051,7 +20074,7 @@ return {
           },
         },
         {
-          name = "Paper Tanks",
+          name = "Pew Pew",
           slots = {
             "Arrow",
           },
@@ -20632,6 +20655,7 @@ return {
         Ranger = {
           Arrow = {
             ids = {
+              81683,
             },
             item = "Fabled Arrow",
             names = {

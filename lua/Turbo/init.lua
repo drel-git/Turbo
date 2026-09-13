@@ -311,7 +311,7 @@ local scriptName = 'Turbo'
 -- Suite version, parsed from lua/turbogear/CHANGELOG (the same file TurboGear and
 -- TurboPatcher read), so every surface shows one number. The literal is only a
 -- fallback for broken installs; per-file @version tags remain maintenance metadata.
-local TURBO_VERSION = '1.2.144'
+local TURBO_VERSION = '1.2.145'
 do
     local f = io.open((mq.luaDir or 'lua') .. '/turbogear/CHANGELOG', 'r')
     if f then
@@ -4570,6 +4570,27 @@ TG.openTurboPatcherExternal = function(opts)
     end
 end
 
+TG.transportStatusLabel = function(force)
+    local now = os.clock()
+    local cache = TG._transportStatusCache
+    if force ~= true and type(cache) == 'table' and (now - (tonumber(cache.at) or 0)) < 5.0 then
+        return cache.label, cache
+    end
+    local label = 'E3 (fallback)'
+    local route, reason = 'e3_fallback', 'unavailable'
+    local ok, transport = pcall(require, 'turbo_lib.transport')
+    if ok and type(transport) == 'table' and type(transport.status) == 'function' then
+        local okStatus, st = pcall(transport.status)
+        if okStatus and type(st) == 'table' then
+            label = tostring(st.label or label)
+            route = tostring(st.route or route)
+            reason = tostring(st.reason or reason)
+        end
+    end
+    TG._transportStatusCache = { label = label, route = route, reason = reason, at = now }
+    return label, TG._transportStatusCache
+end
+
 local function findE3Ini(manualFile, characterName)
     local mqPath = mq.TLO.MacroQuest.Path() or ''
     local charName = tostring(characterName or mq.TLO.Me.CleanName() or ''):match('^%s*(.-)%s*$') or ''
@@ -6148,6 +6169,7 @@ local function printHelp()
     printf('\aw    \ay/turbosnapshot\ax - active turboloot.ini settings, grouped + with descriptions\ax')
     printf('\aw    \ay/turbo hitchlog\ax [\atseconds\ax] - timed Turbo UI hitch log (default 180s; alias \ay/turbohitchlog\ax)\ax')
     printf('\aw    \ay/lua run Turbo hitchlog\ax [\atseconds\ax] - same when UI is closed (opens Turbo)\ax')
+    printf('\aw    \ay/turbowalletlegacy\ax - open the old TurboWallet popup for debugging/fallback\ax')
     printf('\aw \ax')
     printf('\at==== \ayOTHER TOOLS \at====\ax')
     printf('\aw    \ag/mac turboloot help\ax     \ag/mac turbogive help\ax     \ag/mac turbokey help\ax')
@@ -6727,6 +6749,20 @@ local function bindTurboRuntimeCommands()
     if not okWares then
         printf('\at[Turbo]\ax \ayCould not bind /turbowares: %s\ax', tostring(errWares))
     end
+    local okWalletLegacy, errWalletLegacy = pcall(function()
+        mq.bind('/turbowalletlegacy', function()
+            if TG.FleetWallet and TG.FleetWallet.openLegacy then
+                TG.FleetWallet.openLegacy()
+                TG.statusMessage = 'Legacy TurboWallet opened.'
+            else
+                TG.statusMessage = 'Legacy TurboWallet unavailable.'
+            end
+        end)
+    end)
+    TG.walletLegacyBindActive = okWalletLegacy
+    if not okWalletLegacy then
+        printf('\at[Turbo]\ax \ayCould not bind /turbowalletlegacy: %s\ax', tostring(errWalletLegacy))
+    end
     -- Review auto-clear after successful Go loot (local echo + TurboGear relay).
     local okReviewGo, errReviewGo = pcall(function()
         mq.bind('/turboreviewgoloot', function(...)
@@ -6815,6 +6851,10 @@ local function unbindTurboRuntimeCommands()
     if TG.waresBindActive then
         pcall(function() mq.unbind('/turbowares') end)
         TG.waresBindActive = false
+    end
+    if TG.walletLegacyBindActive then
+        pcall(function() mq.unbind('/turbowalletlegacy') end)
+        TG.walletLegacyBindActive = false
     end
     if TG.reviewGoLootBindActive then
         pcall(function() mq.unbind('/turboreviewgoloot') end)
@@ -10861,7 +10901,8 @@ function TG.renderWindow()
     if TG.hitchlog then TG.hitchlog.span_end() end
 
     local t = nowMS()
-    turboStaggeredAutoRefresh(g, t, { skipWallet = false })
+    local legacyWalletOpen = TG.FleetWallet and TG.FleetWallet.isOpen and TG.FleetWallet.isOpen()
+    turboStaggeredAutoRefresh(g, t, { skipWallet = legacyWalletOpen ~= true })
 
     if TG.hitchlog then TG.hitchlog.span_begin('skip_journal_poll') end
     if g.skipQueue and g.skipQueue.poll and g.skipQueue.poll() then
@@ -12875,6 +12916,10 @@ function TG.renderWindow()
                 openTurboPatcher = function(opts)
                     o.openTurboPatcherExternal(opts)
                 end,
+                transportStatus = function()
+                    local label = TG.transportStatusLabel and TG.transportStatusLabel() or 'E3 (fallback)'
+                    return label
+                end,
                 sendXTankMacro = function()
                     if TG.requireSharedControl('XTank macro broadcast') then
                         local cmd = TG.xtankBroadcastCommand()
@@ -13309,7 +13354,7 @@ while TG.windowOpen do
     -- Do not mq.doevents() here: it can interrupt TurboLoot GO while a mac is
     -- running. Review dismiss uses /turboreviewgoloot (bind) instead.
     require('Turbo.wares').processPendingActions(TG)
-    if TG.FleetWallet and TG.FleetWallet.tick then
+    if TG.FleetWallet and TG.FleetWallet.tick and TG.FleetWallet.isOpen and TG.FleetWallet.isOpen() then
         pcall(TG.FleetWallet.tick)
     end
     -- Patcher shutdown hook: TurboPatcher drops turbo_patch.lock in the shared

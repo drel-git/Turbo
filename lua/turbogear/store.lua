@@ -29,6 +29,7 @@ local Store = {
     version = 0,
     content_version = 0,
     content_signatures = {},
+    persist_signatures = {},
     last_content_change_by_key = {},
     cache_signature = nil,
     cache_last_reload_reason = "",
@@ -38,10 +39,11 @@ local Store = {
 -- UI BiS/announce path see peer loot in ~seconds instead of waiting for the
 -- normal bg save_every (~30s). Cache reloads do not schedule this.
 local content_flush_due_at = nil
--- Keys whose content_signature changed since last successful persist. Default
--- Store.save only serializes these (partial) — full-fleet serialize was 400s+.
+-- Keys whose persisted row changed since last successful persist. Default
+-- Store.save only serializes these (partial) -- full-fleet serialize was 400s+.
 local dirty_persist_keys = {}
 local persisted_content_sig = {}
+local persisted_persist_sig = {}
 
 -- In-flight budgeted payload build (bags/bank). Aborted when inventory changes again.
 local persist_job = nil
@@ -494,6 +496,74 @@ local function snapshot_inventory_recency(snap)
     return best
 end
 
+local WALLET_KEYS = {
+    'platinum', 'diamond_coins', 'radiant_crystals', 'ebon_crystals',
+    'planar_symbols', 'taelosian_symbols', 'tribute_favor',
+    'celestial_crests', 'nightveil_scrip', 'aa_unspent',
+}
+
+local function has_wallet_payload(snap)
+    if type(snap) ~= "table" then return false end
+    for _, k in ipairs(WALLET_KEYS) do
+        if snap[k] ~= nil then return true end
+    end
+    return false
+end
+
+local function snapshot_wallet_recency(snap)
+    if type(snap) ~= "table" then return 0 end
+    local best = tonumber(snap.walletUpdated) or 0
+    if best <= 0 and has_wallet_payload(snap) then
+        best = tonumber(snap.updated) or 0
+    end
+    return best
+end
+
+local function copy_wallet_fields(from, to)
+    if type(from) ~= "table" or type(to) ~= "table" then return to end
+    for _, k in ipairs(WALLET_KEYS) do
+        if from[k] ~= nil then to[k] = from[k] end
+    end
+    if from.walletUpdated ~= nil then to.walletUpdated = from.walletUpdated end
+    return to
+end
+
+local function preserve_newer_wallet(existing, candidate)
+    if type(existing) ~= "table" or type(candidate) ~= "table" then return candidate end
+    local existing_wallet = snapshot_wallet_recency(existing)
+    local candidate_wallet = snapshot_wallet_recency(candidate)
+    if existing_wallet > 0 and existing_wallet > candidate_wallet then
+        copy_wallet_fields(existing, candidate)
+    end
+    return candidate
+end
+
+local function snapshot_persist_sig(snap)
+    if type(snap) ~= "table" then return "" end
+    local parts = {
+        snapshot_content_sig(snap),
+        tostring(tonumber(snap.updated) or 0),
+        tostring(tonumber(snap.inventoryUpdated) or 0),
+        tostring(tonumber(snap.walletUpdated) or snapshot_wallet_recency(snap) or 0),
+    }
+    for _, k in ipairs(WALLET_KEYS) do
+        parts[#parts + 1] = tostring(snap[k] or "")
+    end
+    return table.concat(parts, "\31")
+end
+
+local function wallet_same_stamp_changed(candidate, existing)
+    local cw, ew = snapshot_wallet_recency(candidate), snapshot_wallet_recency(existing)
+    if cw <= 0 or ew <= 0 or cw ~= ew then return false end
+    return snapshot_persist_sig(candidate) ~= snapshot_persist_sig(existing)
+end
+
+local function snapshot_store_recency(snap)
+    local inv = snapshot_inventory_recency(snap)
+    local wallet = snapshot_wallet_recency(snap)
+    return wallet > inv and wallet or inv
+end
+
 -- R1 cross-box ordering: prefer the publisher's monotonic seq (immune to clock
 -- skew between boxes, since we only ever compare two snapshots of the SAME key /
 -- owner) and fall back to wall-clock recency for snapshots from pre-seq
@@ -506,8 +576,8 @@ local function snapshot_seq(snap)
 end
 local function is_newer(candidate, existing)
     local cs, es = snapshot_seq(candidate), snapshot_seq(existing)
-    if cs and es then return cs > es end
-    return snapshot_inventory_recency(candidate) > snapshot_inventory_recency(existing)
+    if cs and es and cs ~= es then return cs > es end
+    return snapshot_store_recency(candidate) > snapshot_store_recency(existing)
 end
 
 -- Select the persistence backend now that the recency comparator exists.
@@ -744,6 +814,7 @@ local function merge_lite_snapshot(existing, snap)
         zoneName = snap.zoneName or existing.zoneName,
         updated = snap.updated or existing.updated,
         inventoryUpdated = snapshot_inventory_stamp(snap) or existing.inventoryUpdated or existing.updated,
+        walletUpdated = snap.walletUpdated or (has_wallet_payload(snap) and snap.updated) or existing.walletUpdated,
         seq = snapshot_seq(snap) or snapshot_seq(existing),
         metaUpdated = existing.metaUpdated,
         proto = snap.proto or existing.proto,
@@ -770,6 +841,8 @@ local function merge_lite_snapshot(existing, snap)
         ebon_crystals = snap.ebon_crystals ~= nil and snap.ebon_crystals or existing.ebon_crystals,
         platinum = snap.platinum ~= nil and snap.platinum or existing.platinum,
         diamond_coins = snap.diamond_coins ~= nil and snap.diamond_coins or existing.diamond_coins,
+        planar_symbols = snap.planar_symbols ~= nil and snap.planar_symbols or existing.planar_symbols,
+        taelosian_symbols = snap.taelosian_symbols ~= nil and snap.taelosian_symbols or existing.taelosian_symbols,
         tribute_favor = snap.tribute_favor ~= nil and snap.tribute_favor or existing.tribute_favor,
         celestial_crests = snap.celestial_crests ~= nil and snap.celestial_crests or existing.celestial_crests,
         nightveil_scrip = snap.nightveil_scrip ~= nil and snap.nightveil_scrip or existing.nightveil_scrip,
@@ -801,6 +874,7 @@ local function merge_lite_snapshot(existing, snap)
         out.spells_sig = existing.spells_sig
         out.spell_ids = existing.spell_ids
     end
+    preserve_newer_wallet(existing, out)
     return out
 end
 
@@ -815,10 +889,13 @@ local function merge_snapshot(existing, snap)
     if snap.ebon_crystals == nil then snap.ebon_crystals = existing.ebon_crystals end
     if snap.platinum == nil then snap.platinum = existing.platinum end
     if snap.diamond_coins == nil then snap.diamond_coins = existing.diamond_coins end
+    if snap.planar_symbols == nil then snap.planar_symbols = existing.planar_symbols end
+    if snap.taelosian_symbols == nil then snap.taelosian_symbols = existing.taelosian_symbols end
     if snap.tribute_favor == nil then snap.tribute_favor = existing.tribute_favor end
     if snap.celestial_crests == nil then snap.celestial_crests = existing.celestial_crests end
     if snap.nightveil_scrip == nil then snap.nightveil_scrip = existing.nightveil_scrip end
     if snap.aa_unspent == nil then snap.aa_unspent = existing.aa_unspent end
+    snap.walletUpdated = snap.walletUpdated or (has_wallet_payload(snap) and snap.updated) or existing.walletUpdated
     if not snap.spells_sig or snap.spells_sig == "" then
         snap.spells = existing.spells
         snap.spells_sig = existing.spells_sig
@@ -827,6 +904,7 @@ local function merge_snapshot(existing, snap)
     -- Incomplete walks must not replace prior equipped/bags (partial wipe).
     if snap.inventoryIncomplete == true then
         apply_incomplete_inventory_preserve(existing, snap)
+        preserve_newer_wallet(existing, snap)
         return snap
     end
     -- Full snaps still go through item merge so empty focus/stats rows cannot
@@ -836,12 +914,19 @@ local function merge_snapshot(existing, snap)
     apply_equipped_preserve(existing, snap)
     local live_bank = snap.bankLive == true and snap.bankOpen == true
     -- Live open bank is authoritative (including intentional empty).
-    if live_bank then return snap end
-    -- bankValid + empty after zone/closed gather is NOT authoritative.
-    if snap.bankValid == true and type(snap.bank) == "table" and #snap.bank > 0 then
+    if live_bank then
+        preserve_newer_wallet(existing, snap)
         return snap
     end
-    if type(existing.bank) ~= "table" or #existing.bank == 0 then return snap end
+    -- bankValid + empty after zone/closed gather is NOT authoritative.
+    if snap.bankValid == true and type(snap.bank) == "table" and #snap.bank > 0 then
+        preserve_newer_wallet(existing, snap)
+        return snap
+    end
+    if type(existing.bank) ~= "table" or #existing.bank == 0 then
+        preserve_newer_wallet(existing, snap)
+        return snap
+    end
     local out = {}
     for k, v in pairs(snap) do out[k] = v end
     out.bank = existing.bank
@@ -851,6 +936,7 @@ local function merge_snapshot(existing, snap)
     out.bankPreserved = true
     out.bankCapturedAt = tonumber(existing.bankCapturedAt) or snapshot_inventory_stamp(existing)
     out.bankReason = "cached; bank window closed"
+    preserve_newer_wallet(existing, out)
     return out
 end
 
@@ -870,6 +956,9 @@ function Store.put(snap, kind)
         if not snap or not snap.name or not snap.server then return end
         local key = snap.server .. "_" .. snap.name
         local existing = Store.sources[key]
+        if snap.walletUpdated == nil and has_wallet_payload(snap) then
+            snap.walletUpdated = tonumber(snap.updated) or os.time()
+        end
         -- Phase 0: store.put runs 2-4ms on non-looting boxes and spikes to
         -- seconds on the box doing bag scans. Split the two candidates (deep
         -- merge vs full content signature) and record heap movement across the
@@ -885,6 +974,7 @@ function Store.put(snap, kind)
         local sig = diag.time("store.put.content_sig", function()
             return snapshot_content_sig(snap)
         end)
+        local psig = snapshot_persist_sig(snap)
         -- Negative = a collection ran during this put.
         diag_heap_delta("store.put.gc_kb", gc_kb0)
         snap.status = "online"; snap.last_seen = os.time(); snap.kind = kind or "client"
@@ -893,9 +983,13 @@ function Store.put(snap, kind)
         if Store.content_signatures[key] ~= sig then
             note_content_change("put", key, snap, Store.content_signatures[key], sig)
             Store.content_signatures[key] = sig
+            Store.persist_signatures[key] = psig
             Store.content_version = (Store.content_version or 0) + 1
             -- Own row always. Peer rows only on UI+bg boxes so the viewer process
             -- (cache-only) can see actor SNAPSHOTs; pure bg peers skip (hitch).
+            note_persist_dirty(key)
+        elseif Store.persist_signatures[key] ~= psig then
+            Store.persist_signatures[key] = psig
             note_persist_dirty(key)
         end
         Store.version = (Store.version or 0) + 1
@@ -948,6 +1042,7 @@ function Store.apply_delta(delta, kind)
         if Store.content_signatures[key] ~= sig then
             note_content_change("delta", key, existing, Store.content_signatures[key], sig)
             Store.content_signatures[key] = sig
+            Store.persist_signatures[key] = snapshot_persist_sig(existing)
             Store.content_version = (Store.content_version or 0) + 1
             note_persist_dirty(key)
         end
@@ -1148,10 +1243,13 @@ local function write_wallet_sidecar(out)
                 diamond_coins = s.diamond_coins,
                 radiant_crystals = s.radiant_crystals,
                 ebon_crystals = s.ebon_crystals,
+                planar_symbols = s.planar_symbols,
+                taelosian_symbols = s.taelosian_symbols,
                 tribute_favor = s.tribute_favor,
                 celestial_crests = s.celestial_crests,
                 nightveil_scrip = s.nightveil_scrip,
                 aa_unspent = s.aa_unspent,
+                walletUpdated = s.walletUpdated,
             }
         end
     end
@@ -1168,23 +1266,47 @@ local function write_wallet_sidecar(out)
     end
 end
 
-local WALLET_KEYS = {
-    'platinum', 'diamond_coins', 'radiant_crystals', 'ebon_crystals',
-    'tribute_favor', 'celestial_crests', 'nightveil_scrip', 'aa_unspent',
-}
-
 --- Merge wallet-only fields (depth=wallet) and rewrite sidecar immediately.
 function Store.put_wallet(wallet, kind)
     if type(wallet) ~= 'table' or not wallet.name or not wallet.server then return false end
+    local wallet_diag = tostring(wallet._walletDiagReason or "") == "settle"
+    local function wallet_diag_ms()
+        local ok_mq, mq_mod = pcall(require, 'mq')
+        if ok_mq and mq_mod and mq_mod.gettime then
+            local t = tonumber(mq_mod.gettime())
+            if t then return math.floor(t) end
+        end
+        return math.floor((os.time() or 0) * 1000)
+    end
+    local put_start_ms = wallet_diag and wallet_diag_ms() or 0
     local key = wallet.server .. '_' .. wallet.name
     local existing = Store.sources[key]
+    local wallet_stamp = tonumber(wallet.walletUpdated) or tonumber(wallet.updated) or os.time()
+    local existing_wallet_stamp = snapshot_wallet_recency(existing)
+    if existing_wallet_stamp > 0 and wallet_stamp > 0 and existing_wallet_stamp > wallet_stamp then
+        if diag.is_enabled and diag.is_enabled() then
+            print(string.format("[TurboGear] wallet: ignored older wallet update name=%s incoming=%s existing=%s pp=%s crests=%s",
+                tostring(wallet.name),
+                tostring(wallet_stamp),
+                tostring(existing_wallet_stamp),
+                tostring(wallet.platinum),
+                tostring(wallet.celestial_crests)))
+        end
+        return false
+    end
+    local changed = type(existing) ~= 'table'
     local out
     if type(existing) == 'table' then
         out = existing
         for _, k in ipairs(WALLET_KEYS) do
-            if wallet[k] ~= nil then out[k] = wallet[k] end
+            if wallet[k] ~= nil then
+                if out[k] ~= wallet[k] then changed = true end
+                out[k] = wallet[k]
+            end
         end
-        out.updated = tonumber(wallet.updated) or os.time()
+        if tonumber(out.walletUpdated) ~= wallet_stamp then changed = true end
+        out.walletUpdated = wallet_stamp
+        out.updated = tonumber(wallet.updated) or wallet_stamp
         out.class = coalesce_class(wallet.class, out.class)
         out.level = wallet.level or out.level
     else
@@ -1193,7 +1315,8 @@ function Store.put_wallet(wallet, kind)
             server = wallet.server,
             class = coalesce_class(wallet.class, nil),
             level = wallet.level,
-            updated = tonumber(wallet.updated) or os.time(),
+            updated = tonumber(wallet.updated) or wallet_stamp,
+            walletUpdated = wallet_stamp,
             depth = 'wallet',
             kind = kind or 'client',
         }
@@ -1207,8 +1330,27 @@ function Store.put_wallet(wallet, kind)
     out.kind = kind or out.kind or 'client'
     if (kind or 'client') == 'client' then out.actorSeenAt = os.time() end
     Store.sources[key] = out
+    Store.persist_signatures[key] = snapshot_persist_sig(out)
     Store.version = (Store.version or 0) + 1
+    if changed then
+        note_persist_dirty(key)
+        Store.request_flush()
+    end
+    local sidecar_start_ms = wallet_diag and wallet_diag_ms() or 0
     pcall(write_wallet_sidecar, Store.sources)
+    if wallet_diag and diag.is_enabled and diag.is_enabled() then
+        local done_ms = wallet_diag_ms()
+        print(string.format("[TurboGear] wallet settle: Store.put_wallet t=%d name=%s pp=%s crests=%s updated=%s changed=%s sidecarMs=%d totalMs=%d kind=%s",
+            done_ms,
+            tostring(wallet.name),
+            tostring(wallet.platinum),
+            tostring(wallet.celestial_crests),
+            tostring(wallet_stamp),
+            tostring(changed == true),
+            done_ms - sidecar_start_ms,
+            done_ms - put_start_ms,
+            tostring(kind or 'client')))
+    end
     return true
 end
 
@@ -1304,6 +1446,7 @@ local function persist_row(s)
     return {
         name = s.name, server = s.server, class = s.class, level = s.level,
         updated = s.updated, seq = s.seq, inventoryUpdated = s.inventoryUpdated,
+        walletUpdated = s.walletUpdated,
         metaUpdated = s.metaUpdated, actorSeenAt = s.actorSeenAt,
         discoverySeenAt = s.discoverySeenAt, kind = s.kind, depth = s.depth,
         equipped = slim_item_list(s.equipped),
@@ -1319,6 +1462,7 @@ local function persist_row(s)
         spell_ids = s.spell_ids,
         radiant_crystals = s.radiant_crystals, ebon_crystals = s.ebon_crystals,
         platinum = s.platinum, diamond_coins = s.diamond_coins,
+        planar_symbols = s.planar_symbols, taelosian_symbols = s.taelosian_symbols,
         tribute_favor = s.tribute_favor, celestial_crests = s.celestial_crests,
         nightveil_scrip = s.nightveil_scrip,
         aa_unspent = s.aa_unspent,
@@ -1366,13 +1510,13 @@ end
 -- Build SQLite payload with sectional reuse. Equip-only flushes keep bags/bank
 -- strings and only re-slim/re-serialize the changed list(s).
 local function build_row_payload(key, live, serialize_fn, hash_fn)
-    local content_sig = Store.content_signatures[key]
+    local persist_sig = Store.persist_signatures[key] or snapshot_persist_sig(live)
     local cache = section_ser_cache[key]
     if not cache then
         cache = {}
         section_ser_cache[key] = cache
     end
-    if content_sig and cache.full_sig == content_sig and type(cache.full_payload) == "string" then
+    if persist_sig ~= "" and cache.full_sig == persist_sig and type(cache.full_payload) == "string" then
         diag.count("store.serialize_full_reuse")
         return cache.full_payload, cache.full_hash or hash_fn(cache.full_payload)
     end
@@ -1400,6 +1544,7 @@ local function build_row_payload(key, live, serialize_fn, hash_fn)
         encode_field("updated", encode_scalar(live.updated)),
         encode_field("seq", encode_scalar(live.seq)),
         encode_field("inventoryUpdated", encode_scalar(live.inventoryUpdated)),
+        encode_field("walletUpdated", encode_scalar(live.walletUpdated)),
         encode_field("metaUpdated", encode_scalar(live.metaUpdated)),
         encode_field("actorSeenAt", encode_scalar(live.actorSeenAt)),
         encode_field("discoverySeenAt", encode_scalar(live.discoverySeenAt)),
@@ -1422,6 +1567,8 @@ local function build_row_payload(key, live, serialize_fn, hash_fn)
         encode_field("ebon_crystals", encode_scalar(live.ebon_crystals)),
         encode_field("platinum", encode_scalar(live.platinum)),
         encode_field("diamond_coins", encode_scalar(live.diamond_coins)),
+        encode_field("planar_symbols", encode_scalar(live.planar_symbols)),
+        encode_field("taelosian_symbols", encode_scalar(live.taelosian_symbols)),
         encode_field("tribute_favor", encode_scalar(live.tribute_favor)),
         encode_field("celestial_crests", encode_scalar(live.celestial_crests)),
         encode_field("nightveil_scrip", encode_scalar(live.nightveil_scrip)),
@@ -1429,7 +1576,7 @@ local function build_row_payload(key, live, serialize_fn, hash_fn)
     }
     local payload = "{" .. table.concat(parts, ",") .. "}"
     local h = hash_fn(payload)
-    cache.full_sig = content_sig
+    cache.full_sig = persist_sig
     cache.full_payload = payload
     cache.full_hash = h
     return payload, h
@@ -1445,6 +1592,7 @@ local function assemble_payload_from_cache(key, live, cache, serialize_fn, hash_
         encode_field("updated", encode_scalar(live.updated)),
         encode_field("seq", encode_scalar(live.seq)),
         encode_field("inventoryUpdated", encode_scalar(live.inventoryUpdated)),
+        encode_field("walletUpdated", encode_scalar(live.walletUpdated)),
         encode_field("metaUpdated", encode_scalar(live.metaUpdated)),
         encode_field("actorSeenAt", encode_scalar(live.actorSeenAt)),
         encode_field("discoverySeenAt", encode_scalar(live.discoverySeenAt)),
@@ -1467,6 +1615,8 @@ local function assemble_payload_from_cache(key, live, cache, serialize_fn, hash_
         encode_field("ebon_crystals", encode_scalar(live.ebon_crystals)),
         encode_field("platinum", encode_scalar(live.platinum)),
         encode_field("diamond_coins", encode_scalar(live.diamond_coins)),
+        encode_field("planar_symbols", encode_scalar(live.planar_symbols)),
+        encode_field("taelosian_symbols", encode_scalar(live.taelosian_symbols)),
         encode_field("tribute_favor", encode_scalar(live.tribute_favor)),
         encode_field("celestial_crests", encode_scalar(live.celestial_crests)),
         encode_field("nightveil_scrip", encode_scalar(live.nightveil_scrip)),
@@ -1474,8 +1624,8 @@ local function assemble_payload_from_cache(key, live, cache, serialize_fn, hash_
     }
     local payload = "{" .. table.concat(parts, ",") .. "}"
     local h = hash_fn(payload)
-    local content_sig = Store.content_signatures[key]
-    cache.full_sig = content_sig
+    local persist_sig = Store.persist_signatures[key] or snapshot_persist_sig(live)
+    cache.full_sig = persist_sig
     cache.full_payload = payload
     cache.full_hash = h
     return payload, h
@@ -1534,6 +1684,7 @@ local function finish_persist_job()
     else
         for k in pairs(job.out) do
             persisted_content_sig[k] = Store.content_signatures[k]
+            persisted_persist_sig[k] = Store.persist_signatures[k] or snapshot_persist_sig(Store.sources[k])
             dirty_persist_keys[k] = nil
         end
         diag.time("store.persist.finish_wallet_sidecar", function()
@@ -1581,7 +1732,8 @@ progress_persist_job = function(budget_ms)
             goto continue_persist
         end
         local content_sig = Store.content_signatures[key]
-        if persisted_content_sig[key] ~= nil and persisted_content_sig[key] == content_sig then
+        local persist_sig = Store.persist_signatures[key] or snapshot_persist_sig(live)
+        if persisted_persist_sig[key] ~= nil and persisted_persist_sig[key] == persist_sig then
             dirty_persist_keys[key] = nil
             job.ki = job.ki + 1
             job.work = nil
@@ -1596,7 +1748,7 @@ progress_persist_job = function(budget_ms)
                 cache = {}
                 section_ser_cache[key] = cache
             end
-            if content_sig and cache.full_sig == content_sig and type(cache.full_payload) == "string" then
+            if persist_sig ~= "" and cache.full_sig == persist_sig and type(cache.full_payload) == "string" then
                 job.out[key] = {
                     name = live.name, server = live.server, class = live.class, level = live.level,
                     updated = live.updated, seq = live.seq,
@@ -1611,6 +1763,7 @@ progress_persist_job = function(budget_ms)
             end
             job.cache = cache
             job.key_sig = content_sig
+            job.key_persist_sig = persist_sig
             job.eq_sig = item_list_sig(live.equipped)
             job.bags_sig = item_list_sig(live.bags)
             job.bank_sig = item_list_sig(live.bank)
@@ -1806,10 +1959,11 @@ function Store.save(opts)
         local skipped_unchanged = 0
         for k, s in pairs(Store.sources) do
             if filter and not filter[k] then goto continue_save_key end
+            local psig = Store.persist_signatures[k] or snapshot_persist_sig(s)
             -- Disk already has this inventory content; skip slim+serialize.
             if opts.force_all ~= true
-                and persisted_content_sig[k] ~= nil
-                and persisted_content_sig[k] == Store.content_signatures[k] then
+                and persisted_persist_sig[k] ~= nil
+                and persisted_persist_sig[k] == psig then
                 skipped_unchanged = skipped_unchanged + 1
                 goto continue_save_key
             end
@@ -1848,6 +2002,7 @@ function Store.save(opts)
         else
             for k in pairs(out) do
                 persisted_content_sig[k] = Store.content_signatures[k]
+                persisted_persist_sig[k] = Store.persist_signatures[k] or snapshot_persist_sig(Store.sources[k])
                 dirty_persist_keys[k] = nil
             end
             pcall(write_wallet_sidecar, Store.sources)
@@ -1891,13 +2046,16 @@ local function ingest_cache_table(t, mark_offline)
             if type(existing) ~= "table" then
                 Store.sources[k] = s
                 local sig = snapshot_content_sig(s)
+                local psig = snapshot_persist_sig(s)
                 note_content_change("cache-new", k, s, Store.content_signatures[k], sig)
                 Store.content_signatures[k] = sig
+                Store.persist_signatures[k] = psig
                 -- Loaded from disk: already persisted at this content.
                 persisted_content_sig[k] = sig
+                persisted_persist_sig[k] = psig
                 accepted = true
                 content_changed = true
-            elseif is_newer(s, existing) then
+            elseif is_newer(s, existing) or wallet_same_stamp_changed(s, existing) then
                 s = preserve_presence(existing, s, mark_offline and "offline" or existing.status)
                 -- Disk/actor rows with class="?" must not clobber a known in-memory class.
                 s.class = coalesce_class(s.class, existing.class)
@@ -1910,13 +2068,16 @@ local function ingest_cache_table(t, mark_offline)
                 -- heartbeats). Only bump content_version - which wakes heavy
                 -- consumers like the needs index - when the payload changed.
                 local sig = snapshot_content_sig(s)
+                local psig = snapshot_persist_sig(s)
                 if Store.content_signatures[k] ~= sig then
                     note_content_change("cache-newer", k, s, Store.content_signatures[k], sig)
                     Store.content_signatures[k] = sig
-                    -- Fresher disk/actor row replaces memory; treat as persisted.
-                    persisted_content_sig[k] = sig
                     content_changed = true
                 end
+                Store.persist_signatures[k] = psig
+                -- Fresher disk/actor row replaces memory; treat as persisted.
+                persisted_content_sig[k] = Store.content_signatures[k]
+                persisted_persist_sig[k] = psig
             end
         end
     end
@@ -2066,7 +2227,9 @@ function Store.remove_source(key)
     if key == "" or key == my_key() or not Store.sources[key] then return false end
     Store.sources[key] = nil
     Store.content_signatures[key] = nil
+    Store.persist_signatures[key] = nil
     persisted_content_sig[key] = nil
+    persisted_persist_sig[key] = nil
     section_ser_cache[key] = nil
     Store.last_content_change_by_key[key] = nil
     Store.version = (Store.version or 0) + 1

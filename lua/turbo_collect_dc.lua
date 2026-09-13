@@ -25,8 +25,12 @@ do
     end
 end
 local bot_pause = require('turbo_lib.bot_pause')
+local wallet_refresh = require('turbo_lib.wallet_refresh')
+local transport = require('turbo_lib.transport')
 
 local TAG = '\at[TurboDC]\ax'
+local CURRENCY_NAME = 'Diamond Coins'
+local CURRENCY_SHORT = 'DC'
 local DEFAULT_CHUNK = 7000
 local MAX_PASSES = 200
 local FIRST_ACTIVITY_TIMEOUT_MS = 45000
@@ -48,6 +52,15 @@ local function out(fmt, ...)
     else
         print(TAG .. ' ' .. msg)
     end
+end
+
+local function fmt_num(n)
+    local s = tostring(math.floor(tonumber(n) or 0))
+    local k
+    repeat
+        s, k = s:gsub("^(-?%d+)(%d%d%d)", "%1,%2")
+    until k == 0
+    return s
 end
 
 local function clean_name(name)
@@ -322,17 +335,24 @@ local function parse_args()
     return scope, max_amount, recipient, from_only, explicit_senders
 end
 
-local function ask_sender(name, recipient, chunk)
+local function ask_sender(name, recipient, chunk, remote_reclaim)
     done[clean_name(name)] = nil
+    local route = transport.route_hint_arg and transport.route_hint_arg() or ''
+    local ack = remote_reclaim and ' ack' or ''
+    local ok
     if chunk and chunk > 0 then
-        mq.cmdf('/squelch /e3bct %s /mac turbogive _senddc %s %d', name, recipient, chunk)
+        ok = transport.send_target(name, string.format('/mac turbogive _senddc %s %d%s notify %s%s', recipient, chunk, ack, me_name(), route))
     else
-        mq.cmdf('/squelch /e3bct %s /mac turbogive _senddc %s', name, recipient)
+        ok = transport.send_target(name, string.format('/mac turbogive _senddc %s%s notify %s%s', recipient, ack, me_name(), route))
     end
+    if not ok then
+        out('\ayWARNING --\ax unable to form remote command for %s; skipping.', name)
+        return false
+    end
+    return true
 end
 
 local function wait_sender(name, collect_locally, chunk, recipient)
-    out('\ao[COLLECT DC]\ax Asking \ag%s\ax to send DC...', name)
     local before_alt = collect_locally and read_alt_dc() or 0
     local before_inv = collect_locally and item_count('Diamond Coin') or 0
     local start = now_ms()
@@ -340,7 +360,9 @@ local function wait_sender(name, collect_locally, chunk, recipient)
     local saw_trade = false
     local trade_count = 0
 
-    ask_sender(name, recipient, chunk)
+    if not ask_sender(name, recipient, chunk, not collect_locally) then
+        return 0, 0, false
+    end
 
     while true do
         if mq.doevents then mq.doevents() end
@@ -354,7 +376,7 @@ local function wait_sender(name, collect_locally, chunk, recipient)
                 reclaim_dc()
                 last_activity = now_ms()
             else
-                out('\ay[COLLECT DC]\ax Trade with %s did not close cleanly; moving on.', name)
+                out('\ayWARNING --\ax trade with %s did not close cleanly; moving on.', name)
                 break
             end
         end
@@ -370,7 +392,7 @@ local function wait_sender(name, collect_locally, chunk, recipient)
         elseif saw_trade then
             if now_ms() - last_activity >= IDLE_AFTER_TRADE_MS then break end
         elseif now_ms() - start >= FIRST_ACTIVITY_TIMEOUT_MS then
-            out('\ay[COLLECT DC]\ax Timed out waiting for %s to open trade or signal done.', name)
+            out('\ayWARNING --\ax timed out waiting for %s to open trade or signal done.', name)
             break
         end
 
@@ -410,7 +432,6 @@ local function main()
     end
 
     if collect_locally and item_count('Diamond Coin') > 0 then
-        out('\ao[COLLECT DC]\ax Reclaiming existing inventory Diamond Coin before collection.')
         reclaim_dc()
     end
 
@@ -450,15 +471,7 @@ local function main()
         out('\ayWarning:\ax no free inventory slots. Incoming DC may fail if it cannot stack.')
     end
 
-    local chunk = max_amount > 0 and math.min(max_amount, DEFAULT_CHUNK) or DEFAULT_CHUNK
-    out('\ao[COLLECT DC]\ax %s -> \ag%s\ax from %d sender(s), chunk %d%s (%s).',
-        collect_locally and 'Collect' or 'Give',
-        recipient,
-        #active,
-        chunk,
-        max_amount > 0 and (' each, limit ' .. tostring(max_amount)) or '',
-        from_only ~= '' and ('from ' .. from_only)
-            or (explicit_senders and 'selected characters' or (scope == 'all' and 'E3 peers' or 'group')))
+    out('%s -> \ag%s\ax from %d sender(s)', CURRENCY_NAME, recipient, #active)
 
     register_done_events()
 
@@ -481,10 +494,7 @@ local function main()
             total_received = total_received + got
             pass_received = pass_received + got
             if got > 0 then
-                out('\ao[COLLECT DC]\ax Pass %d: %s delivered \ag%d\ax DC. Alt-currency DC now: \ag%d\ax.',
-                    pass, name, got, read_alt_dc())
-            elseif signaled then
-                out('\ao[COLLECT DC]\ax Pass %d: %s signaled done.', pass, name)
+                out('%s transferred \ag%s\ax %s', name, fmt_num(got), CURRENCY_SHORT)
             end
             mq.delay(350)
         end
@@ -512,13 +522,13 @@ local function main()
     end
     clear_cursor('finishing', 4000)
     close_inventory()
+    wallet_refresh.refresh_participants(recipient, active)
 
     if collect_locally then
-        out('\agComplete\ax after \ag%d\ax pass(es). \ag%d\ax/\ag%d\ax requests returned activity. Total received/reclaimed: \ag%d\ax DC. Alt-currency DC now: \ag%d\ax.',
-            passes, responded, sent_count, total_received, read_alt_dc())
+        out('\agComplete --\ax \ag%s\ax %s collected to \ag%s\ax',
+            fmt_num(total_received), CURRENCY_SHORT, recipient)
     else
-        out('\agComplete\ax after \ag%d\ax pass(es). \ag%d\ax/\ag%d\ax senders signaled. Recipient: \ag%s\ax.',
-            passes, responded, sent_count, recipient)
+        out('\agComplete --\ax collection sent to \ag%s\ax', recipient)
     end
     return true
 end

@@ -21,6 +21,7 @@
   MINI  /lua run turbogear mini       (UI loaded, starts as mini icon)
   UI    /lua run turbogear ui         (explicit UI start)
   CMDS  /tgear show|hide|sync|publish|note|status|debug|diag|perfdiag|stop|toggle   (also /turbogear)
+        /tgear openwallet|wallettoggle  open/toggle the Wallet tab (wallet publish remains /tgear wallet)
         /tgear exportspells [copies]  export missing research list
         /tgear import <file>  /tgear export <list>  /tgear sharelist <list>
         /tgear pulllists <Server_CharName>
@@ -33,6 +34,12 @@ local PROCESS_STARTED_WALL_S = (mq.gettime and (tonumber(mq.gettime()) or 0) / 1
 local process_to_listener_ready_ms = nil
 
 local SCRIPT_ARGS = { ... }              -- must be captured at chunk top level
+do
+    local first_arg = tostring(SCRIPT_ARGS[1] or ''):lower()
+    if first_arg ~= 'bg' then
+        print('\at[TurboGear]\ax \agStarting...\ax \awLoading gear data and syncing characters. \ayLarge inventories may take a few seconds.\ax')
+    end
+end
 
 local cfg    = require('config')
 local CFG    = cfg.CFG
@@ -51,10 +58,12 @@ state.bg     = FORCE_BG
 state.show   = not state.bg
     and not (SCRIPT_ARGS[1] == 'mini' or (cfg.Settings.startMinimized == true and SCRIPT_ARGS[1] ~= 'ui'))
 
--- /lua run turbogear stock|collect - open UI on that tab (starts bg via normal UI path).
+-- /lua run turbogear stock|collect|wallet - open UI on that tab (starts bg via normal UI path).
 local startup_tab_arg = tostring(SCRIPT_ARGS[1] or ''):lower()
-if not state.bg and (startup_tab_arg == 'stock' or startup_tab_arg == 'stockup' or startup_tab_arg == 'collect') then
-    cfg.Settings.mainTab = (startup_tab_arg == 'collect') and 'collect' or 'stock'
+if not state.bg and (startup_tab_arg == 'stock' or startup_tab_arg == 'stockup'
+    or startup_tab_arg == 'collect' or startup_tab_arg == 'wallet') then
+    cfg.Settings.mainTab = (startup_tab_arg == 'collect') and 'collect'
+        or (startup_tab_arg == 'wallet' and 'wallet' or 'stock')
     state.show = true
 end
 
@@ -764,6 +773,116 @@ local function parse_item_name_id(text)
     return require('announce_rules').parse_item_name_id(text)
 end
 
+local function wallet_diag_ms()
+    if mq.gettime then
+        local t = tonumber(mq.gettime())
+        if t then return math.floor(t) end
+    end
+    return math.floor((os.time() or 0) * 1000)
+end
+
+local function wallet_bool_label(v)
+    return v and "open" or "closed"
+end
+
+local function wallet_cursor_label()
+    local ok, id = pcall(function() return mq.TLO.Cursor.ID() end)
+    return (ok and tonumber(id) or 0) > 0 and "blocked" or "clear"
+end
+
+local function wallet_trade_open()
+    local ok, open = pcall(function() return mq.TLO.Window('TradeWnd').Open() end)
+    return ok and open == true
+end
+
+local function wallet_pp_value()
+    local ok, pp = pcall(function() return mq.TLO.Me.Platinum() end)
+    if not ok then return nil end
+    return tonumber(pp)
+end
+
+local function wait_wallet_transaction_state()
+    local start_ms = wallet_diag_ms()
+    local trade_wait_ms = 2500
+    local cursor_wait_ms = 2500
+    while wallet_trade_open() and (wallet_diag_ms() - start_ms) < trade_wait_ms do
+        mq.delay(50)
+    end
+    local trade_done_ms = wallet_diag_ms()
+    local cursor_start_ms = trade_done_ms
+    while wallet_cursor_label() ~= "clear" and (wallet_diag_ms() - cursor_start_ms) < cursor_wait_ms do
+        mq.delay(50)
+    end
+    return {
+        start_ms = start_ms,
+        trade_done_ms = trade_done_ms,
+        cursor_done_ms = wallet_diag_ms(),
+        trade_open = wallet_trade_open(),
+        cursor_state = wallet_cursor_label(),
+    }
+end
+
+local function settle_wallet_read()
+    local first_ms = wallet_diag_ms()
+    local first_pp = wallet_pp_value()
+    local last_pp, last_ms = first_pp, first_ms
+    local deadline = first_ms + 1500
+    local stable_reads = 0
+    repeat
+        mq.delay(250)
+        local now_ms = wallet_diag_ms()
+        local pp = wallet_pp_value()
+        if pp ~= nil and last_pp ~= nil and pp == last_pp then
+            stable_reads = stable_reads + 1
+        else
+            stable_reads = 0
+        end
+        last_pp, last_ms = pp, now_ms
+    until stable_reads >= 1 or wallet_diag_ms() >= deadline
+    return first_pp, last_pp, first_ms, last_ms
+end
+
+local function publish_settled_wallet()
+    local me = tostring(mq.TLO.Me.CleanName() or "?")
+    local initial_trade = wallet_trade_open()
+    local initial_cursor = wallet_cursor_label()
+    local initial_pp = wallet_pp_value()
+    if diag.is_enabled and diag.is_enabled() then
+        print(string.format("[TurboGear] wallet settle: %s start t=%d trade=%s cursor=%s pp=%s",
+            me, wallet_diag_ms(), wallet_bool_label(initial_trade), initial_cursor, tostring(initial_pp)))
+    end
+
+    local state_info = wait_wallet_transaction_state()
+    if diag.is_enabled and diag.is_enabled() then
+        print(string.format("[TurboGear] wallet settle: %s transaction t=%d trade=%s cursor=%s pp=%s tradeWait=%dms cursorWait=%dms",
+            me,
+            state_info.cursor_done_ms,
+            wallet_bool_label(state_info.trade_open),
+            state_info.cursor_state,
+            tostring(wallet_pp_value()),
+            state_info.trade_done_ms - state_info.start_ms,
+            state_info.cursor_done_ms - state_info.trade_done_ms))
+    end
+
+    local first_pp, final_pp, first_ms, final_ms = settle_wallet_read()
+    if diag.is_enabled and diag.is_enabled() then
+        print(string.format("[TurboGear] wallet settle: %s read first t=%d pp=%s final t=%d pp=%s readWait=%dms",
+            me, first_ms, tostring(first_pp), final_ms, tostring(final_pp), final_ms - first_ms))
+    end
+
+    local snap = require('snapshot').gather_wallet()
+    if type(snap) == "table" then
+        snap._walletDiagReason = "settle"
+        snap._walletDiagPublishMs = wallet_diag_ms()
+    end
+    local ok = Engine.publish_wallet(snap, { reason = "wallet_settle", force = true })
+    if diag.is_enabled and diag.is_enabled() then
+        print(string.format("[TurboGear] wallet settle: %s publish t=%d pp=%s ok=%s",
+            me, wallet_diag_ms(), tostring(snap and snap.platinum), tostring(ok == true)))
+    end
+    return ok
+end
+
 local function tgear_command(...)
     local args = { ... }
     local arg = (args[1] or ""):lower()
@@ -921,20 +1040,43 @@ local function tgear_command(...)
     elseif arg == "wallet" then
         -- Fleet $ live path: cheap TLO wallet gather + E3 TurboFW + actor WALLET.
         -- No inventory bag walk. Safe to poke while Fleet wallet is open.
+        local settle = (args[2] or ""):lower() == "settle"
+        local postcollect = ((args[2] or ""):lower() == "postcollect")
+            or ((args[3] or ""):lower() == "postcollect")
         if not state.bg then
             request_local_bg_start("wallet command")
-            mq.cmd('/timed 1 /squelch /tgearbg wallet')
-            -- Still set E3 var from UI process so Mono query works immediately.
-            pcall(function()
-                local snap = require('snapshot').gather_wallet()
-                local enc = require('snapshot').encode_wallet_e3(snap)
-                if enc and enc ~= "" then mq.cmdf('/squelch /e3varset TurboFW %s', enc) end
-                require('store').Store.put_wallet(snap, 'client')
-            end)
-            print("[TurboGear] wallet: published local E3 TurboFW + delegated bg actor")
+            mq.cmd('/timed 1 /squelch /tgearbg wallet'
+                .. (settle and " settle" or "")
+                .. (postcollect and " postcollect" or ""))
+            if settle then
+                if diag.is_enabled and diag.is_enabled() then
+                    print("[TurboGear] wallet settle: delegated to local bg responder")
+                end
+            else
+                -- Still set E3 var from UI process so Mono query works immediately.
+                pcall(function()
+                    local snap = require('snapshot').gather_wallet()
+                    local enc = require('snapshot').encode_wallet_e3(snap)
+                    if enc and enc ~= "" then mq.cmdf('/squelch /e3varset TurboFW %s', enc) end
+                    require('store').Store.put_wallet(snap, 'client')
+                end)
+                if diag.is_enabled and diag.is_enabled() then
+                    print("[TurboGear] wallet: published local E3 TurboFW + delegated bg actor")
+                end
+            end
         else
-            local ok = Engine.publish_wallet(nil, { reason = "manual_wallet", force = true })
-            print(ok and "[TurboGear] wallet: published" or "[TurboGear] wallet: unchanged/skip")
+            local ok
+            if settle then
+                ok = publish_settled_wallet()
+            else
+                ok = Engine.publish_wallet(nil, {
+                    reason = postcollect and "postcollect_wallet" or "manual_wallet",
+                    force = true,
+                })
+                if diag.is_enabled and diag.is_enabled() then
+                    print(ok and "[TurboGear] wallet: published" or "[TurboGear] wallet: unchanged/skip")
+                end
+            end
         end
     elseif arg == "spellsync" then
         -- Spell-book round trip. The Spells tab delegates here because the UI
@@ -1117,6 +1259,24 @@ local function tgear_command(...)
         if cfg.SaveSettings then cfg.SaveSettings() end
         state.show = true
         print("[TurboGear] switched to BiS Catalog (List pill / BiS + Lists)")
+    elseif arg == "openwallet" or arg == "walletui" or arg == "fleetwallet" then
+        cfg.Settings.mainTab = "wallet"
+        if cfg.MarkSettingsDirty then cfg.MarkSettingsDirty("open_wallet") end
+        state.show = true
+        print("[TurboGear] Wallet opened.")
+    elseif arg == "wallettoggle" or arg == "togglewallet" then
+        local already_wallet_visible = state.show == true
+            and state.bg ~= true
+            and tostring(cfg.Settings.mainTab or "") == "wallet"
+        if already_wallet_visible then
+            state.show = false
+            print("[TurboGear] Wallet hidden.")
+        else
+            cfg.Settings.mainTab = "wallet"
+            if cfg.MarkSettingsDirty then cfg.MarkSettingsDirty("wallet_toggle") end
+            state.show = true
+            print("[TurboGear] Wallet opened.")
+        end
     elseif arg == "pilldebug" then
         -- Gated List-pill click/popup diagnostics (see bis_list_pill.lua).
         cfg.Settings.debugListPill = not (cfg.Settings.debugListPill == true)

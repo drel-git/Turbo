@@ -905,6 +905,15 @@ function Engine.publish_wallet(snap, opts)
         snap = snapshot.gather_wallet and snapshot.gather_wallet() or nil
     end
     if type(snap) ~= "table" or not snap.name or snap.name == "?" then return false end
+    local diag_reason = tostring(opts.reason or snap._walletDiagReason or "")
+    local wallet_settle_diag = diag_reason == "wallet_settle" or tostring(snap._walletDiagReason or "") == "settle"
+    local function wallet_diag_ms()
+        if mq.gettime then
+            local t = tonumber(mq.gettime())
+            if t then return math.floor(t) end
+        end
+        return math.floor((os.time() or 0) * 1000)
+    end
     local wsig = snapshot.wallet_signature and snapshot.wallet_signature(snap) or ""
     if opts.force ~= true and wsig ~= "" and wsig == tostring(Engine.last_wallet_sig or "") then
         return false
@@ -916,8 +925,9 @@ function Engine.publish_wallet(snap, opts)
         local enc = snapshot.encode_wallet_e3 and snapshot.encode_wallet_e3(snap) or ""
         if enc ~= "" then mq.cmdf('/squelch /e3varset TurboFW %s', enc) end
     end)
+    local mail_ok = nil
     if Engine.ok then
-        send_mail("wallet", {
+        mail_ok = send_mail("wallet", {
             type = MSG.WALLET,
             proto = CFG.proto,
             kind = 'client',
@@ -932,11 +942,20 @@ function Engine.publish_wallet(snap, opts)
                 diamond_coins = snap.diamond_coins,
                 radiant_crystals = snap.radiant_crystals,
                 ebon_crystals = snap.ebon_crystals,
+                planar_symbols = snap.planar_symbols,
+                taelosian_symbols = snap.taelosian_symbols,
                 tribute_favor = snap.tribute_favor,
                 celestial_crests = snap.celestial_crests,
+                nightveil_scrip = snap.nightveil_scrip,
                 aa_unspent = snap.aa_unspent,
+                _walletDiagReason = snap._walletDiagReason,
+                _walletDiagPublishMs = snap._walletDiagPublishMs,
             },
         })
+    end
+    if wallet_settle_diag and diag.is_enabled and diag.is_enabled() then
+        print(string.format("[TurboGear] wallet settle: MSG.WALLET send t=%d name=%s pp=%s sent=%s",
+            wallet_diag_ms(), tostring(snap.name), tostring(snap.platinum), tostring(Engine.ok and mail_ok ~= false)))
     end
     pcall(function() Store.put_wallet(snap, 'client') end)
     diag.event("engine.publish_wallet", string.format("reason=%s name=%s",

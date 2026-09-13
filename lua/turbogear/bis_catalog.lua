@@ -327,15 +327,61 @@ local TATTERED_SACK_RANKS = {
 }
 
 local TATTERED_SACK_MATERIALS = {
-    ["Reinforced Stitching Frame (T2 Trash)"] = { id = 151058, min_rank = 5 },
-    ["Treated Expedition Straps (T3 Trash)"] = { min_rank = 3 },
-    ["Arcwoven Binding Thread (T4 Trash)"] = { min_rank = 4 },
-    ["Master Tailor's Celestial Lining (T5 Trash)"] = { min_rank = 5 },
+    ["Reinforced Stitching Frame (T2 Trash)"] = { id = 151058, name = "Reinforced Stitching Frame", min_rank = 5 },
+    ["Treated Expedition Straps (T3 Trash)"] = { id = 151059, name = "Treated Expedition Straps", min_rank = 3 },
+    ["Arcwoven Binding Thread (T4 Trash)"] = { id = 151060, name = "Arcwoven Binding Thread", min_rank = 4 },
+    ["Master Tailor's Celestial Lining (T5 Trash)"] = { id = 151061, name = "Master Tailor's Celestial Lining", min_rank = 5 },
 }
 
 local TATTERED_SACK_SLOT_RANK = {}
 for _, row in ipairs(TATTERED_SACK_RANKS) do
     TATTERED_SACK_SLOT_RANK[row.slot] = row.rank
+end
+
+function M._note_progression_exact_id(out, id)
+    id = tonumber(id) or 0
+    if id <= 0 then return end
+    if type(out.progression_exact_ids) ~= "table" then out.progression_exact_ids = {} end
+    out.progression_exact_ids[id] = true
+end
+
+function M._progression_norm_name(name)
+    return tostring(name or ""):lower():gsub("`", "'"):gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
+end
+
+function M._note_progression_exact_name(out, name)
+    name = M._progression_norm_name(name)
+    if name == "" then return end
+    if type(out.progression_exact_names) ~= "table" then out.progression_exact_names = {} end
+    out.progression_exact_names[name] = true
+end
+
+function M._note_progression_exact_names(out, names)
+    for _, name in ipairs(names or {}) do
+        M._note_progression_exact_name(out, name)
+    end
+end
+
+function M._note_progression_exact_ids(out, ids)
+    for _, id in ipairs(ids or {}) do
+        M._note_progression_exact_id(out, id)
+    end
+end
+
+function M._note_progression_exact_pair(out, id, name)
+    id = tonumber(id) or 0
+    name = M._progression_norm_name(name)
+    if id <= 0 or name == "" then return end
+    if type(out.progression_exact_pairs) ~= "table" then out.progression_exact_pairs = {} end
+    if type(out.progression_exact_pairs[id]) ~= "table" then out.progression_exact_pairs[id] = {} end
+    out.progression_exact_pairs[id][name] = true
+end
+
+function M._note_current_progression_exact(out)
+    if type(out) ~= "table" then return end
+    M._note_progression_exact_ids(out, out.ids)
+    M._note_progression_exact_name(out, out.item)
+    M._note_progression_exact_names(out, out.names)
 end
 
 local function expand_tattered_sack_chain(out)
@@ -344,15 +390,107 @@ local function expand_tattered_sack_chain(out)
     local rank = TATTERED_SACK_SLOT_RANK[slot]
     local mat = TATTERED_SACK_MATERIALS[slot]
     local min_rank = rank or (mat and mat.min_rank) or nil
-    if not min_rank then return out end
-    out.progression_id_match = true
-    if mat and mat.id then add_ids(out, { mat.id }, id_seen) end
-    for _, row in ipairs(TATTERED_SACK_RANKS) do
-        if row.rank >= min_rank then
-            add_ids(out, { row.id }, id_seen)
-            add_names(out, { row.name }, name_seen)
+    if min_rank then
+        out.progression_id_match = true
+        if mat and mat.id then
+            add_ids(out, { mat.id }, id_seen)
+            M._note_progression_exact_id(out, mat.id)
+            M._note_progression_exact_name(out, mat.name)
+        end
+        if rank then
+            for _, row in ipairs(TATTERED_SACK_RANKS) do
+                if row.rank == rank then
+                    M._note_progression_exact_id(out, row.id)
+                    M._note_progression_exact_name(out, row.name)
+                    break
+                end
+            end
+        end
+        for _, row in ipairs(TATTERED_SACK_RANKS) do
+            if row.rank >= min_rank then
+                add_ids(out, { row.id }, id_seen)
+                add_names(out, { row.name }, name_seen)
+            end
         end
     end
+    return out
+end
+
+M._DJINN_STRONGBOX_RANKS = {
+    { rank = 1, id = 50132, name = "Celestial Strongbox" },
+    { rank = 2, id = 50134, name = "Blessed Celestial Strongbox" },
+    { rank = 3, id = 50135, name = "Blessed Celestial Strongbox" },
+    { rank = 4, id = 50136, name = "Blessed Celestial Strongbox" },
+    { rank = 5, id = 50137, name = "Blessed Celestial Strongbox" },
+    { rank = 6, id = 50138, name = "Blessed Celestial Strongbox" },
+    { rank = 7, id = 50139, name = "Blessed Celestial Strongbox" },
+    { rank = 8, id = 50140, name = "Blessed Celestial Strongbox" },
+    { rank = 9, id = 50141, name = "Blessed Celestial Strongbox" },
+    { rank = 10, id = 50142, name = "Blessed Celestial Strongbox" },
+    { rank = 11, id = 50143, name = "Hallowed Celestial Strongbox" },
+}
+
+M._DJINN_STRONGBOX_SLOTS = {
+    ["Celestial Strongbox (CC) (Base)"] = { min_rank = 1, exact = { 50132 } },
+    ["Celestial Blessing of the Djinn (UPG ITM)"] = { min_rank = 2, exact = { 50133 }, add = { 50133 } },
+    ["Blessed Celestial Strongbox (UP1)"] = { min_rank = 2, exact = { 50134 } },
+    ["Blessed Celestial Strongbox (UP2)"] = { min_rank = 3, exact = { 50135 } },
+    ["Blessed Celestial Strongbox (UP3)"] = { min_rank = 4, exact = { 50136 } },
+    ["Blessed Celestial Strongbox (UP4)"] = { min_rank = 5, exact = { 50137 } },
+    ["Blessed Celestial Strongbox (UP5)"] = { min_rank = 6, exact = { 50138 } },
+    ["Blessed Celestial Strongbox (UP6)"] = { min_rank = 7, exact = { 50139 } },
+    ["Blessed Celestial Strongbox (UP7)"] = { min_rank = 8, exact = { 50140 } },
+    ["Blessed Celestial Strongbox (UP8)"] = { min_rank = 9, exact = { 50141 } },
+    ["Blessed Celestial Strongbox (UP9)"] = { min_rank = 10, exact = { 50142 } },
+    ["Hallowed Celestial Strongbox"] = { min_rank = 11, exact = { 50143 } },
+}
+
+M._DRAGONHIDE_SATCHEL_RANKS = {
+    { rank = 1, id = 81942, name = "Chromatic Dragonhide Satchel" },
+    { rank = 2, id = 81943, name = "Reinforced Dragonhide Satchel" },
+    { rank = 3, id = 81944, name = "Scaled Dragonhide Satchel" },
+    { rank = 4, id = 81945, name = "Elder Dragonhide Satchel" },
+    { rank = 5, id = 81946, name = "Ascendant Dragonhide Satchel" },
+}
+
+M._DRAGONHIDE_SATCHEL_SLOTS = {
+    ["Chromatic Dragonhide Satchel (Base)"] = { min_rank = 1, exact = { 81942 } },
+    ["Draconic Binding Thread (UPG ITM)"] = { min_rank = 2, exact = { 81947 }, add = { 81947 }, name = "Draconic Binding Thread" },
+    ["Reinforced Dragonhide Satchel (UP1)"] = { min_rank = 2, exact = { 81943 } },
+    ["Scaled Dragonhide Satchel (UP2)"] = { min_rank = 3, exact = { 81944 } },
+    ["Elder Dragonhide Satchel (UP3)"] = { min_rank = 4, exact = { 81945 } },
+    ["Ascendant Dragonhide Satchel (UP^)"] = { min_rank = 5, exact = { 81946 } },
+}
+
+function M._expand_ranked_bag_chain(out, slot_meta, ranks, add_names_for_ranks, add_exact_names)
+    local meta = slot_meta[tostring(out.slot or "")]
+    if not meta then return out end
+    local id_seen, name_seen = seed_id_seen(out), seed_name_seen(out)
+    out.progression_id_match = true
+    M._note_progression_exact_ids(out, meta.exact)
+    M._note_progression_exact_name(out, meta.name)
+    if meta.add then add_ids(out, meta.add, id_seen) end
+    for _, row in ipairs(ranks or {}) do
+        if add_exact_names and type(meta.exact) == "table" then
+            for _, exact_id in ipairs(meta.exact) do
+                if tonumber(exact_id) == tonumber(row.id) then
+                    M._note_progression_exact_name(out, row.name)
+                    break
+                end
+            end
+        end
+        if row.rank >= (tonumber(meta.min_rank) or 0) then
+            add_ids(out, { row.id }, id_seen)
+            if add_names_for_ranks then add_names(out, { row.name }, name_seen) end
+        end
+    end
+    return out
+end
+
+function M._expand_bag_progression_chains(out)
+    expand_tattered_sack_chain(out)
+    M._expand_ranked_bag_chain(out, M._DJINN_STRONGBOX_SLOTS, M._DJINN_STRONGBOX_RANKS, false)
+    M._expand_ranked_bag_chain(out, M._DRAGONHIDE_SATCHEL_SLOTS, M._DRAGONHIDE_SATCHEL_RANKS, true, true)
     return out
 end
 
@@ -381,6 +519,9 @@ function M._expand_final_slot_chain(list, class_bucket, out, final_slots, compon
     if not component_slots[slot] then return out end
     local id_seen, name_seen = seed_id_seen(out), seed_name_seen(out)
     local added = false
+    if not out.progression_exact_ids and not out.progression_exact_names and not out.progression_exact_pairs then
+        M._note_current_progression_exact(out)
+    end
     for final_slot in pairs(final_slots) do
         local final = (class_bucket and class_bucket[final_slot])
             or (list and list.template and list.template[final_slot])
@@ -397,16 +538,46 @@ function M._expand_final_slot_chain(list, class_bucket, out, final_slots, compon
     return out
 end
 
+M._ANCIENT_BAUBLE_EXACT_BY_SLOT = {
+    ["Base (Trash)"] = { id = 40805, name = "Ancient Bauble Remnant" },
+    ["Gem1 (Minis)"] = { id = 40805, name = "Xanthous Prismatic Remnant" },
+    ["Gem2 (Gamus)"] = { id = 40806, name = "Cerulean Prismatic Remnant" },
+    ["Gem3 (Warlocks)"] = { id = 40807, name = "Titian Prismatic Remnant" },
+    ["Gem4 (Sythrax)"] = { id = 40808, name = "Violaceous Prismatic Remnant" },
+    ["Gem5 (Brother)"] = { id = 40809, name = "Incarnadine Prismatic Remnant" },
+    ["Gem6 (Garudon)"] = { id = 40810, name = "Nacreous Prismatic Remnant" },
+}
+
 function M._expand_ancient_bauble_chain(list, class_bucket, out)
-    return M._expand_final_slot_chain(list, class_bucket, out, { Final = true }, {
-        ["Base (Trash)"] = true,
-        ["Gem1 (Minis)"] = true,
-        ["Gem2 (Gamus)"] = true,
-        ["Gem3 (Warlocks)"] = true,
-        ["Gem4 (Sythrax)"] = true,
-        ["Gem5 (Brother)"] = true,
-        ["Gem6 (Garudon)"] = true,
-    })
+    local slot = tostring(out and out.slot or "")
+    local exact = M._ANCIENT_BAUBLE_EXACT_BY_SLOT[slot]
+    if not exact then return out end
+    M._note_progression_exact_pair(out, exact.id, exact.name)
+    M._note_progression_exact_name(out, exact.name)
+    return M._expand_final_slot_chain(list, class_bucket, out, { Final = true }, M._ANCIENT_BAUBLE_EXACT_BY_SLOT)
+end
+
+function M._expand_veksar_glyph_chain(list, class_bucket, out)
+    if tostring(out and out.slot or "") ~= "Glyphed Sarnak Skull" then return out end
+    M._note_current_progression_exact(out)
+    out.progression_prefer_later = true
+    local glyph = (class_bucket and class_bucket["Glyph Aug"])
+        or (list and list.template and list.template["Glyph Aug"])
+        or (list and list.visible and list.visible["Glyph Aug"])
+    if not glyph then return out end
+    local e = norm_entry_cached(glyph)
+    local id_seen, name_seen = seed_id_seen(out), seed_name_seen(out)
+    add_ids(out, e.ids, id_seen)
+    add_names(out, e.names, name_seen)
+    add_names(out, { e.item }, name_seen)
+    out.progression_id_match = true
+    return out
+end
+
+function M._expand_veksar_progression_chains(list, class_bucket, out)
+    M._expand_ancient_bauble_chain(list, class_bucket, out)
+    M._expand_veksar_glyph_chain(list, class_bucket, out)
+    return out
 end
 
 local function mark_dsk_book_progression(out)
@@ -423,8 +594,30 @@ end
 -- name "Jonas Dagmire's Skeletal Hand" (see ownership_index.name_is_id_only),
 -- so a name hit cannot tell tiers apart. Only the "Jonas Dagmire's" prefix
 -- alias is added so bare/prefixed bone names both match.
+M._JONAS_EXACT_IDS_BY_SLOT = {
+    ["Tier 1 Complete"] = { 33166 },
+    ["Tier 2 Complete"] = { 33167, 33172 },
+    ["Tier 3 Complete"] = { 33168, 33173 },
+    ["Tier 4 Complete"] = { 33169, 33174 },
+    ["Tier 5 Complete"] = { 33170, 33175 },
+    ["Tier 6 Complete"] = { 33171 },
+}
+
 local function expand_jonas_hand_chain(list, class_bucket, out)
     out.progression_id_match = true
+    local exact = M._JONAS_EXACT_IDS_BY_SLOT[tostring(out.slot or "")]
+    if exact then
+        M._note_progression_exact_ids(out, exact)
+    else
+        local exact_ids = {}
+        for _, raw in ipairs(out.ids or {}) do
+            local id = tonumber(raw) or 0
+            if id > 0 and (id < 33166 or id > 33171) then exact_ids[#exact_ids + 1] = id end
+        end
+        if #exact_ids > 0 then M._note_progression_exact_ids(out, exact_ids) end
+    end
+    M._note_progression_exact_name(out, out.item)
+    M._note_progression_exact_names(out, out.names)
     local name_seen = seed_name_seen(out)
     add_jonas_aliases(out, out.names, name_seen)
     add_jonas_aliases_for_name(out, out.item, name_seen)
@@ -448,22 +641,82 @@ local function expand_don_clicky_chain(list, class_bucket, out)
     return out
 end
 
--- DoN Shadow section: owning the finished class Shadow counts as having used
--- Primary/Secondary/Tertiary Materium of Legends (mark those rows green).
+function M._don_reward_from_shadow(shadow)
+    if not shadow then return nil end
+    local e = norm_entry_cached(shadow)
+    local shadow_item = tostring(e.item or ""):lower()
+    local ids, names = {}, {}
+    for i = 2, #(e.ids or {}) do ids[#ids + 1] = e.ids[i] end
+    for _, name in ipairs(e.names or {}) do
+        local n = tostring(name or "")
+        local low = n:lower()
+        if n ~= "" and low ~= shadow_item and not low:find("^shadow of a legendary ", 1, false) then
+            names[#names + 1] = n
+        end
+    end
+    if #ids == 0 and #names == 0 then return nil end
+    return {
+        item = names[1] or tostring(e.item or "Reward"),
+        ids = ids,
+        names = names,
+        slot = "Reward",
+        group = "Shadow",
+    }
+end
+
+function M._note_don_shadow_exact(out)
+    if tostring(out and out.slot or "") ~= "Shadow" then
+        M._note_current_progression_exact(out)
+        return
+    end
+    local first_id = out.ids and tonumber(out.ids[1]) or nil
+    if first_id and first_id > 0 then M._note_progression_exact_id(out, first_id) end
+    M._note_progression_exact_name(out, out.item)
+    local shadow_item = tostring(out.item or ""):lower()
+    for _, name in ipairs(out.names or {}) do
+        local low = tostring(name or ""):lower()
+        if low == shadow_item or low:find("^shadow of a legendary ", 1, false) then
+            M._note_progression_exact_name(out, name)
+        end
+    end
+end
+
+-- DoN Shadow section: owning the finished class reward counts as having used
+-- Primary/Secondary/Tertiary Materium of Legends and the intermediate Shadow.
 local function expand_don_shadow_chain(list, class_bucket, out)
     local slot = tostring(out.slot or "")
-    if slot ~= "Materium1" and slot ~= "Materium2" and slot ~= "Materium3" then
+    if slot ~= "Materium1" and slot ~= "Materium2" and slot ~= "Materium3" and slot ~= "Shadow" then
         return out
     end
     local shadow = (class_bucket and class_bucket.Shadow)
         or (list and list.template and list.template.Shadow)
-    if not shadow then return out end
-    local e = norm_entry_cached(shadow)
+    local reward = M._don_reward_from_shadow(shadow)
+    if not reward then return out end
+    local e = norm_entry_cached(reward)
     out.progression_id_match = true
+    out.progression_prefer_later = true
+    M._note_don_shadow_exact(out)
     local id_seen, name_seen = seed_id_seen(out), seed_name_seen(out)
     add_ids(out, e.ids, id_seen)
     add_names(out, e.names, name_seen)
     add_names(out, { e.item }, name_seen)
+    return out
+end
+
+-- DoN charm combine: once either finished Avarice charm exists, the Duality
+-- combine container has been consumed and should remain satisfied.
+function M._expand_don_charm_chain(out)
+    local slot = tostring(out.slot or "")
+    if slot ~= "Duality" then return out end
+    out.progression_id_match = true
+    out.progression_prefer_later = true
+    M._note_current_progression_exact(out)
+    local id_seen, name_seen = seed_id_seen(out), seed_name_seen(out)
+    add_ids(out, { 55054, 55055 }, id_seen)
+    add_names(out, {
+        "Lustrous Gem of Eternal Avarice",
+        "Solemn Gem of Restrained Avarice",
+    }, name_seen)
     return out
 end
 
@@ -479,7 +732,7 @@ local DON_SCALES_EPICS = {
     Monk = { id = 55730, name = "Draconic Fistwraps of Immortality" },
     Necromancer = { id = 55910, name = "Draconic Deathwhisper" },
     Paladin = { id = 55081, name = "Nightbane, Sword of the Dragons" },
-    Ranger = { id = 40863, name = "Aurora, the Draconic Bow" },
+    Ranger = { id = 55911, name = "Aurora, the Draconic Bow" },
     Rogue = { id = 55904, name = "Nightshade, Blade of Draconic Entropy" },
     ["Shadow Knight"] = { id = 55080, name = "Innoruuk's Draconic Blessing" },
     Shaman = { id = 55728, name = "Draconic Spiritstaff of the Heyokah" },
@@ -488,14 +741,45 @@ local DON_SCALES_EPICS = {
 }
 
 local function expand_don_scales_chain(out, class_name)
-    if tostring(out.slot or "") ~= "Misc4" then return out end
+    local slot = tostring(out.slot or "")
+    if slot ~= "Misc4" and slot ~= "Scales" then return out end
     local epic = DON_SCALES_EPICS[class_key(class_name)]
     if not epic then return out end
     out.progression_id_match = true
+    out.progression_prefer_later = true
+    M._note_current_progression_exact(out)
     local id_seen, name_seen = seed_id_seen(out), seed_name_seen(out)
     add_ids(out, { epic.id }, id_seen)
     add_names(out, { epic.name }, name_seen)
     return out
+end
+
+function M._don_virtual_raw_entry(list, class_bucket, class_name, slot)
+    slot = tostring(slot or "")
+    if slot == "Reward" then
+        local shadow = (class_bucket and class_bucket.Shadow)
+            or (list and list.template and list.template.Shadow)
+        return M._don_reward_from_shadow(shadow)
+    elseif slot == "Scales" then
+        local base = list and list.template and list.template.Misc4
+        if type(base) ~= "table" then return nil end
+        local out = {}
+        for k, v in pairs(base) do out[k] = v end
+        out.slot = "Scales"
+        out.group = "Epic"
+        return out
+    elseif slot == "2.75" then
+        local epic = DON_SCALES_EPICS[class_key(class_name)]
+        if not epic then return nil end
+        return {
+            item = epic.name,
+            ids = { epic.id },
+            names = { epic.name },
+            slot = "2.75",
+            group = "Epic",
+        }
+    end
+    return nil
 end
 
 -- Sebilis Forsaken armor: LazBiS treats either the finished class armor or the
@@ -534,20 +818,24 @@ function M.sebilis_forsaken_mold_for_slot(slot)
     })[tostring(slot or "")]
 end
 
+M._ORIGINATOR_EXACT_BY_SLOT = {
+    PSAug1 = { id = 40469, name = "Bloodstained Gear Set #1" },
+    PSAug2 = { id = 40470, name = "Bloodstained Gear Set #2" },
+    PSAug3 = { id = 40471, name = "Bloodstained Gear Set #3" },
+    PSAugSprings = { id = 40468, name = "Bloodstained Spring" },
+    PSAugContainer = { id = 40472, name = "Bloodstained Gear Assembly" },
+    PSAugFinal = { id = 39071, name = "Originator's Overlooked Oddity" },
+}
+
 function M.expand_sebilis_originator_chain(out)
     local slot = tostring(out and out.slot or "")
-    local originator_slots = {
-        PSAug1 = true,
-        PSAug2 = true,
-        PSAug3 = true,
-        PSAugSprings = true,
-        PSAugContainer = true,
-        PSAugFinal = true,
-    }
-    if not originator_slots[slot] then return out end
+    local exact = M._ORIGINATOR_EXACT_BY_SLOT[slot]
+    if not exact then return out end
     local group = tostring(out.group or "")
     if group ~= "" and group ~= "Originator's Overlook" then return out end
     out.progression_id_match = true
+    M._note_progression_exact_id(out, exact.id)
+    M._note_progression_exact_name(out, exact.name)
     local id_seen, name_seen = seed_id_seen(out), seed_name_seen(out)
     add_ids(out, { 39071 }, id_seen)
     add_names(out, { "Originator's Overlooked Oddity" }, name_seen)
@@ -557,6 +845,94 @@ end
 function M.expand_sebilis_special_chains(out)
     M.expand_sebilis_forsaken_chain(out)
     M.expand_sebilis_originator_chain(out)
+    return out
+end
+
+M._ANGUISH_MINIAUG_PROGRESSIONS = {
+    MiniAug1 = {
+        { rank = 1, id = 47344, name = "Abhorrent Brimstone of Charring", label = "Base", marker = "I" },
+        { rank = 2, id = 150343, name = "Adorned Abhorrent Brimstone of Charring", label = "Adorned", marker = "II" },
+        { rank = 3, id = 150355, name = "Imbued Abhorrent Brimstone of Charring", label = "Imbued", marker = "III" },
+    },
+    MiniAug2 = {
+        { rank = 1, id = 47339, name = "Gem of Unnatural Resilience", label = "Base", marker = "I" },
+        { rank = 2, id = 150344, name = "Adorned Gem of Unnatural Resilience", label = "Adorned", marker = "II" },
+        { rank = 3, id = 150356, name = "Imbued Gem of Unnatural Resilience", label = "Imbued", marker = "III" },
+    },
+    MiniAug3 = {
+        { rank = 1, id = 47347, name = "Kyv Eye of Marksmanship", label = "Base", marker = "I" },
+        { rank = 2, id = 150346, name = "Adorned Kyv Eye of Marksmanship", label = "Adorned", marker = "II" },
+        { rank = 3, id = 150357, name = "Imbued Kyv Eye of Marksmanship", label = "Imbued", marker = "III" },
+    },
+    MiniAug4 = {
+        { rank = 1, id = 47345, name = "Orb of Forbidden Laughter", label = "Base", marker = "I" },
+        { rank = 2, id = 150347, name = "Adorned Orb of Forbidden Laughter", label = "Adorned", marker = "II" },
+        { rank = 3, id = 150358, name = "Imbued Orb of Forbidden Laughter", label = "Imbued", marker = "III" },
+    },
+    MiniAug5 = {
+        { rank = 1, id = 47346, name = "Petrified Girplan Heart", label = "Base", marker = "I" },
+        { rank = 2, id = 150348, name = "Adorned Petrified Girplan Heart", label = "Adorned", marker = "II" },
+        { rank = 3, id = 150359, name = "Imbued Petrified Girplan Heart", label = "Imbued", marker = "III" },
+    },
+    MiniAug6 = {
+        { rank = 1, id = 47343, name = "Rune of Astral Celerity", label = "Base", marker = "I" },
+        { rank = 2, id = 150349, name = "Adorned Rune of Astral Celerity", label = "Adorned", marker = "II" },
+        { rank = 3, id = 150360, name = "Imbued Rune of Astral Celerity", label = "Imbued", marker = "III" },
+    },
+    MiniAug7 = {
+        { rank = 1, id = 47341, name = "Rune of Futile Resolutions", label = "Base", marker = "I" },
+        { rank = 2, id = 150350, name = "Adorned Rune of Futile Resolutions", label = "Adorned", marker = "II" },
+        { rank = 3, id = 150361, name = "Imbued Rune of Futile Resolutions", label = "Imbued", marker = "III" },
+    },
+    MiniAug8 = {
+        { rank = 1, id = 47337, name = "Rune of Grim Portents", label = "Base", marker = "I" },
+        { rank = 2, id = 150351, name = "Adorned Rune of Grim Portents", label = "Adorned", marker = "II" },
+        { rank = 3, id = 150362, name = "Imbued Rune of Grim Portents", label = "Imbued", marker = "III" },
+    },
+    MiniAug9 = {
+        { rank = 1, id = 47338, name = "Rune of Living Lightning", label = "Base", marker = "I" },
+        { rank = 2, id = 150352, name = "Adorned Rune of Living Lightning", label = "Adorned", marker = "II" },
+        { rank = 3, id = 150363, name = "Imbued Rune of Living Lightning", label = "Imbued", marker = "III" },
+    },
+    MiniAug10 = {
+        { rank = 1, id = 47340, name = "Stone of Horrid Transformation", label = "Base", marker = "I" },
+        { rank = 2, id = 150353, name = "Adorned Stone of Horrid Transformation", label = "Adorned", marker = "II" },
+        { rank = 3, id = 150364, name = "Imbued Stone of Horrid Transformation", label = "Imbued", marker = "III" },
+    },
+    MiniAug11 = {
+        { rank = 1, id = 47342, name = "Stone of Planar Protection", label = "Base", marker = "I" },
+        { rank = 2, id = 150354, name = "Adorned Stone of Planar Protection", label = "Adorned", marker = "II" },
+        { rank = 3, id = 150365, name = "Imbued Stone of Planar Protection", label = "Imbued", marker = "III" },
+    },
+}
+
+function M._expand_anguish_miniaug_progression(out)
+    local chain = M._ANGUISH_MINIAUG_PROGRESSIONS[tostring(out and out.slot or "")]
+    if not chain then return out end
+    out.progression = chain
+    out.progression_id_match = true
+    return out
+end
+
+function M._expand_eoc_radix_chain(list, class_bucket, out)
+    if tostring(out and out.slot or "") ~= "EOC" then return out end
+    local radix = (class_bucket and class_bucket.Radix)
+        or (list and list.template and list.template.Radix)
+        or (list and list.visible and list.visible.Radix)
+    if not radix then return out end
+    local e = norm_entry_cached(radix)
+    local final_name = trim(e.item ~= "" and e.item or ((e.names or {})[1] or ""))
+    if final_name == "" then return out end
+    local ok_idx, ownership_index = pcall(require, 'ownership_index')
+    if ok_idx and ownership_index and ownership_index.name_is_id_only
+        and ownership_index.name_is_id_only(final_name) then
+        return out
+    end
+    M._note_current_progression_exact(out)
+    out.progression_prefer_later = true
+    local name_seen = seed_name_seen(out)
+    add_names(out, { final_name }, name_seen)
+    out.progression_id_match = true
     return out
 end
 
@@ -592,6 +968,36 @@ function M._row_is_owned(row)
     if type(row) ~= "table" then return false end
     local status = tostring(row.status or "")
     return row.have == true and status ~= "missing" and status ~= "unknown"
+end
+
+function M._apply_progression_satisfied_status(entry, row)
+    if type(entry) ~= "table" or type(row) ~= "table" or not M._row_is_owned(row) then return row end
+    local exact_pairs = type(entry.progression_exact_pairs) == "table" and entry.progression_exact_pairs or nil
+    local exact_ids = type(entry.progression_exact_ids) == "table" and entry.progression_exact_ids or nil
+    local exact_names = type(entry.progression_exact_names) == "table" and entry.progression_exact_names or nil
+    local match_id = M._row_match_id(row)
+    local match_name = M._progression_norm_name(M._row_match_name(row))
+    if exact_pairs then
+        local names = match_id and exact_pairs[tonumber(match_id)] or nil
+        if names and match_name ~= "" and names[match_name] then return row end
+        if not match_id and match_name ~= "" and exact_names and exact_names[match_name] then return row end
+    else
+        if not exact_ids and not exact_names then return row end
+        if match_id and exact_ids and exact_ids[tonumber(match_id)] then return row end
+        if match_name ~= "" and exact_names and exact_names[match_name] then return row end
+    end
+    if not match_id and match_name == "" then return row end
+
+    row.status = "progression_satisfied"
+    row.have = true
+    local match = row.match
+    if type(match) == "table" then
+        row.progression_satisfied_name = tostring(match.name or match.item or "")
+        row.progression_satisfied_location = tostring(match.location or match.where or match.slotname or "")
+    else
+        row.progression_satisfied_name = tostring(match or "")
+    end
+    return row
 end
 
 function M._completed_entry_for_forsaken(entry, mold)
@@ -707,9 +1113,93 @@ function M.default_list_id()
     return g and g.lists and g.lists[1] and g.lists[1].id or ""
 end
 
+function M._clone_catalog_category(cat, source_list_id, name_override)
+    if type(cat) ~= "table" then return nil end
+    local out = {}
+    for k, v in pairs(cat) do out[k] = v end
+    out.name = name_override or cat.name
+    out._source_list_id = source_list_id
+    return out
+end
+
+function M._append_catalog_categories(out, source_list_id, section_label, rename_single)
+    local src = catalog.lists and catalog.lists[source_list_id] or nil
+    if not src then return end
+    local cats = src.categories or {}
+    local single = #cats == 1
+    for _, cat in ipairs(cats) do
+        local label = cat and cat.name or ""
+        if section_label then
+            if single and rename_single then
+                label = section_label
+            else
+                label = tostring(section_label) .. ": " .. tostring(label)
+            end
+        end
+        local clone = M._clone_catalog_category(cat, source_list_id, label)
+        if clone then out[#out + 1] = clone end
+    end
+end
+
+function M._quest_category_moves_to_nightveil(cat_name)
+    cat_name = tostring(cat_name or "")
+    return cat_name == "Chromatic Veil" or cat_name == "VP Hardcore"
+end
+
+function M._synthetic_list(id)
+    id = tostring(id or "")
+    M._synthetic_cache = M._synthetic_cache or {}
+    if M._synthetic_cache[id] then return M._synthetic_cache[id] end
+    local result = nil
+    if id == "hardcorezones" then
+        result = {
+            id = "hardcorezones",
+            name = "Hardcore Zones",
+            group = "Other Checklists",
+            categories = (function()
+                local out = {}
+                M._append_catalog_categories(out, "llhcitems", "Lower HC", true)
+                M._append_catalog_categories(out, "hcitems", "Higher HC", true)
+                return out
+            end)(),
+        }
+    elseif id == "nightveil" then
+        local raw = catalog.lists and catalog.lists.nightveil or nil
+        if not raw then return nil end
+        local out = {}
+        for k, v in pairs(raw) do out[k] = v end
+        out.categories = {}
+        M._append_catalog_categories(out.categories, "nightveil")
+        local quest = catalog.lists and catalog.lists.questitems or nil
+        for _, cat in ipairs((quest and quest.categories) or {}) do
+            if M._quest_category_moves_to_nightveil(cat.name) then
+                local clone = M._clone_catalog_category(cat, "questitems")
+                if clone then out.categories[#out.categories + 1] = clone end
+            end
+        end
+        result = out
+    elseif id == "questitems" then
+        local raw = catalog.lists and catalog.lists.questitems or nil
+        if not raw then return nil end
+        local out = {}
+        for k, v in pairs(raw) do out[k] = v end
+        out.name = "Misc"
+        out.categories = {}
+        for _, cat in ipairs(raw.categories or {}) do
+            if not M._quest_category_moves_to_nightveil(cat.name) then
+                local clone = M._clone_catalog_category(cat, "questitems")
+                if clone then out.categories[#out.categories + 1] = clone end
+            end
+        end
+        result = out
+    end
+    if result then M._synthetic_cache[id] = result end
+    return result
+end
+
 function M.list(id)
     id = id or M.default_list_id()
-    return catalog.lists and catalog.lists[id] or nil
+    return M._synthetic_list(id) or (catalog.lists and catalog.lists[id] or nil)
 end
 
 function M.list_label(id)
@@ -719,6 +1209,24 @@ end
 
 -- UI tab order/labels (does not change generated catalog data).
 local UI_LIST_BUTTONS = {
+    { id = "preanguish", label = "Pre-Raid", group = "Group Best In Slot" },
+    { id = "anguish", label = "Anguish", group = "Raid Best In Slot" },
+    { id = "fuku", label = "FUKU", group = "Raid Best In Slot" },
+    { id = "dsk", label = "DSK", group = "Raid Best In Slot" },
+    { id = "sebilis", label = "Sebilis", group = "Raid Best In Slot" },
+    { id = "veksar", label = "Veksar", group = "Raid Best In Slot" },
+    { id = "don", label = "Dragons of Norrath", group = "Raid Best In Slot" },
+    { id = "hardcorezones", label = "Hardcore Zones", group = "Other Checklists" },
+    { id = "focusitems", label = "Type 12 Augs", group = "Other Checklists" },
+    { id = "jonas", label = "Hand", group = "Other Checklists" },
+    { id = "fungal", label = "Fungal", group = "Raid Best In Slot" },
+    { id = "questitems", label = "Misc", group = "Other Checklists" },
+    { id = "nightveil", label = "Nightveil", group = "Other Checklists" },
+    { id = "vendoritems", label = "Vendor", group = "Other Checklists" },
+    { id = "bagitems", label = "Bags", group = "Other Checklists" },
+}
+
+M._ANNOUNCE_LIST_BUTTONS = {
     { id = "preanguish", label = "Pre-Raid", group = "Group Best In Slot" },
     { id = "anguish", label = "Anguish", group = "Raid Best In Slot" },
     { id = "fuku", label = "FUKU", group = "Raid Best In Slot" },
@@ -908,7 +1416,11 @@ local function resolve_entry_uncached(list_id, class_name, slot)
     -- list.template/visible painted pouches/axes in Arms for Discord (?).
     if not class_name then return nil end
     local class_bucket = list.classes and list.classes[class_name] or nil
-    local entry = class_bucket and class_bucket[slot]
+    local entry = nil
+    if list_id == "don" then
+        entry = M._don_virtual_raw_entry(list, class_bucket, class_name, slot)
+    end
+    if not entry then entry = class_bucket and class_bucket[slot] end
     -- Template/visible only after a real class resolved (shared slots), never for stubs.
     if not entry and list.template then entry = list.template[slot] end
     if not entry and list.visible then entry = list.visible[slot] end
@@ -925,17 +1437,23 @@ local function resolve_entry_uncached(list_id, class_name, slot)
     if list_id == "jonas" then
         expand_jonas_hand_chain(list, class_bucket, out)
     elseif list_id == "veksar" then
-        M._expand_ancient_bauble_chain(list, class_bucket, out)
+        M._expand_veksar_progression_chains(list, class_bucket, out)
     elseif list_id == "dsk" then
         mark_dsk_book_progression(out)
+        M._expand_eoc_radix_chain(list, class_bucket, out)
+    elseif list_id == "questitems" then
+        M._expand_eoc_radix_chain(list, class_bucket, out)
     elseif list_id == "don" then
         expand_don_clicky_chain(list, class_bucket, out)
         expand_don_shadow_chain(list, class_bucket, out)
+        M._expand_don_charm_chain(out)
         expand_don_scales_chain(out, class_name)
     elseif list_id == "bagitems" then
-        expand_tattered_sack_chain(out)
+        M._expand_bag_progression_chains(out)
     elseif list_id == "sebilis" then
         M.expand_sebilis_special_chains(out)
+    elseif list_id == "anguish" then
+        M._expand_anguish_miniaug_progression(out)
     end
     return out
 end
@@ -958,16 +1476,18 @@ function M.rows_for_snap(list_id, snap)
     local rows = {}
     if not list or not snap then return rows end
     for _, cat in ipairs(list.categories or {}) do
+        local source_list_id = cat._source_list_id or list_id
         rows[#rows+1] = { category = cat.name, header = true }
-        for _, slot in ipairs(category_slots(list_id, cat, snap.class, false)) do
-            local entry = M.resolve_entry(list_id, snap.class, slot)
+        for _, slot in ipairs(category_slots(source_list_id, cat, snap.class, false)) do
+            local entry = M.resolve_entry(source_list_id, snap.class, slot)
             if entry then
                 entry.group = cat.name
                 local eval = bis.evaluate_entry(entry, snap)
                 eval.category = cat.name
+                eval.source_list_id = source_list_id
                 rows[#rows+1] = eval
             else
-                rows[#rows+1] = { category = cat.name, slot = slot, empty = true }
+                rows[#rows+1] = { category = cat.name, slot = slot, empty = true, source_list_id = source_list_id }
             end
         end
     end
@@ -983,8 +1503,9 @@ function M.reference_rows(list_id, opts)
     opts = type(opts) == "table" and opts or {}
     local class_names = opts.class_names
     for _, cat in ipairs(list.categories or {}) do
-        rows[#rows+1] = { category = cat.name, header = true }
-        if is_don_spells_category(list_id, cat.name) then
+        local source_list_id = cat._source_list_id or list_id
+        rows[#rows+1] = { category = cat.name, header = true, source_list_id = source_list_id }
+        if is_don_spells_category(source_list_id, cat.name) then
             -- Per-character class columns: N index rows, no shared left-side list.
             local DS = ensure_don_spells_mod()
             local max_n = 0
@@ -1001,11 +1522,12 @@ function M.reference_rows(list_id, opts)
                     category = cat.name,
                     spell_index = i,
                     hide_slot = true,
+                    source_list_id = source_list_id,
                 }
             end
         else
-            for _, slot in ipairs(category_slots(list_id, cat, nil, false)) do
-                rows[#rows+1] = { category = cat.name, slot = slot }
+            for _, slot in ipairs(category_slots(source_list_id, cat, nil, false)) do
+                rows[#rows+1] = { category = cat.name, slot = slot, source_list_id = source_list_id }
             end
         end
     end
@@ -1059,6 +1581,7 @@ function M.evaluate_slot(list_id, snap, slot, category)
                 -- Single label for display (row_location used to join location/where → "Bags - Bags").
                 local match = {
                     name = hit.name or entry.item,
+                    id = tonumber(hit.id or hit.item_id or hit.itemID),
                     where = loc,
                     slotname = loc,
                     location = loc,
@@ -1071,22 +1594,33 @@ function M.evaluate_slot(list_id, snap, slot, category)
                     category = category,
                     from_bis_search = true,
                 }
+                if type(entry.progression) == "table" then
+                    local prog = bis.evaluate_entry(entry, snap, { skip_live = true })
+                    if prog and prog.status and prog.status ~= "missing" then
+                        prog.category = category
+                        prog.from_bis_search = true
+                        row = prog
+                    end
+                end
                 if status == "missing" and (entry.progression_id_match == true or M._EXPANDED_SLOT_FALLBACK_LISTS[tostring(list_id or "")]) then
                     local fallback = bis.evaluate_entry(entry, snap)
                     if fallback and fallback.status and fallback.status ~= "missing" then
                         fallback.category = category
                         fallback = M._apply_sebilis_forsaken_status(list_id, entry, snap, fallback)
-                        return M._apply_sebilis_originator_status(list_id, entry, snap, fallback)
+                        fallback = M._apply_sebilis_originator_status(list_id, entry, snap, fallback)
+                        return M._apply_progression_satisfied_status(entry, fallback)
                     end
                 end
                 row = M._apply_sebilis_forsaken_status(list_id, entry, snap, row)
-                return M._apply_sebilis_originator_status(list_id, entry, snap, row)
+                row = M._apply_sebilis_originator_status(list_id, entry, snap, row)
+                return M._apply_progression_satisfied_status(entry, row)
             end
         end
     end
     local row = bis.evaluate_entry(entry, snap)
     row = M._apply_sebilis_forsaken_status(list_id, entry, snap, row)
     row = M._apply_sebilis_originator_status(list_id, entry, snap, row)
+    row = M._apply_progression_satisfied_status(entry, row)
     row.category = category
     -- A peer DoN ability row with no search answer and no spellbook in the
     -- snapshot is UNKNOWN, not missing (absent data is not "doesn't know").
@@ -1150,7 +1684,7 @@ local function ensure_catalog_search_index()
 
     local rows = {}
     local merge = {}
-    for _, spec in ipairs(UI_LIST_BUTTONS) do
+    for _, spec in ipairs(M._ANNOUNCE_LIST_BUTTONS) do
         local list = M.list(spec.id)
         if not list then goto continue_list end
 
@@ -1258,7 +1792,7 @@ end
 
 function M.lists_for_announce()
     local out = {}
-    for _, spec in ipairs(UI_LIST_BUTTONS) do
+    for _, spec in ipairs(M._ANNOUNCE_LIST_BUTTONS) do
         if M.list(spec.id) and M.list_announce_enabled(spec.id) then
             out[#out + 1] = { kind = "catalog", id = spec.id }
         end
@@ -1273,7 +1807,7 @@ end
 
 local function builtin_announce_list_refs(include_disabled)
     local out = {}
-    for _, spec in ipairs(UI_LIST_BUTTONS) do
+    for _, spec in ipairs(M._ANNOUNCE_LIST_BUTTONS) do
         if M.list(spec.id) and (include_disabled == true or M.list_announce_enabled(spec.id)) then
             out[#out + 1] = { kind = "catalog", id = spec.id }
         end
@@ -2282,14 +2816,20 @@ local function collect_template_announce_entries_for_link(item_name, item_id)
                         if list_id == "don" then
                             expand_don_clicky_chain(list, bucket, entry)
                             expand_don_shadow_chain(list, bucket, entry)
+                            M._expand_don_charm_chain(entry)
                         elseif list_id == "veksar" then
-                            M._expand_ancient_bauble_chain(list, bucket, entry)
+                            M._expand_veksar_progression_chains(list, bucket, entry)
                         elseif list_id == "dsk" then
                             mark_dsk_book_progression(entry)
+                            M._expand_eoc_radix_chain(list, bucket, entry)
+                        elseif list_id == "questitems" then
+                            M._expand_eoc_radix_chain(list, bucket, entry)
                         elseif list_id == "bagitems" then
-                            expand_tattered_sack_chain(entry)
+                            M._expand_bag_progression_chains(entry)
                         elseif list_id == "sebilis" then
                             M.expand_sebilis_special_chains(entry)
+                        elseif list_id == "anguish" then
+                            M._expand_anguish_miniaug_progression(entry)
                         end
                         if bis.link_matches_entry(entry, item_name, item_id) then
                             local dedupe = list_id .. "\31" .. tostring(slot)
@@ -2503,17 +3043,23 @@ local function compact_apply_expansions(list_id, list, bucket, entry, class_name
     if list_id == "jonas" then
         expand_jonas_hand_chain(list, bucket, entry)
     elseif list_id == "veksar" then
-        M._expand_ancient_bauble_chain(list, bucket, entry)
+        M._expand_veksar_progression_chains(list, bucket, entry)
     elseif list_id == "dsk" then
         mark_dsk_book_progression(entry)
+        M._expand_eoc_radix_chain(list, bucket, entry)
+    elseif list_id == "questitems" then
+        M._expand_eoc_radix_chain(list, bucket, entry)
     elseif list_id == "don" then
         expand_don_clicky_chain(list, bucket, entry)
         expand_don_shadow_chain(list, bucket, entry)
+        M._expand_don_charm_chain(entry)
         expand_don_scales_chain(entry, class_name)
     elseif list_id == "bagitems" then
-        expand_tattered_sack_chain(entry)
+        M._expand_bag_progression_chains(entry)
     elseif list_id == "sebilis" then
         M.expand_sebilis_special_chains(entry)
+    elseif list_id == "anguish" then
+        M._expand_anguish_miniaug_progression(entry)
     end
 end
 
@@ -3498,7 +4044,11 @@ local function shared_builtin_raw_entry(list_id, list, class_name, slot)
     if not list then return nil, "no-list" end
     class_name = class_key(class_name or "")
     local class_bucket = class_name and list.classes and list.classes[class_name] or nil
-    local raw = class_bucket and class_bucket[slot]
+    local raw = nil
+    if list_id == "don" then
+        raw = M._don_virtual_raw_entry(list, class_bucket, class_name, slot)
+    end
+    if not raw then raw = class_bucket and class_bucket[slot] end
     local source_bucket = class_bucket
     if not raw and list.template then raw, source_bucket = list.template[slot], list.template end
     if not raw and list.visible then raw, source_bucket = list.visible[slot], list.visible end
@@ -3515,11 +4065,16 @@ shared_apply_expansions_measured = function(build, list_id, list, bucket, entry,
         end)
     elseif list_id == "veksar" then
         shared_phase_time(build, "expand_veksar_bauble", function()
-            M._expand_ancient_bauble_chain(list, bucket, entry)
+            M._expand_veksar_progression_chains(list, bucket, entry)
         end)
     elseif list_id == "dsk" then
         shared_phase_time(build, "mark_dsk_books", function()
             mark_dsk_book_progression(entry)
+            M._expand_eoc_radix_chain(list, bucket, entry)
+        end)
+    elseif list_id == "questitems" then
+        shared_phase_time(build, "expand_eoc_radix", function()
+            M._expand_eoc_radix_chain(list, bucket, entry)
         end)
     elseif list_id == "don" then
         shared_phase_time(build, "expand_don_clicky", function()
@@ -3528,16 +4083,23 @@ shared_apply_expansions_measured = function(build, list_id, list, bucket, entry,
         shared_phase_time(build, "expand_don_shadow", function()
             expand_don_shadow_chain(list, bucket, entry)
         end)
+        shared_phase_time(build, "expand_don_charm", function()
+            M._expand_don_charm_chain(entry)
+        end)
         shared_phase_time(build, "expand_don_scales", function()
             expand_don_scales_chain(entry, class_name)
         end)
     elseif list_id == "bagitems" then
         shared_phase_time(build, "expand_tattered_sack", function()
-            expand_tattered_sack_chain(entry)
+            M._expand_bag_progression_chains(entry)
         end)
     elseif list_id == "sebilis" then
         shared_phase_time(build, "expand_sebilis_forsaken", function()
             M.expand_sebilis_special_chains(entry)
+        end)
+    elseif list_id == "anguish" then
+        shared_phase_time(build, "expand_anguish_miniaug", function()
+            M._expand_anguish_miniaug_progression(entry)
         end)
     end
 end
@@ -4009,7 +4571,7 @@ end
 
 local function builtin_announce_id_set()
     local set = {}
-    for _, spec in ipairs(UI_LIST_BUTTONS) do
+    for _, spec in ipairs(M._ANNOUNCE_LIST_BUTTONS) do
         if M.list(spec.id) then set[tostring(spec.id)] = true end
     end
     return set
@@ -4771,14 +5333,20 @@ local function paint_need_walk(snap, item_name, item_id, opts)
                             if list_id == 'don' then
                                 expand_don_clicky_chain(list, bucket, entry)
                                 expand_don_shadow_chain(list, bucket, entry)
+                                M._expand_don_charm_chain(entry)
                             elseif list_id == 'veksar' then
-                                M._expand_ancient_bauble_chain(list, bucket, entry)
+                                M._expand_veksar_progression_chains(list, bucket, entry)
                             elseif list_id == 'dsk' then
                                 mark_dsk_book_progression(entry)
+                                M._expand_eoc_radix_chain(list, bucket, entry)
+                            elseif list_id == 'questitems' then
+                                M._expand_eoc_radix_chain(list, bucket, entry)
                             elseif list_id == 'bagitems' then
-                                expand_tattered_sack_chain(entry)
+                                M._expand_bag_progression_chains(entry)
                             elseif list_id == 'sebilis' then
                                 M.expand_sebilis_special_chains(entry)
+                            elseif list_id == 'anguish' then
+                                M._expand_anguish_miniaug_progression(entry)
                             end
                             if names_hit(entry, nil, raw) then
                                 local row = M.evaluate_slot(list_id, snap, slot, nil)

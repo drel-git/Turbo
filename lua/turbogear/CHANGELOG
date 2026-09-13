@@ -1,3 +1,17 @@
+1.2.145
+Big TurboGear polish pass:
+- UI overhaul, performance improvements, and bug fixes
+- New lean TurboGear Wallet for fleet-wide currency tracking (Wallet in TG or $ from Turbo)
+- New Collect tab for easily moving things around
+- Improved E3 / EQBC / DanNet / Custom transport support
+- Major visual overhaul for Dragons of Norrath Lockouts and Instances Lockouts
+- Improved Type 12 source-reference readability and boss/source callouts
+- Expanded TurboBiS progression handling for several upgrade-style item chains
+- Added DoN TurboBiS progression coloring for Duality, Shadow/Reward, and Scales/2.75 chains
+- Added Radiant Crystal Cache + Vault to TurboGear Collect
+- Continued TurboBiS progression cleanup for bags and linked quest rows
+- Performance cleanup: fewer repeated config loads and no new background polling
+
 1.2.144
 v1.2.144 Hotfix
 - Fixed TurboBiS ownership matching for Anguish, DSK, Sebilis Forsaken, Hand, Fungal, Veksar bauble, DSK books, and Bloodstained progression rows.

@@ -25,6 +25,29 @@ local lo_add_duration = ""
 local lo_status = ""
 local lo_dz_picker_entries = {}
 local lo_show_advanced = false
+local UI = {
+    header_bg = { 0.10, 0.15, 0.22, 1.00 },
+    row_base = { 0.060, 0.075, 0.100, 0.74 },
+    row_alt = { 0.085, 0.095, 0.120, 0.74 },
+    row_hover = { 0.13, 0.20, 0.29, 0.95 },
+    ready = { 0.35, 0.68, 0.45, 0.82 },
+    locked = { 1.00, 0.48, 0.36, 1.00 },
+    unknown = { 0.45, 0.48, 0.54, 1.00 },
+    instance = { 0.74, 0.77, 0.82, 1.00 },
+    zone = { 0.48, 0.52, 0.60, 1.00 },
+    section = {
+        Raid = { bg = { 0.22, 0.16, 0.07, 0.94 }, fg = { 0.90, 0.68, 0.34, 1.00 } },
+        TwoGroupRaid = { bg = { 0.05, 0.22, 0.24, 0.94 }, fg = { 0.40, 0.82, 0.82, 1.00 } },
+        Group = { bg = { 0.06, 0.14, 0.28, 0.94 }, fg = { 0.44, 0.68, 1.00, 1.00 } },
+        OldRaids = { bg = { 0.12, 0.18, 0.24, 0.94 }, fg = { 0.68, 0.76, 0.84, 1.00 } },
+        Custom = { bg = { 0.17, 0.11, 0.22, 0.94 }, fg = { 0.76, 0.58, 0.86, 1.00 } },
+    },
+    badge = {
+        locked = { bg = { 0.22, 0.10, 0.08, 0.96 }, border = { 0.54, 0.18, 0.16, 0.76 }, label = { 0.84, 0.48, 0.42, 1.00 }, value = { 1.00, 0.57, 0.48, 1.00 } },
+        open = { bg = { 0.08, 0.17, 0.11, 0.96 }, border = { 0.18, 0.42, 0.25, 0.76 }, label = { 0.48, 0.74, 0.54, 1.00 }, value = { 0.58, 0.92, 0.64, 1.00 } },
+        chars = { bg = { 0.11, 0.14, 0.20, 0.96 }, border = { 0.24, 0.32, 0.44, 0.76 }, label = { 0.62, 0.68, 0.76, 1.00 }, value = { 0.82, 0.86, 0.92, 1.00 } },
+    },
+}
 
 local function seconds_to_duration_str(secs)
     secs = math.max(0, math.floor(tonumber(secs) or 0))
@@ -118,25 +141,16 @@ local function table_col_text_centered(color, text, col_w)
 end
 
 local function draw_open_icon()
-    if not theme.draw_unlock_icon(Theme.online or Theme.green, 12.0, true) then
-        table_col_text_centered(Theme.online or Theme.green, "Open", column_width_now())
+    if not theme.draw_unlock_icon(UI.ready or Theme.green, 11.0, true) then
+        table_col_text_centered(UI.ready or Theme.green, "Open", column_width_now())
     end
 end
 
 local function draw_header_cell(snap, counts)
     local cc = views.class_color(snap and snap.class)
     local name = snap and snap.name or "?"
-    local cls = views.class_abbrev(snap and snap.class)
     local w = column_width_now() or 96.0
-    table_col_text_centered(cc, string.format("%s (%s)", name, cls), w)
-    if counts then
-        if counts.no_data then
-            table_col_text_centered(Theme.dim, "no lockout data", w)
-        else
-            local locked, open = counts[1] or 0, counts[2] or 0
-            table_col_text_centered(Theme.dim, string.format("%d locked / %d open", locked, open), w)
-        end
-    end
+    table_col_text_centered(cc, name, w)
 end
 
 local function lockout_counts_for_snap(snap)
@@ -168,7 +182,7 @@ local function draw_lockout_cell(snap, category, entry)
     end
     local state = lockouts.cell_status(snap, category, entry.name)
     if state.locked then
-        table_col_text_centered(Theme.amber or Theme.gold, tostring(state.timer or "Locked"), column_width_now())
+        table_col_text_centered(UI.locked or Theme.amber or Theme.gold, tostring(state.timer or "Locked"), column_width_now())
         if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
             ImGui.SetTooltip("Available in: " .. tostring(state.timer or "?"))
         end
@@ -206,7 +220,7 @@ local function draw_lockout_cell_compact(snap, category, entry)
     end
     local state = lockouts.cell_status(snap, category, entry.name)
     if state.locked then
-        views.col_text_centered(Theme.amber or Theme.gold, tostring(state.timer or "Locked"), column_width_now())
+        views.col_text_centered(UI.locked or Theme.amber or Theme.gold, tostring(state.timer or "Locked"), column_width_now())
         if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
             ImGui.SetTooltip("Available in: " .. tostring(state.timer or "?"))
         end
@@ -253,14 +267,141 @@ local function aggregate_counts(counts_by_key)
     return locked, open, missing
 end
 
-local function draw_add_lockout_panel()
+local function text_width(text)
+    if views.text_width then return views.text_width(text) end
+    if not ImGui.CalcTextSize then return 0 end
+    local ok, w = pcall(ImGui.CalcTextSize, tostring(text or ""))
+    if not ok then return 0 end
+    if type(w) == "table" then return tonumber(w.x or w[1]) or 0 end
+    return tonumber(w) or 0
+end
+
+local function color_u32(color)
+    if theme.color_u32 then return theme.color_u32(color) end
+    if not (IM_COL32 and type(color) == "table") then return nil end
+    return IM_COL32(
+        math.floor((color[1] or 0) * 255),
+        math.floor((color[2] or 0) * 255),
+        math.floor((color[3] or 0) * 255),
+        math.floor((color[4] or 1) * 255))
+end
+
+local function set_row_bg(color)
+    if not (ImGui.TableSetBgColor and ImGuiTableBgTarget) then return end
+    local c = color_u32(color)
+    if not c then return end
+    pcall(ImGui.TableSetBgColor, ImGuiTableBgTarget.RowBg0, c)
+    if ImGuiTableBgTarget.RowBg1 then pcall(ImGui.TableSetBgColor, ImGuiTableBgTarget.RowBg1, c) end
+end
+
+local function push_table_style()
+    local pushed = 0
+    if ImGui.PushStyleColor and ImGuiCol then
+        local function pc(which, color)
+            if which and color then
+                ImGui.PushStyleColor(which, color[1], color[2], color[3], color[4])
+                pushed = pushed + 1
+            end
+        end
+        pc(ImGuiCol.TableHeaderBg, UI.header_bg)
+        pc(ImGuiCol.TableRowBg, UI.row_base)
+        pc(ImGuiCol.TableRowBgAlt, UI.row_alt)
+        pc(ImGuiCol.TableBorderLight, { 0.17, 0.21, 0.27, 0.72 })
+        pc(ImGuiCol.TableBorderStrong, { 0.22, 0.30, 0.38, 0.95 })
+        pc(ImGuiCol.HeaderHovered, UI.row_hover)
+    end
+    return pushed
+end
+
+local function table_col_text_right(color, text, col_w)
+    text = tostring(text or "")
+    col_w = tonumber(col_w) or column_width_now() or 80.0
+    local tw = text_width(text)
+    if col_w > 0 and tw > 0 and tw < col_w and ImGui.GetCursorPosX and ImGui.SetCursorPosX then
+        local ok, x = pcall(ImGui.GetCursorPosX)
+        if ok and tonumber(x) then pcall(ImGui.SetCursorPosX, tonumber(x) + math.max(0, col_w - tw - 8.0)) end
+    end
+    col_text(color, text)
+end
+
+local function draw_stat_chip(label, value, style)
+    style = style or UI.badge.chars
+    label = tostring(label or "")
+    value = tostring(value or 0)
+    local text = label .. " " .. value
+    local pad_x, pad_y = 7.0, 2.0
+    local w = math.max(62.0, text_width(text) + pad_x * 2)
+    local h = ((ImGui.GetTextLineHeight and ImGui.GetTextLineHeight()) or 14.0) + pad_y * 2
+    if ImGui.GetWindowDrawList and ImGui.GetCursorScreenPos and ImGui.Dummy and theme.color_u32 then
+        local x, y = ImGui.GetCursorScreenPos()
+        local draw = ImGui.GetWindowDrawList()
+        draw:AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + h), theme.color_u32(style.bg), 4.0)
+        draw:AddRect(ImVec2(x, y), ImVec2(x + w, y + h), theme.color_u32(style.border), 4.0, 0, 1.0)
+        draw:AddText(ImVec2(x + pad_x, y + pad_y), theme.color_u32(style.label), label)
+        draw:AddText(ImVec2(x + pad_x + text_width(label .. " "), y + pad_y), theme.color_u32(style.value), value)
+        ImGui.Dummy(w, h)
+    else
+        col_text(style.label, label .. " " .. value)
+    end
+end
+
+local function draw_summary_chips_right(locked, open, chars)
+    local labels = {
+        { "Locked", locked or 0, UI.badge.locked },
+        { "Open", open or 0, UI.badge.open },
+        { "Chars", chars or 0, UI.badge.chars },
+    }
+    local total_w = 0
+    for _, spec in ipairs(labels) do
+        total_w = total_w + math.max(62.0, text_width(tostring(spec[1]) .. " " .. tostring(spec[2])) + 14.0)
+    end
+    total_w = total_w + 8.0 * (#labels - 1)
+    if ImGui.GetContentRegionAvail and ImGui.SetCursorPosX and ImGui.GetCursorPosX then
+        local avail = ImGui.GetContentRegionAvail()
+        if type(avail) == "table" then avail = avail.x or avail[1] end
+        local cur_x = tonumber(ImGui.GetCursorPosX()) or 0
+        if tonumber(avail) and tonumber(avail) > total_w then
+            ImGui.SameLine()
+            ImGui.SetCursorPosX(cur_x + tonumber(avail) - total_w)
+        else
+            ImGui.SameLine()
+        end
+    else
+        ImGui.SameLine()
+    end
+    for i, spec in ipairs(labels) do
+        if i > 1 then ImGui.SameLine() end
+        draw_stat_chip(spec[1], spec[2], spec[3])
+    end
+end
+
+local function category_style(cat)
+    return UI.section[tostring(cat or "")] or UI.section.Custom
+end
+
+local function draw_display_label(entry, hidden)
+    local base = entry and ((entry.label and entry.label ~= "" and entry.label)
+        or (entry.display and entry.display ~= "" and tostring(entry.display))
+        or tostring(entry.name or "?")) or "?"
+    local zone = entry and tostring(entry.zone or "") or ""
+    local base_color = hidden and Theme.dim or UI.instance
+    col_text(base_color, hidden and ("(" .. base .. ")") or base)
+    if zone ~= "" then
+        ImGui.SameLine(0, 3)
+        col_text(UI.zone, "(" .. zone .. ")")
+    end
+end
+
+local function draw_add_lockout_panel(after_button)
     local add_color = show_add_panel and (Theme.customizeActive or Theme.customize or Theme.steel)
         or (Theme.customize or Theme.steel)
     if themed_button("Add Your Own Custom Lockouts##lo_add_custom", add_color) then
         show_add_panel = not show_add_panel
     end
+    if after_button then after_button() end
     if not show_add_panel then return end
 
+    ImGui.Spacing()
     -- Primary action row
     if themed_button("Pick from DZ window##lo_pick_dz", Theme.blue) then
         lo_dz_picker_entries = lockouts.read_dz_timers()
@@ -543,23 +684,7 @@ local function draw_scope_row()
 end
 
 function M.draw()
-    draw_add_lockout_panel()
     local view_key, scoped_keys = draw_scope_row()
-    ImGui.SameLine()
-    if toggle_button(Settings.lockoutsLockedOnly and "Locked Only: ON##lo_locked_only" or "Locked Only: OFF##lo_locked_only", Settings.lockoutsLockedOnly == true) then
-        Settings.lockoutsLockedOnly = not (Settings.lockoutsLockedOnly == true)
-        if cfg.MarkSettingsDirty then cfg.MarkSettingsDirty("lockouts_ui") else SaveSettings() end
-    end
-    ImGui.SameLine()
-    if toggle_button(Settings.lockoutsCompact and "Compact: ON##lo_compact" or "Compact: OFF##lo_compact", Settings.lockoutsCompact == true) then
-        Settings.lockoutsCompact = not (Settings.lockoutsCompact == true)
-        if cfg.MarkSettingsDirty then cfg.MarkSettingsDirty("lockouts_ui") else SaveSettings() end
-    end
-    ImGui.SameLine()
-    if toggle_button(Settings.lockoutsShowHidden and "Show Hidden: ON##lo_showhidden" or "Show Hidden: OFF##lo_showhidden", Settings.lockoutsShowHidden == true) then
-        Settings.lockoutsShowHidden = not (Settings.lockoutsShowHidden == true)
-        if cfg.MarkSettingsDirty then cfg.MarkSettingsDirty("lockouts_ui") else SaveSettings() end
-    end
     ImGui.Spacing()
 
     if (Settings.lockoutsRosterScope or "online") == "self" then
@@ -583,30 +708,27 @@ function M.draw()
         counts_by_key[key] = lockout_counts_for_snap(snap)
     end
     local total_locked, total_open, missing_snaps = aggregate_counts(counts_by_key)
-    col_text(Theme.dim, string.format("%d locked / %d open across %d character%s%s",
-        total_locked, total_open, #keys, #keys == 1 and "" or "s",
-        missing_snaps > 0 and string.format(" | %d missing snapshot%s", missing_snaps, missing_snaps == 1 and "" or "s") or ""))
-    col_text(Theme.dim, "Tip: Click section headers to expand or collapse lockout groups.")
+    draw_add_lockout_panel(function()
+        draw_summary_chips_right(total_locked, total_open, #keys)
+    end)
+    if missing_snaps > 0 then
+        col_text(Theme.dim, string.format("%d missing snapshot%s", missing_snaps, missing_snaps == 1 and "" or "s"))
+    end
 
     local cols = 1 + #keys
-    local extra = 0
-    if Settings.lockoutsCompact and ImGuiTableFlags and ImGuiTableFlags.ScrollX then
-        extra = ImGuiTableFlags.ScrollX
-    end
+    local extra = ImGuiTableFlags and ((ImGuiTableFlags.ScrollX or 0) + (ImGuiTableFlags.ScrollY or 0)) or 0
+    local pushed = push_table_style()
     if views.begin_scroll_table("LockoutsMain", cols, views.scroll_table_flags(extra), 52.0, 220.0) then
         local ok, err = pcall(function()
-            ImGui.TableSetupColumn("Lockout", ImGuiTableColumnFlags.WidthFixed, Settings.lockoutsCompact and 220.0 or 260.0)
+            ImGui.TableSetupColumn("Instance", ImGuiTableColumnFlags.WidthFixed, 300.0)
             for _, key in ipairs(keys) do
-                if Settings.lockoutsCompact then
-                    ImGui.TableSetupColumn("##lock_col_" .. tostring(key), ImGuiTableColumnFlags.WidthFixed, 74.0)
-                else
-                    ImGui.TableSetupColumn("##lock_col_" .. tostring(key), ImGuiTableColumnFlags.WidthStretch, 1.0)
-                end
+                ImGui.TableSetupColumn("##lock_col_" .. tostring(key), ImGuiTableColumnFlags.WidthStretch, 1.0)
             end
             views.setup_scroll_freeze("LockoutsMain", 1, 1)
             ImGui.TableNextRow()
+            set_row_bg(UI.header_bg)
             ImGui.TableSetColumnIndex(0)
-            col_text(Theme.header or Theme.item, "Lockout")
+            col_text(Theme.header or Theme.item, "Instance")
             for cidx, key in ipairs(keys) do
                 ImGui.TableSetColumnIndex(cidx)
                 local snap = views.source_snapshot(key)
@@ -615,34 +737,42 @@ function M.draw()
 
             for _, cat in ipairs(lockouts.categories_for_ui()) do
                 ImGui.TableNextRow()
+                local style = category_style(cat)
+                set_row_bg(style.bg)
                 ImGui.TableSetColumnIndex(0)
                 local cat_label = lockout_ref.category_label and lockout_ref.category_label(cat) or cat
                 local label = (category_collapsed(cat) and "[+] " or "[-] ") .. cat_label
+                local n_entries = 0
+                for _, entry in ipairs(lockouts.entries_for_category(cat)) do
+                    if not is_entry_hidden(cat, entry.name) then n_entries = n_entries + 1 end
+                end
                 local pushed = false
                 if ImGui.PushStyleColor and ImGuiCol and ImGuiCol.Text then
-                    local c = Theme.category or Theme.cyan
+                    local c = style.fg or Theme.category or Theme.cyan
                     pushed = pcall(ImGui.PushStyleColor, ImGuiCol.Text, c[1], c[2], c[3], c[4])
                 end
-                if ImGui.Selectable(label .. "##lo_cat_" .. tostring(cat), false) then
+                local selectable_flags = ImGuiSelectableFlags and (ImGuiSelectableFlags.SpanAllColumns or 0) or 0
+                if ImGui.Selectable(label .. "##lo_cat_" .. tostring(cat), false, selectable_flags) then
                     toggle_category(cat)
                 end
+                if ImGui.IsItemHovered and ImGui.IsItemHovered() then set_row_bg(UI.row_hover) end
                 if pushed and ImGui.PopStyleColor then pcall(ImGui.PopStyleColor, 1) end
                 for cidx = 1, #keys do
                     ImGui.TableSetColumnIndex(cidx)
-                    ImGui.TextDisabled("")
-                end
-                if not category_collapsed(cat) then for _, entry in ipairs(lockouts.entries_for_category(cat)) do
-                    local hidden = is_entry_hidden(cat, entry.name)
-                    if hidden and not Settings.lockoutsShowHidden then goto continue_lockout_entry end
-                    if Settings.lockoutsLockedOnly and not entry_has_locked(keys, cat, entry) then goto continue_lockout_entry end
-                    ImGui.TableNextRow()
-                    ImGui.TableSetColumnIndex(0)
-                    local row_label = lockout_ref.display_label(entry)
-                    if hidden then
-                        col_text(Theme.dim, "(" .. row_label .. ")")
+                    if cidx == #keys then
+                        table_col_text_right(style.fg or Theme.dim, string.format("%d Instance%s", n_entries, n_entries == 1 and "" or "s"), column_width_now())
                     else
-                        col_text(Theme.slot or Theme.dim, row_label)
+                        ImGui.TextDisabled("")
                     end
+                end
+                if not category_collapsed(cat) then for ridx, entry in ipairs(lockouts.entries_for_category(cat)) do
+                    local hidden = is_entry_hidden(cat, entry.name)
+                    if hidden then goto continue_lockout_entry end
+                    ImGui.TableNextRow()
+                    if ridx % 2 == 0 then set_row_bg(UI.row_alt) else set_row_bg(UI.row_base) end
+                    ImGui.TableSetColumnIndex(0)
+                    draw_display_label(entry, hidden)
+                    if ImGui.IsItemHovered and ImGui.IsItemHovered() then set_row_bg(UI.row_hover) end
                     if entry.zone and entry.zone ~= "" and ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
                         ImGui.SetTooltip(tostring(entry.zone))
                     end
@@ -677,11 +807,7 @@ function M.draw()
                     for cidx, key in ipairs(keys) do
                         ImGui.TableSetColumnIndex(cidx)
                         local snap = views.source_snapshot(key)
-                        if Settings.lockoutsCompact then
-                            draw_lockout_cell_compact(snap, cat, entry)
-                        else
-                            draw_lockout_cell(snap, cat, entry)
-                        end
+                        draw_lockout_cell(snap, cat, entry)
                     end
                     ::continue_lockout_entry::
                 end end
@@ -690,6 +816,7 @@ function M.draw()
         ImGui.EndTable()
         if not ok then col_text(Theme.amber, "Lockouts table error: " .. tostring(err)) end
     end
+    if pushed > 0 then ImGui.PopStyleColor(pushed) end
     col_text(Theme.dim, "Locked = on timer (hover for expiry). Open = available. Sync refreshes all boxes.")
 end
 

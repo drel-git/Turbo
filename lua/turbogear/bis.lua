@@ -125,6 +125,106 @@ local function add_forsaken_shadowy_aliases(entry, names)
     if alias then add_name_alias_once(names, alias) end
 end
 
+local function normalize_id_set(src)
+    if type(src) ~= "table" then return nil end
+    local out = {}
+    for k, v in pairs(src) do
+        local id = tonumber(k)
+        if type(k) == "number" and tonumber(v) then id = tonumber(v) end
+        if id and id > 0 then out[id] = true end
+    end
+    return next(out) and out or nil
+end
+
+local function normalize_name_set(src)
+    if type(src) ~= "table" then return nil end
+    local out = {}
+    for k, v in pairs(src) do
+        local name = type(k) == "string" and k or tostring(v or "")
+        name = norm_item_name(name)
+        if name ~= "" then out[name] = true end
+    end
+    return next(out) and out or nil
+end
+
+local function normalize_pair_set(src)
+    if type(src) ~= "table" then return nil end
+    local out = {}
+    for id_key, names in pairs(src) do
+        local id = tonumber(id_key)
+        if id and id > 0 and type(names) == "table" then
+            for name_key, enabled in pairs(names) do
+                local name = norm_item_name(name_key)
+                if name ~= "" and enabled then
+                    out[id] = out[id] or {}
+                    out[id][name] = true
+                end
+            end
+        end
+    end
+    for _, raw in ipairs(src) do
+        if type(raw) == "table" then
+            local id = tonumber(raw.id)
+            local name = norm_item_name(raw.name)
+            if id and id > 0 and name ~= "" then
+                out[id] = out[id] or {}
+                out[id][name] = true
+            end
+        end
+    end
+    return next(out) and out or nil
+end
+
+local function progression_candidate_is_exact(entry, id, name)
+    if type(entry) ~= "table" then return false end
+    id = tonumber(id)
+    name = norm_item_name(name)
+    local exact_pairs = type(entry.progression_exact_pairs) == "table" and entry.progression_exact_pairs or nil
+    local exact_ids = type(entry.progression_exact_ids) == "table" and entry.progression_exact_ids or nil
+    local exact_names = type(entry.progression_exact_names) == "table" and entry.progression_exact_names or nil
+    if id and id > 0 and exact_pairs and exact_pairs[id] then
+        if name ~= "" and exact_pairs[id][name] then return true end
+        if name == "" and not exact_ids then return true end
+    end
+    if id and id > 0 and exact_ids and exact_ids[id] then return true end
+    if name ~= "" and exact_names and exact_names[name] then return true end
+    return false
+end
+
+local function has_progression_exact(entry)
+    return type(entry) == "table"
+        and (type(entry.progression_exact_ids) == "table"
+            or type(entry.progression_exact_names) == "table"
+            or type(entry.progression_exact_pairs) == "table")
+end
+
+local function prefer_later_progression(entry)
+    return type(entry) == "table" and entry.progression_prefer_later == true and has_progression_exact(entry)
+end
+
+local function normalize_progression(src)
+    if type(src) ~= "table" then return nil end
+    local out = {}
+    for _, raw in ipairs(src) do
+        if type(raw) == "table" then
+            local rank = tonumber(raw.rank)
+            local id = tonumber(raw.id)
+            local name = trim(raw.name or "")
+            if rank and rank > 0 and ((id and id > 0) or name ~= "") then
+                out[#out + 1] = {
+                    rank = math.floor(rank),
+                    id = id and id > 0 and id or nil,
+                    name = name,
+                    label = trim(raw.label or ""),
+                    marker = trim(raw.marker or ""),
+                }
+            end
+        end
+    end
+    table.sort(out, function(a, b) return (a.rank or 0) < (b.rank or 0) end)
+    return #out > 0 and out or nil
+end
+
 local function forsaken_status_for_match(entry, matched_name, status)
     local alias = forsaken_shadowy_alias_for_entry(entry)
     if not alias then return status end
@@ -182,6 +282,11 @@ function M.normalize_entry(e)
         spells = spells,
         spell_ids = spell_ids,
         progression_id_match = e.progression_id_match == true,
+        progression_exact_ids = normalize_id_set(e.progression_exact_ids),
+        progression_exact_names = normalize_name_set(e.progression_exact_names),
+        progression_exact_pairs = normalize_pair_set(e.progression_exact_pairs),
+        progression_prefer_later = e.progression_prefer_later == true,
+        progression = normalize_progression(e.progression),
     }
 end
 
@@ -507,19 +612,24 @@ local function live_worn_slot_status(entry)
     pcall(function() name = tostring(it.Name() or "") end)
     pcall(function() id = tonumber(it.ID()) or 0 end)
     if entry_matches_item(entry, { name = name, id = id }) then
-        return "equipped"
+        return "equipped", { name = name, id = id > 0 and id or nil, location = "Equipped", where = "Equipped", slotname = "Equipped" }
     end
     return nil
 end
 
 local function live_status_from_fi(fi, bank)
     if not fi then return nil end
-    if bank then return "carried" end
+    if bank then return "carried", "Bank" end
     local slot = nil
     pcall(function() slot = tonumber(fi.ItemSlot()) end)
     -- InvSlots 0-22 are worn; bag/bank pack slots are higher.
-    if slot and slot >= 0 and slot <= 22 then return "equipped" end
-    return "carried"
+    if slot and slot >= 0 and slot <= 22 then
+        local slotname = nil
+        pcall(function() slotname = tostring(fi.ItemSlotName and fi.ItemSlotName() or "") end)
+        if not slotname or slotname == "" or slotname == "nil" then slotname = "Equipped" end
+        return "equipped", slotname
+    end
+    return "carried", "Bags"
 end
 
 -- After zone, FindItemBank can fail while Store still holds a preserved bank.
@@ -563,13 +673,22 @@ end
 --- Returns "equipped", "carried", or nil (not owned on this box).
 function M.live_item_status(entry, item_name, item_id)
     entry = entry and M.normalize_entry(entry) or {}
+    local function match_from_fi(fi, fallback_name, loc)
+        local actual, id = "", 0
+        pcall(function() actual = tostring(fi.Name() or "") end)
+        pcall(function() id = tonumber(fi.ID and fi.ID() or 0) or 0 end)
+        local name = actual ~= "" and actual or trim(fallback_name)
+        if name == "" then name = tostring(entry.item or "") end
+        return { name = name, id = id > 0 and id or nil, location = loc or "", where = loc or "", slotname = loc or "" }
+    end
     local function try(v, verify_name)
         local fi = find_item_tlo(v, false)
         if fi then
             local actual = ""
             pcall(function() actual = tostring(fi.Name() or "") end)
             if not verify_name or entry_name_matches_actual(entry, actual) then
-                return live_status_from_fi(fi, false)
+                local status, loc = live_status_from_fi(fi, false)
+                return status, match_from_fi(fi, type(v) == "string" and v:gsub("^=", "") or entry.item, loc)
             end
         end
         fi = find_item_tlo(v, true)
@@ -577,37 +696,79 @@ function M.live_item_status(entry, item_name, item_id)
             local actual = ""
             pcall(function() actual = tostring(fi.Name() or "") end)
             if not verify_name or entry_name_matches_actual(entry, actual) then
-                return live_status_from_fi(fi, true)
+                local status, loc = live_status_from_fi(fi, true)
+                return status, match_from_fi(fi, type(v) == "string" and v:gsub("^=", "") or entry.item, loc)
             end
         end
         return nil
     end
+    if prefer_later_progression(entry) then
+        local seen_ids, seen_names = {}, {}
+        local function try_later_id(id)
+            id = tonumber(id) or 0
+            if id <= 0 or seen_ids[id] or progression_candidate_is_exact(entry, id, nil) then return nil end
+            seen_ids[id] = true
+            return try(id, true)
+        end
+        local function try_later_name(name)
+            name = trim(name)
+            local key = norm_item_name(name)
+            if name == "" or seen_names[key] or ownership_index.name_is_id_only(name)
+                or progression_candidate_is_exact(entry, nil, name) then
+                return nil
+            end
+            seen_names[key] = true
+            return try(name)
+        end
+        for _, id in ipairs(entry.ids or {}) do
+            local st, match = try_later_id(id)
+            if st then return st, match end
+        end
+        local st, match = try_later_id(item_id)
+        if st then return st, match end
+        st, match = try_later_name(item_name)
+        if st then return st, match end
+        for _, name in ipairs(entry.names or {}) do
+            st, match = try_later_name(name)
+            if st then return st, match end
+        end
+        st, match = try_later_name(entry.item)
+        if st then return st, match end
+    end
     for _, id in ipairs(entry.ids or {}) do
-        local st = try(tonumber(id) or 0, true)
-        if st then return st end
+        local st, match = try(tonumber(id) or 0, true)
+        if st then return st, match end
     end
     item_id = tonumber(item_id) or 0
     if item_id > 0 then
-        local st = try(item_id, true)
-        if st then return st end
+        local st, match = try(item_id, true)
+        if st then return st, match end
     end
     item_name = trim(item_name)
     if item_name ~= "" and not ownership_index.name_is_id_only(item_name) then
-        local st = try(item_name)
-        if st then return forsaken_status_for_match(entry, item_name, st) end
+        local st, match = try(item_name)
+        if st then return forsaken_status_for_match(entry, item_name, st), match end
     end
     local canonical = trim(entry.item)
+    for _, name in ipairs(entry.names or {}) do
+        name = trim(name)
+        if name ~= "" and name ~= item_name and name ~= canonical
+            and not ownership_index.name_is_id_only(name) then
+            local st, match = try(name)
+            if st then return forsaken_status_for_match(entry, name, st), match end
+        end
+    end
     if canonical ~= "" and canonical ~= item_name and not ownership_index.name_is_id_only(canonical) then
-        local st = try(canonical)
-        if st then return forsaken_status_for_match(entry, canonical, st) end
+        local st, match = try(canonical)
+        if st then return forsaken_status_for_match(entry, canonical, st), match end
     end
     local shadowy_alias = forsaken_shadowy_alias_for_entry(entry)
     if shadowy_alias and not ownership_index.name_is_id_only(shadowy_alias) then
-        local st = try(shadowy_alias)
-        if st then return "forsaken_base" end
+        local st, match = try(shadowy_alias)
+        if st then return "forsaken_base", match end
     end
-    local worn = live_worn_slot_status(entry)
-    if worn then return worn end
+    local worn, worn_match = live_worn_slot_status(entry)
+    if worn then return worn, worn_match end
     if owned_in_store_bank(entry, item_name, item_id) then
         return "carried"
     end
@@ -632,11 +793,11 @@ local function live_status_cached(entry)
     local now = os.clock()
     local hit = live_fallback_cache[key]
     if hit and (now - hit.at) <= LIVE_FALLBACK_TTL then
-        return hit.status
+        return hit.status, hit.match
     end
-    local status = M.live_item_status(entry, entry.item, nil)
-    live_fallback_cache[key] = { status = status, at = now }
-    return status
+    local status, match = M.live_item_status(entry, entry.item, nil)
+    live_fallback_cache[key] = { status = status, match = match, at = now }
+    return status, match
 end
 
 local function live_own_cached(entry)
@@ -788,6 +949,60 @@ local function ensure_don_spells()
     return DonSpells
 end
 
+local function copy_item_match(item)
+    if type(item) ~= "table" then return { name = tostring(item or "") } end
+    local out = {}
+    for k, v in pairs(item) do out[k] = v end
+    return out
+end
+
+local function progression_stage_match(entry, idx)
+    if type(entry) ~= "table" or type(entry.progression) ~= "table" or type(idx) ~= "table" then return nil end
+    local best, max_rank = nil, 0
+    for i, stage in ipairs(entry.progression) do
+        local rank = tonumber(stage.rank) or i
+        if rank > max_rank then max_rank = rank end
+        local rec = nil
+        local id = tonumber(stage.id)
+        if id and id > 0 then rec = idx.by_id and idx.by_id[id] or nil end
+        if not rec and stage.name and trim(stage.name) ~= "" and idx.by_name then
+            rec = idx.by_name[norm_item_name(stage.name)]
+        end
+        if rec and (not best or rank > best.rank) then
+            best = { rank = rank, stage = stage, rec = rec, index = i }
+        end
+    end
+    if not best then return nil end
+
+    local match = copy_item_match(best.rec.item)
+    if tostring(match.name or "") == "" then match.name = best.stage.name end
+    match.id = tonumber(match.id or match.item_id or match.itemID or best.stage.id)
+    match.progression_rank = best.rank
+    match.progression_max_rank = max_rank
+    match.progression_label = best.stage.label
+    match.progression_marker = best.stage.marker
+    match.progression_owned_name = tostring(best.stage.name or match.name or "")
+    local next_stage = entry.progression[best.index + 1]
+    if next_stage then
+        match.progression_next_name = tostring(next_stage.name or "")
+        match.progression_next_label = tostring(next_stage.label or "")
+    end
+    return match, best.rec.status or "carried"
+end
+
+local function decorate_progression_row(row)
+    local match = row and row.match
+    if type(match) ~= "table" or not match.progression_rank then return row end
+    row.progression_rank = tonumber(match.progression_rank)
+    row.progression_max_rank = tonumber(match.progression_max_rank)
+    row.progression_label = tostring(match.progression_label or "")
+    row.progression_marker = tostring(match.progression_marker or "")
+    row.progression_owned_name = tostring(match.progression_owned_name or match.name or "")
+    row.progression_next_name = tostring(match.progression_next_name or "")
+    row.progression_next_label = tostring(match.progression_next_label or "")
+    return row
+end
+
 local function match_entry(entry, snap)
     entry = normalize_entry_ro(entry)
     local idx = snapshot_index(snap)
@@ -797,6 +1012,29 @@ local function match_entry(entry, snap)
         local handled, match, status = DS.try_match(entry, snap)
         if handled then
             return match, status or "missing", entry
+        end
+    end
+    do
+        local match, status = progression_stage_match(entry, idx)
+        if match then return match, status or "carried", entry end
+    end
+    if prefer_later_progression(entry) then
+        for _, id in ipairs(entry.ids or {}) do
+            id = tonumber(id)
+            if id and id > 0 and not progression_candidate_is_exact(entry, id, nil) then
+                local rec = idx.by_id[id]
+                local matched_name = rec and (rec.item and rec.item.name or rec.item) or nil
+                if rec and entry_name_matches_actual(entry, matched_name) then
+                    return rec.item, forsaken_status_for_match(entry, matched_name, rec.status), entry
+                end
+            end
+        end
+        for _, name in ipairs(entry.names or { entry.item }) do
+            if not progression_candidate_is_exact(entry, nil, name) then
+                local rec = not ownership_index.name_is_id_only(name) and idx.by_name[norm_item_name(name)] or nil
+                local matched_name = rec and (rec.item and rec.item.name or rec.item) or name
+                if rec then return rec.item, forsaken_status_for_match(entry, matched_name, rec.status), entry end
+            end
         end
     end
     for _, id in ipairs(entry.ids or {}) do
@@ -851,7 +1089,7 @@ function M.evaluate(list, snap)
         local match, status
         match, status, entry = match_entry(entry, snap)
         local have = status ~= nil and status ~= "missing"
-        rows[#rows + 1] = { entry = entry, have = have, match = match, status = status }
+        rows[#rows + 1] = decorate_progression_row({ entry = entry, have = have, match = match, status = status })
     end
     return rows
 end
@@ -863,6 +1101,14 @@ end
 function M.evaluate_entry(entry, snap, opts)
     local match, status
     match, status, entry = match_entry(entry, snap or {})
+    if type(match) == "table" and match.progression_rank then
+        return decorate_progression_row({
+            entry = entry,
+            have = status_is_have(status),
+            match = match,
+            status = status,
+        })
+    end
     -- opts.skip_live: bulk callers (needs index builds) evaluate purely against
     -- the snapshot. Local BiS display (perf_live_self_bis) reconciles with live
     -- FindItem so equip/unequip is instant without waiting on Store persist.
@@ -889,12 +1135,12 @@ function M.evaluate_entry(entry, snap, opts)
                 return { entry = entry, have = true, match = match or entry.item, status = status }
             end
         end
-        local live = live_status_cached(entry)
+        local live, live_match = live_status_cached(entry)
         if status_is_have(live) then
             return {
                 entry = entry,
                 have = true,
-                match = match or entry.item,
+                match = live_match or match or entry.item,
                 status = live,
             }
         end
@@ -917,9 +1163,9 @@ function M.evaluate_entry(entry, snap, opts)
                 }
             end
         end
-        local live = live_status_cached(entry)
+        local live, live_match = live_status_cached(entry)
         if live then
-            return { entry = entry, have = true, match = nil, status = live }
+            return { entry = entry, have = true, match = live_match, status = live }
         end
         if live_spells_known(entry) then
             return { entry = entry, have = true, match = entry.item, status = "known" }

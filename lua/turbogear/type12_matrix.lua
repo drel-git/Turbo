@@ -17,6 +17,7 @@ local type12 = require('type12_ownership')
 local M = {}
 
 local cache = { key = nil, rows = nil, keys = nil }
+local DSK_SOURCE_COLOR = { 0.62, 0.58, 0.92, 1.00 }
 
 local function trim(s)
     return tostring(s or ""):match("^%s*(.-)%s*$") or ""
@@ -143,7 +144,7 @@ end
 
 local function source_color(source)
     if source == "DoN" then return Theme.green or Theme.haveWorn end
-    if source == "DSK" then return Theme.gold or Theme.amber end
+    if source == "DSK" then return DSK_SOURCE_COLOR end
     return Theme.dim
 end
 

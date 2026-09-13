@@ -831,6 +831,17 @@ end
 --- Wallet / DoN totals: alt-currency + matching bag stacks (FindItemCount only).
 local function fill_wallet_fields(snap)
     if type(snap) ~= "table" then return snap end
+    local function alt_plus_bag(field, alt_name, item_name)
+        local t = mq.TLO.Me.AltCurrency(alt_name)
+        local n = t and t() or nil
+        local alt = n ~= nil and tonumber(n) or nil
+        local bag = tonumber(mq.TLO.FindItemCount('=' .. item_name)()) or 0
+        if alt ~= nil then
+            snap[field] = alt + bag
+        elseif bag > 0 then
+            snap[field] = bag
+        end
+    end
     pcall(function()
         local e = mq.TLO.Me.EbonCrystals()
         if e ~= nil then snap.ebon_crystals = tonumber(e) end
@@ -879,6 +890,12 @@ local function fill_wallet_fields(snap)
         if total ~= nil then snap.radiant_crystals = total end
     end)
     pcall(function()
+        alt_plus_bag('planar_symbols', 'Planar Symbols', 'Planar Symbol')
+    end)
+    pcall(function()
+        alt_plus_bag('taelosian_symbols', 'Taelosian Symbols', 'Taelosian Symbol')
+    end)
+    pcall(function()
         -- Lazarus custom currency: alt window + bag stacks (same pattern as DC/CC).
         local t = mq.TLO.Me.AltCurrency('Nightveil Scrip')
         local n = t and t() or nil
@@ -907,6 +924,8 @@ function M.wallet_signature(snap)
         tostring(snap.diamond_coins or ""),
         tostring(snap.radiant_crystals or ""),
         tostring(snap.ebon_crystals or ""),
+        tostring(snap.planar_symbols or ""),
+        tostring(snap.taelosian_symbols or ""),
         tostring(snap.tribute_favor or ""),
         tostring(snap.celestial_crests or ""),
         tostring(snap.nightveil_scrip or ""),
