@@ -4669,14 +4669,17 @@ end
 local function generated_source_for_slot(list_id, list, class_name, slot)
     local raw, reason, class_bucket, source_bucket = shared_builtin_raw_entry(list_id, list, class_name, slot)
     if type(raw) ~= "table" then return nil, reason end
-    if list_id == "don" and type(raw.don_ability) == "table" then return raw, "don_spell", nil end
-    if class_bucket and source_bucket == class_bucket then return raw, "class", class_bucket end
-    if list and source_bucket == list.template then return raw, "template", list.template end
-    if list and source_bucket == list.visible then return raw, "visible", list.visible end
-    if class_bucket and raw == class_bucket[slot] then return raw, "class", class_bucket end
-    if list and list.template and raw == list.template[slot] then return raw, "template", list.template end
-    if list and list.visible and raw == list.visible[slot] then return raw, "visible", list.visible end
-    return raw, "unknown", source_bucket
+    if list_id == "don" and type(raw.don_ability) == "table" then return raw, "don_spell", nil, slot end
+    if list_id == "don" and slot == "Scales" and list and list.template and list.template.Misc4 then
+        return raw, "template", list.template, "Misc4"
+    end
+    if class_bucket and source_bucket == class_bucket then return raw, "class", class_bucket, slot end
+    if list and source_bucket == list.template then return raw, "template", list.template, slot end
+    if list and source_bucket == list.visible then return raw, "visible", list.visible, slot end
+    if class_bucket and raw == class_bucket[slot] then return raw, "class", class_bucket, slot end
+    if list and list.template and raw == list.template[slot] then return raw, "template", list.template, slot end
+    if list and list.visible and raw == list.visible[slot] then return raw, "visible", list.visible, slot end
+    return raw, "unknown", source_bucket, slot
 end
 
 function M.generate_builtin_announce_index_payload()
@@ -4706,16 +4709,18 @@ function M.generate_builtin_announce_index_payload()
                     end
                     for _, slot in ipairs(slots or {}) do
                         slot = tostring(slot or "")
-                        local raw, source_kind = generated_source_for_slot(list_id, list, class_name, slot)
+                        local raw, source_kind, _, source_slot = generated_source_for_slot(list_id, list, class_name, slot)
                         if raw and source_kind ~= "unknown" then
-                            key_count = key_count + generated_add_locator(payload, seen_locator, {
+                            local locator = {
                                 list_id = list_id,
                                 class = class_name,
                                 source_kind = source_kind,
                                 category_i = cat_i,
                                 category = tostring(cat and cat.name or ""),
                                 slot = slot,
-                            }, raw)
+                            }
+                            if source_slot and source_slot ~= slot then locator.source_slot = source_slot end
+                            key_count = key_count + generated_add_locator(payload, seen_locator, locator, raw)
                         end
                     end
                 end
@@ -4738,6 +4743,7 @@ local function generated_resolve_builtin_locator(loc, snap_class)
     local list = M.list(list_id)
     if not list then return nil, "no-list" end
     local slot = tostring(loc.slot or "")
+    local source_slot = tostring(loc.source_slot or slot)
     local class_name = class_key(loc.class or snap_class or "")
     local source_kind = tostring(loc.source_kind or "")
     if source_kind == "don_spell" then
@@ -4747,15 +4753,15 @@ local function generated_resolve_builtin_locator(loc, snap_class)
     end
     if source_kind == "class" then
         local bucket = class_name and list.classes and list.classes[class_name] or nil
-        local raw = bucket and bucket[slot]
+        local raw = bucket and bucket[source_slot]
         return raw, raw and nil or "no-class-row", bucket
     end
     if source_kind == "template" then
-        local raw = list.template and list.template[slot]
+        local raw = list.template and list.template[source_slot]
         return raw, raw and nil or "no-template-row", list.template
     end
     if source_kind == "visible" then
-        local raw = list.visible and list.visible[slot]
+        local raw = list.visible and list.visible[source_slot]
         return raw, raw and nil or "no-visible-row", list.visible
     end
     return nil, "bad-source-kind"

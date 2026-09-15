@@ -1,21 +1,22 @@
 -- TurboGear/global_search.lua
--- Cross-tab inventory search over the cached item_index (no live TLO scans).
+-- Cross-tab inventory search over cached Store rows (no live TLO scans).
 
 local cfg = require('config')
 local Settings = cfg.Settings
 local item_index = require('item_index')
-local index_warm_policy = require('index_warm_policy')
 
 local M = {}
 
 local filtered_cache = { key = nil, rows = nil }
 local bis_filtered_cache = { key = nil, rows = nil }
+local last_inventory_filter = { source = "index", building = false }
 
 function M.invalidate()
     filtered_cache.key = nil
     filtered_cache.rows = nil
     bis_filtered_cache.key = nil
     bis_filtered_cache.rows = nil
+    last_inventory_filter = { source = "index", building = false }
 end
 
 local TAB_LABELS = {
@@ -89,22 +90,46 @@ function M.filter(needle, limit)
         return {}
     end
 
-    pcall(function()
-        index_warm_policy.request_item_index("search", 3.0)
-    end)
-    item_index.get(false)
+    local building = type(item_index.building) == "function" and item_index.building() == true
+    local rows_source = {}
+    local source = "cache"
+    local source_version = item_index.version or 0
+    if type(item_index.cached_store_rows) == "function" then
+        local ok_rows, cache_rows, cache_version, cache_source = pcall(item_index.cached_store_rows)
+        if ok_rows and type(cache_rows) == "table" then
+            rows_source = cache_rows
+            source_version = cache_version or source_version
+            source = cache_source or "cache"
+        end
+    elseif type(item_index.suggestion_rows) == "function" then
+        local ok_rows, cache_rows, cache_version, cache_source = pcall(item_index.suggestion_rows)
+        if ok_rows and type(cache_rows) == "table" then
+            rows_source = cache_rows
+            source_version = cache_version or source_version
+            source = cache_source == "index" and "index" or "cache"
+        end
+    else
+        rows_source = item_index.rows or {}
+        source = "index"
+    end
     -- Serve last-good completed rows while a cooperative rebuild runs.
     -- Do not hitch the UI with synchronous tick bursts; the run loop
     -- advances item_index only while Search/Upgrade requested it.
-    local version = tostring(item_index.version or 0) .. ":" .. tostring(#(item_index.rows or {}))
+    local version = tostring(source) .. ":" .. tostring(source_version or 0) .. ":" .. tostring(#rows_source)
     local cache_key = needle .. ":" .. version .. ":" .. tostring(limit or 80)
     if filtered_cache.key == cache_key then
+        last_inventory_filter = {
+            source = source,
+            building = building,
+            indexed = #(item_index.rows or {}),
+            sourceRows = #rows_source,
+        }
         return filtered_cache.rows or {}
     end
 
     limit = tonumber(limit) or 80
     local out = {}
-    for _, row in ipairs(item_index.rows or {}) do
+    for _, row in ipairs(rows_source) do
         if #out >= limit then break end
         local hay = table.concat({
             row.name or "",
@@ -120,7 +145,34 @@ function M.filter(needle, limit)
 
     filtered_cache.key = cache_key
     filtered_cache.rows = out
+    last_inventory_filter = {
+        source = source,
+        building = building,
+        indexed = #(item_index.rows or {}),
+        sourceRows = #rows_source,
+    }
     return out
+end
+
+function M.inventory_status()
+    local building = false
+    if type(item_index.building) == "function" then
+        building = item_index.building() == true
+    end
+    local requested = false
+    local ok_policy, index_warm_policy = pcall(require, 'index_warm_policy')
+    if ok_policy and index_warm_policy and type(index_warm_policy.item_index_requested) == "function" then
+        requested = index_warm_policy.item_index_requested() == true
+    end
+    return {
+        building = building,
+        requested = requested,
+        indexed = #(item_index.rows or {}),
+        version = item_index.version or 0,
+        source = last_inventory_filter.source or "index",
+        sourceRows = last_inventory_filter.sourceRows or 0,
+        detail = type(item_index.status) == "function" and item_index.status() or nil,
+    }
 end
 
 function M.filter_bis(needle, limit)

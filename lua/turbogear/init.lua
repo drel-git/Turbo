@@ -193,6 +193,30 @@ local function status_lines(max_peers, colorize)
     if #keys > shown then
         lines[#lines + 1] = string.format("[TurboGear]   peers truncated: %d shown / %d total", shown, #keys)
     end
+    do
+        local ok_idx, item_index = pcall(require, 'item_index')
+        if ok_idx and item_index and type(item_index.status) == "function" then
+            local ok_st, ix = pcall(item_index.status)
+            if ok_st and type(ix) == "table" then
+                if ix.building then
+                    lines[#lines + 1] = string.format(
+                        "[TurboGear]   item index: building | peer=%d/%d %s %d/%d owner=%s buildRows=%d publishedRows=%d starts=%d restarts=%d finishes=%d reason=%s lastRestart=%s age=%.0fms cv=%s/%s",
+                        tonumber(ix.peer) or 0, tonumber(ix.peers) or 0,
+                        tostring(ix.phase or "?"), tonumber(ix.item) or 0, tonumber(ix.items) or 0,
+                        tostring(ix.owner or ""), tonumber(ix.buildRows) or 0, tonumber(ix.rows) or 0,
+                        tonumber(ix.starts) or 0, tonumber(ix.restarts) or 0, tonumber(ix.finishes) or 0,
+                        tostring(ix.reason or ""), tostring(ix.lastRestart or ""),
+                        tonumber(ix.ageMs) or 0, tostring(ix.contentVersion or ""), tostring(ix.storeContentVersion or ""))
+                else
+                    lines[#lines + 1] = string.format(
+                        "[TurboGear]   item index: ready | rows=%d version=%d starts=%d restarts=%d finishes=%d cv=%s/%s",
+                        tonumber(ix.rows) or 0, tonumber(ix.version) or 0,
+                        tonumber(ix.starts) or 0, tonumber(ix.restarts) or 0, tonumber(ix.finishes) or 0,
+                        tostring(ix.contentVersion or ""), tostring(ix.storeContentVersion or ""))
+                end
+            end
+        end
+    end
     local ast = announce_status_safe()
     do
         local lua_turbo = cfg.lua_turbo_status and cfg.lua_turbo_status() or nil

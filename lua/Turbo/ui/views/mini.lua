@@ -144,6 +144,9 @@ local function activate_tool(tool)
             mq.cmd('/squelch ' .. tostring(tool.launch))
         end
     else
+        if tool.key == 'turbogear' then
+            print('\at[TurboGear]\ax \agStarting...\ax \awLoading gear data and syncing characters. \ayLarge inventories may take a few seconds.\ax')
+        end
         mq.cmd('/squelch ' .. tostring(tool.launch))
     end
 end

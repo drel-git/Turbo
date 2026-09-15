@@ -1,3 +1,11 @@
+1.2.146
+TurboGear:
+- Fixed Ruined Shadowy Sebilis armor announce detection
+- Fixed DoN healer Phial/Crux ranged slot mapping
+- Fixed DoN Scales of the Lava Dragon announce/progression detection
+- Improved Search Everywhere speed using cached inventory matches
+- Improved startup/search status messaging
+
 1.2.145
 Big TurboGear polish pass:
 - UI overhaul, performance improvements, and bug fixes

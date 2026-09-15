@@ -20,6 +20,10 @@ local M = {
     -- CleanName of the Suggestions target; index job walks this peer right
     -- after self so Upgrade picks appear before the rest of the fleet.
     priority_owner = "",
+    starts = 0,
+    restarts = 0,
+    finishes = 0,
+    last_restart_reason = "",
 }
 
 -- In-progress rebuild. Never assigned to M.rows until complete.
@@ -204,10 +208,9 @@ end
 -- Item-payload signature (ignores bankLive / bankCapturedAt stamp-only bumps
 -- that raise Store.content_version). Mid-job restarts on those stamps left
 -- Search stuck at 0 rows after async get() (1.2.89+).
-local payload_sig_cache = { store_v = -1, store_cv = -1, live_key = "", sig = "" }
+local payload_sig_cache = { store_cv = -1, live_key = "", sig = "" }
 
 local function fleet_payload_sig()
-    local store_v = Store.version or 0
     local store_cv = Store.content_version or 0
     local live = live_self_snapshot_for_index()
     local live_key = ""
@@ -218,8 +221,7 @@ local function fleet_payload_sig()
             list_quick_sig(live.bank),
         }, "/")
     end
-    if payload_sig_cache.store_v == store_v
-        and payload_sig_cache.store_cv == store_cv
+    if payload_sig_cache.store_cv == store_cv
         and payload_sig_cache.live_key == live_key then
         return payload_sig_cache.sig
     end
@@ -250,7 +252,6 @@ local function fleet_payload_sig()
     -- (list_quick_sig can look identical when only compare-meta changed on a
     -- path that still advanced content_version).
     local sig = tostring(store_cv) .. "\n" .. table.concat(parts, "\n")
-    payload_sig_cache.store_v = store_v
     payload_sig_cache.store_cv = store_cv
     payload_sig_cache.live_key = live_key
     payload_sig_cache.sig = sig
@@ -461,7 +462,7 @@ local function prioritize_peer(peers, owner_clean)
     return peers
 end
 
-local function start_job()
+local function start_job(reason)
     local target_payload_sig = fleet_payload_sig()
     local self_snap = self_snap_for_index()
     -- Self is peer_i=1 so cold-start never does a synchronous full walk in get().
@@ -471,6 +472,7 @@ local function start_job()
         peers[#peers + 1] = snap
     end
     prioritize_peer(peers, M.priority_owner)
+    M.starts = (M.starts or 0) + 1
     job = {
         rows = {},
         peers = peers,
@@ -480,6 +482,7 @@ local function start_job()
         target_payload_sig = target_payload_sig,
         target_cv = Store.content_version or 0,
         started_at = clock(),
+        reason = tostring(reason or "start"),
     }
     return job
 end
@@ -514,6 +517,15 @@ function M.suggestion_rows()
     return suggest_store_cache.rows, cv, "store"
 end
 
+function M.cached_store_rows()
+    local cv = Store.content_version or 0
+    if suggest_store_cache.cv ~= cv then
+        suggest_store_cache.rows = flatten_store_rows()
+        suggest_store_cache.cv = cv
+    end
+    return suggest_store_cache.rows, cv, "cache"
+end
+
 function M.set_priority_owner(name)
     M.priority_owner = clean_text(name)
 end
@@ -536,6 +548,7 @@ local function finish_job(j)
     M.payload_sig = j.target_payload_sig or fleet_payload_sig()
     M.content_version = j.target_cv or (Store.content_version or 0)
     M.self_signature = M.payload_sig
+    M.finishes = (M.finishes or 0) + 1
     job = nil
     return M.rows, M.version
 end
@@ -543,7 +556,11 @@ end
 local function ensure_job(force)
     if force or is_stale() then
         if not job or not job_targets_match(job) then
-            start_job()
+            if job then
+                M.restarts = (M.restarts or 0) + 1
+                M.last_restart_reason = force and "force" or "stale"
+            end
+            start_job(force and "force" or "stale")
         end
         return true
     end
@@ -604,7 +621,7 @@ end
 --- Drain the in-flight job to completion (tests / rare explicit callers).
 --- Prefer get+tick in the live loop — never call this from UI get().
 function M.rebuild()
-    start_job()
+    start_job("rebuild")
     local j = job
     local guard = 0
     while j and j.peer_i <= #(j.peers or {}) do
@@ -622,10 +639,12 @@ end
 --- Advance an in-progress rebuild within budget_ms. Returns true if a job finished.
 function M.tick(budget_ms)
     if job and not job_targets_match(job) then
-        start_job()
+        M.restarts = (M.restarts or 0) + 1
+        M.last_restart_reason = "target_changed"
+        start_job("target_changed")
     end
     if not job and is_stale() then
-        start_job()
+        start_job("tick_stale")
     end
     local j = job
     if not j then return false end
@@ -654,6 +673,41 @@ end
 
 function M.building()
     return job ~= nil
+end
+
+local PHASE_LABELS = {
+    [PHASE_EQUIPPED] = "equipped",
+    [PHASE_BAGS] = "bags",
+    [PHASE_BANK] = "bank",
+}
+
+function M.status()
+    local j = job
+    local st = {
+        building = j ~= nil,
+        rows = #(M.rows or {}),
+        version = M.version or 0,
+        starts = M.starts or 0,
+        restarts = M.restarts or 0,
+        finishes = M.finishes or 0,
+        lastRestart = M.last_restart_reason or "",
+        contentVersion = M.content_version or -1,
+        storeContentVersion = Store.content_version or 0,
+    }
+    if j then
+        local snap = j.peers and j.peers[j.peer_i] or nil
+        local list = phase_list(snap, j.phase)
+        st.peer = j.peer_i or 0
+        st.peers = #(j.peers or {})
+        st.phase = PHASE_LABELS[j.phase] or tostring(j.phase or "?")
+        st.item = j.item_i or 0
+        st.items = #(list or {})
+        st.buildRows = #(j.rows or {})
+        st.reason = j.reason or ""
+        st.ageMs = math.max(0, (clock() - (tonumber(j.started_at) or clock())) * 1000)
+        st.owner = snap and snap.name or ""
+    end
+    return st
 end
 
 local function item_index_requested()
@@ -704,9 +758,12 @@ function M._reset_for_tests()
     M.self_signature = ""
     M.summary = { total = 0, withAnyStat = 0 }
     M.priority_owner = ""
+    M.starts = 0
+    M.restarts = 0
+    M.finishes = 0
+    M.last_restart_reason = ""
     suggest_store_cache.cv = -1
     suggest_store_cache.rows = {}
-    payload_sig_cache.store_v = -1
     payload_sig_cache.store_cv = -1
     payload_sig_cache.live_key = ""
     payload_sig_cache.sig = ""

@@ -173,6 +173,21 @@ local function hide_main_window()
     M._last_main_rect = nil
 end
 
+local function open_main_window_from_mini()
+    if state.show ~= true then
+        print('\at[TurboGear]\ax \agOpening...\ax \awLoading gear data and syncing characters. \ayLarge inventories may take a few seconds.\ax')
+    end
+    state.show = true
+end
+
+local function toggle_main_window_from_mini()
+    if state.show == true then
+        hide_main_window()
+    else
+        open_main_window_from_mini()
+    end
+end
+
 local function persistMiniPos()
     persist_window_geom("miniWindowPos", nil)
 end
@@ -264,10 +279,6 @@ local function draw_global_search_bar()
             ImGui.TableSetColumnIndex(0)
             ImGui.SetNextItemWidth(-1)
             local next_val = input_text_hint("##tg_global_search", "Search everywhere...", Settings.globalSearch or "")
-            local search_hot = tostring(next_val or ""):gsub("^%s+", ""):gsub("%s+$", "") ~= ""
-            if ImGui.IsItemActive and ImGui.IsItemActive() then search_hot = true end
-            if ImGui.IsItemFocused and ImGui.IsItemFocused() then search_hot = true end
-            if search_hot then request_item_index("search") end
             if next_val ~= (Settings.globalSearch or "") then
                 Settings.globalSearch = next_val
                 global_search.invalidate()
@@ -298,10 +309,6 @@ local function draw_global_search_bar()
 
     ImGui.SetNextItemWidth(math.max(120.0, content_avail_x() - (clear_w + sync_w + 24.0)))
     local next_val = input_text_hint("##tg_global_search", "Search everywhere...", Settings.globalSearch or "")
-    local search_hot = tostring(next_val or ""):gsub("^%s+", ""):gsub("%s+$", "") ~= ""
-    if ImGui.IsItemActive and ImGui.IsItemActive() then search_hot = true end
-    if ImGui.IsItemFocused and ImGui.IsItemFocused() then search_hot = true end
-    if search_hot then request_item_index("search") end
     if next_val ~= (Settings.globalSearch or "") then
         Settings.globalSearch = next_val
         global_search.invalidate()
@@ -388,7 +395,20 @@ local function draw_global_search_results()
 
     col_text(Theme.dim, "Showing search results - Clear to return to the current tab.")
     local rows = global_search.filter(needle, 60)
-    col_text(Theme.dim, string.format("%d inventory match(es)", #rows))
+    local inv_status = global_search.inventory_status and global_search.inventory_status() or {}
+    local inventory_updating = inv_status.building == true
+    local inventory_cached = tostring(inv_status.source or "") == "cache"
+    col_text(inventory_updating and (Theme.amber or Theme.gold) or Theme.dim,
+        string.format("%d inventory match(es)", #rows))
+    if inventory_cached and #rows > 0 then
+        col_text(Theme.amber or Theme.gold, "Showing cached inventory matches.")
+        col_text(Theme.cyan or Theme.sync or Theme.dim, "Use Sync Now if recent inventory changes are missing.")
+    elseif inventory_updating then
+        local msg = #rows > 0
+            and "Inventory matches updating... first search after startup or sync may take a moment."
+            or "Building inventory search index... first search after startup or sync may take a moment."
+        col_text(Theme.amber or Theme.gold, msg)
+    end
     col_text(Theme.dim, "Searches worn gear, bags, bank, and installed augs. Tab = where a left-click opens.")
     local max_h = math.min(320.0, 28.0 + math.max(1, #rows) * 22.0)
     if #rows > 0 and views.begin_scroll_table then
@@ -435,7 +455,7 @@ local function draw_global_search_results()
                 state.err_once = "Search table: " .. tostring(row_err)
             end
         end
-    elseif #rows == 0 then
+    elseif #rows == 0 and not inventory_updating then
         col_text(Theme.placeholder or Theme.dim, "No inventory matches.")
     end
 
@@ -565,14 +585,14 @@ local function draw_mini()
                 ImGui.Image(icon:GetTextureID(), icon_size)
                 if ImGui.IsItemClicked and ImGui.IsItemClicked(0)
                     and (not ImGui.IsMouseDragging or not ImGui.IsMouseDragging(0, MINI_CLICK_SLOP)) then
-                    state.show = not state.show
+                    toggle_main_window_from_mini()
                 end
                 if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
                     ImGui.SetTooltip("TurboGear is running.\nClick icon to open/close full view.\nRight-click for icon options.\nDrag gold border to move.")
                 end
             else
                 if ImGui.Button("TG", icon_size) then
-                    state.show = not state.show
+                    toggle_main_window_from_mini()
                 end
                 if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then
                     ImGui.SetTooltip("TurboGear is running.\nClick to open/close full view.\nRight-click for icon options.\nDrag gold border to move.")
