@@ -176,6 +176,7 @@ local function peer_fresh_status(state, candidate)
             name = rec.name,
             count = rec.count,
             location = loc,
+            updated = rec.updated,
         },
     }
 end
@@ -280,6 +281,52 @@ function M.evaluate_link(state, link)
         reason = matched_any and "owned" or "no-row",
         matched = matched_any,
         ownership = ownership_summary(ownership),
+    }
+end
+
+function M.trace_link(state, link)
+    state = type(state) == "table" and state or {}
+    link = type(link) == "table" and link or {}
+    local result = M.evaluate_link(state, link)
+    local candidate = type(result.candidate) == "table" and result.candidate or nil
+    local ownership = type(state.ownership) == "table" and state.ownership or {}
+    local store_match, store_status = nil, nil
+    if candidate then
+        store_match, store_status = ownership_index.entry_status(candidate.satisfy or candidate.entry or candidate, ownership)
+    end
+    local now = tonumber(state.now) or os.time()
+    local fresh = type(state.freshness) == "table" and state.freshness or {}
+    local peer_rec = type(result.peer_fresh_record) == "table" and result.peer_fresh_record or nil
+    local function age(ts)
+        ts = tonumber(ts) or 0
+        if ts <= 0 then return nil end
+        return math.max(0, now - ts)
+    end
+    local source = "store"
+    if result.peer_fresh_used == true then
+        source = "bis_search"
+    elseif result.live_used == true then
+        source = "live"
+    end
+    return {
+        character = state.identity and state.identity.name or nil,
+        item = link.name,
+        id = link.id,
+        final_need = result.need == true,
+        final_reason = result.reason,
+        final_source = source,
+        decision_source = source,
+        linked_needs_source = source,
+        store_status = store_status,
+        store_name = type(store_match) == "table" and store_match.name or store_match,
+        bis_search_present = peer_rec ~= nil,
+        bis_search_status = peer_rec and peer_rec.status or nil,
+        bis_search_name = peer_rec and peer_rec.name or nil,
+        snapshot_age = age(fresh.inventoryUpdated or fresh.updated),
+        snapshot_depth = fresh.depth,
+        bis_search_age = age(peer_rec and peer_rec.updated),
+        candidate = candidate,
+        result = result,
     }
 end
 

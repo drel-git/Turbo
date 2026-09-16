@@ -16,6 +16,7 @@ local cache_version = 0
 local loaded = false
 local last_file_sig = nil
 local last_request_at = {}
+local diag_cache = {}
 local REQUEST_COOLDOWN_S = 12.0
 
 local function trim(s)
@@ -56,6 +57,13 @@ end
 
 local function char_key(server, name)
     return tostring(server or "") .. "_" .. tostring(name or "")
+end
+
+local function ignored_cache_record(key, rec)
+    local ok_store, store_mod = pcall(require, 'store')
+    local Store = ok_store and store_mod and store_mod.Store or nil
+    if not Store or type(Store.is_ignored_name) ~= "function" then return false end
+    return Store.is_ignored_name(rec and rec.name or key) or Store.is_ignored_name(key)
 end
 
 local function file_sig()
@@ -426,6 +434,86 @@ function M.slot_rec_meta(snap_or_key, list_id, slot)
     }
 end
 
+function M.cache_diag(snap_or_key, list_id, slot, opts)
+    if not loaded then M.load(true) end
+    opts = type(opts) == "table" and opts or {}
+    local now = tonumber(opts.now) or os.time()
+    local throttle_s = tonumber(opts.throttle_s)
+    if throttle_s == nil then throttle_s = 1.0 end
+    local key = snap_or_key
+    if type(snap_or_key) == "table" then
+        key = char_key(snap_or_key.server, snap_or_key.name)
+    end
+    key = tostring(key or "")
+    list_id = trim(list_id)
+    slot = trim(slot)
+    local cache_key = table.concat({ key, list_id, slot, tostring(cache_version) }, "\31")
+    local clock_now = os.clock()
+    local cached = diag_cache[cache_key]
+    if throttle_s > 0 and cached and (clock_now - cached.at) < throttle_s then
+        return cached.value
+    end
+    local rec = cache[key]
+    if type(rec) ~= "table" then return nil end
+    local latest, oldest, list_count, slot_count = 0, nil, 0, 0
+    for _, list in pairs(rec.lists or {}) do
+        if type(list) == "table" then
+            list_count = list_count + 1
+            local updated = tonumber(list.updated) or 0
+            if updated > latest then latest = updated end
+            if updated > 0 and (oldest == nil or updated < oldest) then oldest = updated end
+            if type(list.slots) == "table" then
+                for _ in pairs(list.slots) do slot_count = slot_count + 1 end
+            end
+        end
+    end
+    local function age(ts)
+        ts = tonumber(ts) or 0
+        if ts <= 0 then return nil end
+        return math.max(0, now - ts)
+    end
+    local out = {
+        key = key,
+        name = rec.name,
+        server = rec.server,
+        class = rec.class,
+        listCount = list_count,
+        slotCount = slot_count,
+        latestUpdated = latest > 0 and latest or nil,
+        latestAge = age(latest),
+        oldestUpdated = oldest,
+        oldestAge = age(oldest),
+        ignored = ignored_cache_record(key, rec),
+    }
+    if list_id ~= "" then
+        local list = rec.lists and rec.lists[list_id]
+        if type(list) == "table" then
+            out.list_id = list_id
+            out.listUpdated = tonumber(list.updated) or nil
+            out.listAge = age(out.listUpdated)
+            if slot ~= "" then
+                out.slot = slot
+                local srec = type(list.slots) == "table" and list.slots[slot] or nil
+                if type(srec) == "table" then
+                    out.slotPresent = true
+                    out.slotStatus = tostring(srec.status or "")
+                    out.slotName = srec.name
+                    out.slotLocation = srec.location
+                    out.slotItemCount = tonumber(srec.count) or nil
+                    out.slotUpdated = out.listUpdated
+                    out.slotAge = out.listAge
+                else
+                    out.slotPresent = false
+                end
+            end
+        end
+    end
+    if throttle_s > 0 then
+        diag_cache[cache_key] = { at = clock_now, value = out }
+    end
+    return out
+end
+
 function M.stub_snap(key)
     if not loaded then M.load(true) end
     local rec = cache[tostring(key or "")]
@@ -469,7 +557,8 @@ function M.merge_roster_keys(keys, scope)
     end
     local mine = char_key(me_server(), me_name())
     for _, k in ipairs(M.known_keys()) do
-        if not seen[k] and k ~= mine then
+        local rec = cache[k]
+        if not seen[k] and k ~= mine and not ignored_cache_record(k, rec) then
             out[#out + 1] = k
             seen[k] = true
         end

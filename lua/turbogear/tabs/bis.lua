@@ -2462,6 +2462,93 @@ live_local.catalog_row = function(list_id, key, snap, rec)
     return row
 end
 
+function M._trace_row_summary(row)
+    row = type(row) == "table" and row or {}
+    local match = row.match
+    return {
+        status = row.status,
+        have = row.have == true,
+        empty = row.empty == true,
+        unknown = row.unknown == true,
+        from_bis_search = row.from_bis_search == true,
+        match_name = type(match) == "table" and match.name or match,
+        match_id = type(match) == "table" and match.id or nil,
+        location = type(match) == "table" and (match.location or match.where or match.slotname) or nil,
+    }
+end
+
+function M._trace_age(now, ts)
+    ts = tonumber(ts) or 0
+    if ts <= 0 then return nil end
+    return math.max(0, now - ts)
+end
+
+function M.trace_grid_cell(list_id, source, slot, category, opts)
+    opts = type(opts) == "table" and opts or {}
+    local source_key = type(source) == "string" and source or opts.source_key
+    local snap = type(source) == "table" and source or nil
+    if not snap and source_key then
+        snap = select(1, views.source_snapshot(source_key))
+    end
+    if type(snap) ~= "table" then
+        return { source_key = source_key, list_id = list_id, slot = slot, category = category, error = "no-snapshot" }
+    end
+    local now = tonumber(opts.now) or os.time()
+    local entry = catalog.resolve_entry(list_id, snap.class, slot)
+    local grid_row = catalog.evaluate_slot(list_id, snap, slot, category)
+    local store_row = entry and bis.evaluate_entry(entry, snap, { skip_live = true }) or nil
+    if store_row then store_row.category = category end
+    local bs_rec, bs_meta = nil, nil
+    local ok_bs, bs = pcall(require, 'bis_search')
+    if ok_bs and bs then
+        if type(bs.slot_rec_meta) == "function" then
+            bs_rec, bs_meta = bs.slot_rec_meta(snap, list_id, slot)
+        elseif type(bs.slot_rec) == "function" then
+            bs_rec = bs.slot_rec(snap, list_id, slot)
+        end
+    end
+    local live_status, live_match = nil, nil
+    local is_local = live_local.is_column(source_key, snap)
+    if is_local and entry and bis.live_item_status then
+        live_status, live_match = bis.live_item_status(entry, entry.item, entry.ids and entry.ids[1])
+    end
+    local grid_source = "store"
+    if grid_row and grid_row.from_bis_search == true then
+        grid_source = "bis_search"
+    elseif is_local and live_status ~= nil and grid_row and grid_row.status == live_status then
+        grid_source = "live-local"
+    end
+    return {
+        character = snap.name,
+        server = snap.server,
+        source_key = source_key,
+        list_id = list_id,
+        category = category,
+        slot = slot,
+        item_name = entry and entry.item or nil,
+        item_id = entry and entry.ids and entry.ids[1] or nil,
+        grid_result = M._trace_row_summary(grid_row),
+        grid_ownership_source = grid_source,
+        store_result = M._trace_row_summary(store_row),
+        bis_search_result = type(bs_rec) == "table" and {
+            present = true,
+            status = bs_rec.status,
+            name = bs_rec.name,
+            count = bs_rec.count,
+            location = bs_rec.location,
+            updated = bs_meta and bs_meta.updated or nil,
+        } or { present = false },
+        live_local_result = is_local and {
+            status = live_status,
+            match_name = type(live_match) == "table" and live_match.name or live_match,
+            match_id = type(live_match) == "table" and live_match.id or nil,
+        } or nil,
+        snapshot_age = M._trace_age(now, snap.inventoryUpdated or snap.updated),
+        snapshot_depth = snap.depth,
+        bis_search_age = M._trace_age(now, bs_meta and bs_meta.updated),
+    }
+end
+
 local function draw_catalog_cell(row, layout, layout_cfg, snap, slot, ridx, col_idx)
     ImGui.TableSetColumnIndex(col_idx)
     local name_max = layout_cfg and layout_cfg.name_max or 20

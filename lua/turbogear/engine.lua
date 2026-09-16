@@ -31,6 +31,8 @@ local Engine = {
     request_seq = 0,
     last_source_request = nil,
     last_source_reply = nil,
+    inventory_publish_diag = nil,
+    last_gather_diag = nil,
     pending_request = nil,
     pending_bis_search = nil,
 }
@@ -161,6 +163,67 @@ local function default_publish_depth(force)
     return snapshot.depth_for_settings()
 end
 
+local function reason_kind(reason)
+    reason = tostring(reason or "")
+    if reason == "peer_request" then return "peer-request" end
+    if reason == "manual_sync" or reason == "forced" then return "manual-sync" end
+    if reason == "manual_bank_sync" or reason == "network_bank_sync" or reason == "bank_capture" then return "bank-sync" end
+    if reason == "inventory_change" or reason == "inventory_watch_dirty" or reason == "inventory_watch_bg_poll" then return "inventory-dirty" end
+    if reason == "worn_persist" or reason == "rich_inventory.recovery_probe" then return "worn-poll" end
+    if reason == "startup_bg_full" then return "startup" end
+    if reason == "scheduled_refresh" then return "scheduled" end
+    if reason == "rich_inventory.promote" or reason == "richrefresh" then return "rich-inventory" end
+    if reason == "lockout_change" or reason == "don_change" then return "metadata" end
+    if reason:find("loot", 1, true) then return "loot/chat-event" end
+    return reason ~= "" and reason or "other"
+end
+
+local function count_list(t)
+    return type(t) == "table" and #t or 0
+end
+
+local function annotate_inventory_publish(snap, info)
+    if type(snap) ~= "table" then return nil end
+    info = type(info) == "table" and info or {}
+    local now = os.time()
+    local reason = tostring(info.reason or "")
+    local diag_info = {
+        at = now,
+        reason = reason,
+        reasonKind = reason_kind(reason),
+        seq = tonumber(snap.seq),
+        requestedDepth = tostring(info.requestedDepth or snap.depth or ""),
+        depth = tostring(snap.depth or ""),
+        gatherResult = tostring(info.gatherResult or (snap.inventoryIncomplete and "incomplete" or "ok")),
+        complete = snap.inventoryIncomplete ~= true,
+        equipped = count_list(snap.equipped),
+        bags = count_list(snap.bags),
+        bank = count_list(snap.bank),
+    }
+    Engine.last_gather_diag = {
+        at = now,
+        reason = reason,
+        requestedDepth = diag_info.requestedDepth,
+        depth = diag_info.depth,
+        result = diag_info.gatherResult,
+        complete = diag_info.complete,
+        equipped = diag_info.equipped,
+        bags = diag_info.bags,
+        bank = diag_info.bank,
+    }
+    if info.published == false then return diag_info end
+    snap._tgPublishAt = diag_info.at
+    snap._tgPublishReason = diag_info.reason
+    snap._tgPublishReasonKind = diag_info.reasonKind
+    snap._tgPublishSeq = diag_info.seq
+    snap._tgPublishRequestedDepth = diag_info.requestedDepth
+    snap._tgPublishDepth = diag_info.depth
+    snap._tgPublishGatherResult = diag_info.gatherResult
+    snap._tgPublishComplete = diag_info.complete
+    Engine.inventory_publish_diag = diag_info
+    return diag_info
+end
+
 local function write_local_cache_snapshot(force, depth, opts)
     opts = type(opts) == "table" and opts or {}
     local gs = mq.TLO.EverQuest.GameState()
@@ -179,6 +242,11 @@ local function write_local_cache_snapshot(force, depth, opts)
         skipLockoutBypass = opts.skipLockoutBypass == true,
     })
     if not snap or not snap.name or snap.name == "?" then return false end
+    annotate_inventory_publish(snap, {
+        reason = tostring(opts.reason or "cache_fallback"),
+        requestedDepth = depth,
+        gatherResult = snap.inventoryIncomplete == true and "incomplete" or "ok",
+    })
     Store.put(snap, 'cache')
     Store.save()
     return true
@@ -778,6 +846,7 @@ function Engine.publish(force, depth, opts)
             includeLiveStats = opts.skipLiveStats ~= true,
             skipLockoutBypass = opts.skipLockoutBypass,
             reason = publish_reason,
+            requestedDepth = opts.requestedDepth or depth,
             replyTo = opts.replyTo,
             requester = opts.requester,
             saveNow = opts.saveNow,
@@ -816,6 +885,12 @@ function Engine.publish(force, depth, opts)
         dprint("publish skipped - no valid name (zoning?)")
         return false
     end
+    annotate_inventory_publish(snap, {
+        reason = publish_reason,
+        requestedDepth = opts.requestedDepth or depth,
+        gatherResult = snap.inventoryIncomplete == true and "incomplete" or "ok",
+        published = false,
+    })
     -- Incomplete inventory walk (pcall failed): keep local Store via put/merge
     -- preserve, but do not broadcast a partial/empty wipe to peers.
     if snap.inventoryIncomplete == true then
@@ -844,6 +919,7 @@ function Engine.publish(force, depth, opts)
         Engine.last_publish = os.clock()
         schedule_next_publish(Engine.last_publish)
         Engine.stats.tx_skip = (Engine.stats.tx_skip or 0) + 1
+        if Engine.last_gather_diag then Engine.last_gather_diag.result = "unchanged" end
         dprint("publish skipped - inventory unchanged")
         send_mail("heartbeat_unchanged", { type = MSG.HEARTBEAT, proto = CFG.proto, kind = 'client', snap = {
             name = snap.name,
@@ -865,6 +941,11 @@ function Engine.publish(force, depth, opts)
     Engine.last_publish = os.clock()
     schedule_next_publish(Engine.last_publish)
     Engine.stats.tx_snap = Engine.stats.tx_snap + 1
+    annotate_inventory_publish(snap, {
+        reason = publish_reason,
+        requestedDepth = opts.requestedDepth or depth,
+        gatherResult = "sent",
+    })
     dprint("tx SNAPSHOT (%s, %d equipped / %d bag / %d bank)", depth, #snap.equipped, #snap.bags, #snap.bank)
     send_mail("snapshot", {
         type = MSG.SNAPSHOT,
@@ -974,6 +1055,11 @@ function Engine.publish_snapshot(snap, opts)
                 tostring(opts.reason or "prebuilt"), tostring(snap.depth or "")))
             return false
         end
+        annotate_inventory_publish(snap, {
+            reason = tostring(opts.reason or "prebuilt"),
+            requestedDepth = snap.depth,
+            gatherResult = "local-cache",
+        })
         diag.time("engine.publish_snapshot.store_put", function()
             Store.put(snap, 'cache')
         end)
@@ -986,6 +1072,12 @@ function Engine.publish_snapshot(snap, opts)
         local gs = mq.TLO.EverQuest.GameState()
         if gs and gs ~= "INGAME" then return false end
         local publish_reason = tostring(opts.reason or "prebuilt")
+        annotate_inventory_publish(snap, {
+            reason = publish_reason,
+            requestedDepth = snap.depth,
+            gatherResult = snap.inventoryIncomplete == true and "incomplete" or "ok",
+            published = false,
+        })
         diag.context("engine.publish_snapshot", string.format("reason=%s depth=%s skipLockouts=%s skipLiveStats=%s bg=%s lean=%s",
             publish_reason, tostring(snap.depth or ""),
             tostring(opts.skipLockouts == true), tostring(opts.skipLiveStats == true),
@@ -1000,6 +1092,7 @@ function Engine.publish_snapshot(snap, opts)
             Engine.last_publish = os.clock()
             schedule_next_publish(Engine.last_publish)
             Engine.stats.tx_skip = (Engine.stats.tx_skip or 0) + 1
+            if Engine.last_gather_diag then Engine.last_gather_diag.result = "unchanged" end
             send_mail("heartbeat_unchanged", { type = MSG.HEARTBEAT, proto = CFG.proto, kind = 'client', snap = {
                 name = snap.name,
                 server = snap.server,
@@ -1020,6 +1113,11 @@ function Engine.publish_snapshot(snap, opts)
         Engine.last_publish = os.clock()
         schedule_next_publish(Engine.last_publish)
         Engine.stats.tx_snap = Engine.stats.tx_snap + 1
+        annotate_inventory_publish(snap, {
+            reason = publish_reason,
+            requestedDepth = snap.depth,
+            gatherResult = "sent",
+        })
         send_mail("snapshot", {
             type = MSG.SNAPSHOT,
             proto = CFG.proto,

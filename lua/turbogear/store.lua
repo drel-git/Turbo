@@ -31,6 +31,8 @@ local Store = {
     content_signatures = {},
     persist_signatures = {},
     last_content_change_by_key = {},
+    last_inventory_ingest_by_key = {},
+    last_presence_ingest_by_key = {},
     cache_signature = nil,
     cache_last_reload_reason = "",
 }
@@ -371,6 +373,8 @@ local function diag_heap_delta(label, before_kb)
     end
 end
 
+local snapshot_inventory_stamp, snapshot_seq
+
 -- Phase 0 diagnostics: locate the first differing token between two content
 -- signatures. snapshot_content_sig joins top-level fields with \31 and the
 -- per-item sigs inside a list with \30, so splitting on both yields the item
@@ -411,6 +415,9 @@ local function note_content_change(source, key, snap, old_sig, new_sig)
         kind = tostring(snap and snap.kind or "?"),
         depth = tostring(snap and snap.depth or "?"),
         version = (Store.content_version or 0) + 1,
+        at = os.time(),
+        inventoryUpdated = snapshot_inventory_stamp(snap),
+        seq = snapshot_seq(snap),
         old_len = #(tostring(old_sig or "")),
         new_len = #(tostring(new_sig or "")),
         equipped = list_count(snap and snap.equipped),
@@ -472,7 +479,7 @@ local function snapshot_content_sig(snap)
     }, "\31")
 end
 
-local function snapshot_inventory_stamp(snap)
+function snapshot_inventory_stamp(snap)
     if type(snap) ~= "table" then return nil end
     return tonumber(snap.inventoryUpdated) or tonumber(snap.updated)
 end
@@ -538,6 +545,25 @@ local function preserve_newer_wallet(existing, candidate)
     return candidate
 end
 
+local PUBLISH_DIAG_KEYS = {
+    "_tgPublishAt",
+    "_tgPublishReason",
+    "_tgPublishReasonKind",
+    "_tgPublishSeq",
+    "_tgPublishRequestedDepth",
+    "_tgPublishDepth",
+    "_tgPublishGatherResult",
+    "_tgPublishComplete",
+}
+
+local function copy_publish_diag_fields(from, to)
+    if type(from) ~= "table" or type(to) ~= "table" then return to end
+    for _, k in ipairs(PUBLISH_DIAG_KEYS) do
+        if from[k] ~= nil then to[k] = from[k] end
+    end
+    return to
+end
+
 local function snapshot_persist_sig(snap)
     if type(snap) ~= "table" then return "" end
     local parts = {
@@ -569,7 +595,7 @@ end
 -- owner) and fall back to wall-clock recency for snapshots from pre-seq
 -- responders. Additive + backward-compatible, so no protocol version bump: a box
 -- that lacks seq simply gets the recency path.
-local function snapshot_seq(snap)
+function snapshot_seq(snap)
     local s = tonumber(snap and snap.seq)
     if s and s > 0 then return s end
     return nil
@@ -853,6 +879,7 @@ local function merge_lite_snapshot(existing, snap)
     else
         apply_equipped_preserve(existing, out)
     end
+    copy_publish_diag_fields(snap, out)
     local live_bank = snap.bankLive == true and snap.bankOpen == true
     local snap_bank_ok = live_bank
         or (snap.bankValid == true and type(snap.bank) == "table" and #snap.bank > 0)
@@ -977,8 +1004,21 @@ function Store.put(snap, kind)
         local psig = snapshot_persist_sig(snap)
         -- Negative = a collection ran during this put.
         diag_heap_delta("store.put.gc_kb", gc_kb0)
-        snap.status = "online"; snap.last_seen = os.time(); snap.kind = kind or "client"
-        if (kind or "client") == "client" then snap.actorSeenAt = os.time() end
+        local now = os.time()
+        snap.status = "online"; snap.last_seen = now; snap.kind = kind or "client"
+        if (kind or "client") == "client" then snap.actorSeenAt = now end
+        Store.last_inventory_ingest_by_key[key] = {
+            source = "put",
+            kind = tostring(kind or "client"),
+            at = now,
+            seq = snapshot_seq(snap),
+            updated = tonumber(snap.updated),
+            inventoryUpdated = snapshot_inventory_stamp(snap),
+            depth = tostring(snap.depth or ""),
+            equipped = list_count(snap.equipped),
+            bags = list_count(snap.bags),
+            bank = list_count(snap.bank),
+        }
         Store.sources[key] = snap
         if Store.content_signatures[key] ~= sig then
             note_content_change("put", key, snap, Store.content_signatures[key], sig)
@@ -1029,15 +1069,28 @@ function Store.apply_delta(delta, kind)
             end
         end
         if not touched then return false end
-        existing.updated = tonumber(delta.updated) or os.time()
+        local now = os.time()
+        existing.updated = tonumber(delta.updated) or now
         existing.inventoryUpdated = stamp
         existing.seq = tonumber(delta.seq) or existing.seq
         existing.class = coalesce_class(delta.class, existing.class)
         existing.level = delta.level or existing.level
         existing.status = "online"
-        existing.last_seen = os.time()
+        existing.last_seen = now
         existing.kind = kind or existing.kind or "client"
-        if (kind or "client") == "client" then existing.actorSeenAt = os.time() end
+        if (kind or "client") == "client" then existing.actorSeenAt = now end
+        Store.last_inventory_ingest_by_key[key] = {
+            source = "delta",
+            kind = tostring(kind or existing.kind or "client"),
+            at = now,
+            seq = tonumber(delta.seq) or existing.seq,
+            updated = tonumber(delta.updated),
+            inventoryUpdated = stamp,
+            depth = tostring(existing.depth or ""),
+            equipped = list_count(existing.equipped),
+            bags = list_count(existing.bags),
+            bank = list_count(existing.bank),
+        }
         local sig = snapshot_content_sig(existing)
         if Store.content_signatures[key] ~= sig then
             note_content_change("delta", key, existing, Store.content_signatures[key], sig)
@@ -1057,6 +1110,13 @@ function Store.touch(snap, kind)
     local existing = Store.sources[key]
     local is_meta = snap.depth == "meta"
     local now = os.time()
+    Store.last_presence_ingest_by_key[key] = {
+        source = is_meta and "touch_meta" or "touch",
+        kind = tostring(kind or (existing and existing.kind) or "client"),
+        at = now,
+        updated = tonumber(snap.updated),
+        depth = tostring(snap.depth or ""),
+    }
     if existing then
         local prior_inventory_updated = existing.inventoryUpdated or existing.updated
         local changed = existing.status ~= "online"
@@ -1443,7 +1503,7 @@ end
 
 local function persist_row(s)
     local has_spell_ids = type(s.spell_ids) == "table" and #s.spell_ids > 0
-    return {
+    local row = {
         name = s.name, server = s.server, class = s.class, level = s.level,
         updated = s.updated, seq = s.seq, inventoryUpdated = s.inventoryUpdated,
         walletUpdated = s.walletUpdated,
@@ -1467,6 +1527,7 @@ local function persist_row(s)
         nightveil_scrip = s.nightveil_scrip,
         aa_unspent = s.aa_unspent,
     }
+    return copy_publish_diag_fields(s, row)
 end
 
 -- Sectional payload cache: bags/bank dominate serialize time (~7–11s). Equip-only
@@ -1495,6 +1556,15 @@ end
 
 local function encode_field(k, encoded_v)
     return "[" .. string.format("%q", tostring(k)) .. "]=" .. encoded_v
+end
+
+local function append_publish_diag_fields(parts, snap)
+    if type(parts) ~= "table" or type(snap) ~= "table" then return end
+    for _, k in ipairs(PUBLISH_DIAG_KEYS) do
+        if snap[k] ~= nil then
+            parts[#parts + 1] = encode_field(k, encode_scalar(snap[k]))
+        end
+    end
 end
 
 local function section_payload(cache, sig_key, ser_key, sig, live_list, serialize_fn)
@@ -1574,6 +1644,7 @@ local function build_row_payload(key, live, serialize_fn, hash_fn)
         encode_field("nightveil_scrip", encode_scalar(live.nightveil_scrip)),
         encode_field("aa_unspent", encode_scalar(live.aa_unspent)),
     }
+    append_publish_diag_fields(parts, live)
     local payload = "{" .. table.concat(parts, ",") .. "}"
     local h = hash_fn(payload)
     cache.full_sig = persist_sig
@@ -1622,6 +1693,7 @@ local function assemble_payload_from_cache(key, live, cache, serialize_fn, hash_
         encode_field("nightveil_scrip", encode_scalar(live.nightveil_scrip)),
         encode_field("aa_unspent", encode_scalar(live.aa_unspent)),
     }
+    append_publish_diag_fields(parts, live)
     local payload = "{" .. table.concat(parts, ",") .. "}"
     local h = hash_fn(payload)
     local persist_sig = Store.persist_signatures[key] or snapshot_persist_sig(live)
@@ -2232,6 +2304,8 @@ function Store.remove_source(key)
     persisted_persist_sig[key] = nil
     section_ser_cache[key] = nil
     Store.last_content_change_by_key[key] = nil
+    Store.last_inventory_ingest_by_key[key] = nil
+    Store.last_presence_ingest_by_key[key] = nil
     Store.version = (Store.version or 0) + 1
     Store.content_version = (Store.content_version or 0) + 1
     Store.dirty = true
@@ -2258,6 +2332,67 @@ function Store.is_recently_visible(key, snap)
     if last <= 0 then return false end
     local grace = tonumber(Settings.peerVisibleGraceSeconds) or 180
     return (os.time() - last) <= grace
+end
+
+function Store.inventory_diag(key, opts)
+    opts = type(opts) == "table" and opts or {}
+    key = tostring(key or "")
+    local snap = Store.sources[key]
+    if type(snap) ~= "table" then return nil end
+    local now = tonumber(opts.now) or os.time()
+    local function age(ts)
+        ts = tonumber(ts) or 0
+        if ts <= 0 then return nil end
+        return math.max(0, now - ts)
+    end
+    local change = Store.last_content_change_by_key[key]
+    local ingest = Store.last_inventory_ingest_by_key[key]
+    local presence = Store.last_presence_ingest_by_key[key]
+    local inv_stamp = snapshot_inventory_stamp(snap)
+    return {
+        key = key,
+        name = snap.name,
+        server = snap.server,
+        status = snap.status,
+        ignored = Store.is_ignored_name(snap.name or key),
+        depth = snap.depth,
+        seq = snapshot_seq(snap),
+        updated = snap.updated,
+        inventoryUpdated = inv_stamp,
+        inventoryAge = age(inv_stamp),
+        updatedAge = age(snap.updated),
+        metaUpdatedAge = age(snap.metaUpdated),
+        actorAge = age(snap.actorSeenAt),
+        discoveryAge = age(snap.discoverySeenAt),
+        lastSeenAge = age(snap.last_seen),
+        equipped = list_count(snap.equipped),
+        bags = list_count(snap.bags),
+        bank = list_count(snap.bank),
+        bankValid = snap.bankValid,
+        bankLive = snap.bankLive,
+        inventoryIncomplete = snap.inventoryIncomplete == true,
+        lastContentChangeAge = age(change and change.at),
+        lastContentChangeSource = change and change.source or nil,
+        lastContentChangeDepth = change and change.depth or nil,
+        lastContentChangeVersion = change and change.version or nil,
+        lastContentChangeSigDiff = change and change.sig_diff or nil,
+        lastInventoryIngestAge = age(ingest and ingest.at),
+        lastInventoryIngestSource = ingest and ingest.source or nil,
+        lastInventoryIngestKind = ingest and ingest.kind or nil,
+        lastInventoryIngestDepth = ingest and ingest.depth or nil,
+        lastPresenceIngestAge = age(presence and presence.at),
+        lastPresenceIngestSource = presence and presence.source or nil,
+        lastPresenceIngestKind = presence and presence.kind or nil,
+        publishAge = age(snap._tgPublishAt),
+        publishAt = tonumber(snap._tgPublishAt),
+        publishReason = snap._tgPublishReason,
+        publishReasonKind = snap._tgPublishReasonKind,
+        publishSeq = tonumber(snap._tgPublishSeq),
+        publishRequestedDepth = snap._tgPublishRequestedDepth,
+        publishDepth = snap._tgPublishDepth,
+        publishGatherResult = snap._tgPublishGatherResult,
+        publishComplete = snap._tgPublishComplete,
+    }
 end
 
 function Store.get(key)

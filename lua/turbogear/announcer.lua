@@ -2232,8 +2232,19 @@ function link_sched.generated_diag.peer_freshness_provider(row, snap, diag_prefi
     diag_prefix = tostring(diag_prefix or "generated_shadow")
     return function(candidate)
         candidate = type(candidate) == "table" and candidate or {}
-        local rec = bis_search.slot_rec(snap, candidate.list_id, candidate.slot)
+        local rec, meta
+        if type(bis_search.slot_rec_meta) == "function" then
+            rec, meta = bis_search.slot_rec_meta(snap, candidate.list_id, candidate.slot)
+        else
+            rec = bis_search.slot_rec(snap, candidate.list_id, candidate.slot)
+        end
         if type(rec) == "table" and rec.status ~= nil then
+            if meta and rec.updated == nil then
+                local copy = {}
+                for k, v in pairs(rec) do copy[k] = v end
+                copy.updated = meta.updated
+                rec = copy
+            end
             diag.count(diag_prefix .. ".peer_freshness_record")
             diag.count(diag_prefix .. ".peer_freshness_" .. tostring(rec.status):gsub("[^%w_]+", "_"))
         else

@@ -275,6 +275,9 @@ local function expand_fungal_chain(list, class_bucket, out)
     local family, rank = fungal_family_rank_cached(out.item)
     if not family then family, rank = fungal_family_rank_cached(out.slot) end
     if not family or rank == nil then return out end
+    if not out.progression_exact_ids and not out.progression_exact_names and not out.progression_exact_pairs then
+        M._note_current_progression_exact(out)
+    end
     out.progression_id_match = true
     local id_seen, name_seen = seed_id_seen(out), seed_name_seen(out)
     for slot, raw in pairs(class_bucket or {}) do
@@ -643,20 +646,20 @@ end
 
 function M._don_reward_from_shadow(shadow)
     if not shadow then return nil end
-    local e = norm_entry_cached(shadow)
-    local shadow_item = tostring(e.item or ""):lower()
+    local shadow_item = tostring(shadow.item or shadow.name or ""):lower()
     local ids, names = {}, {}
-    for i = 2, #(e.ids or {}) do ids[#ids + 1] = e.ids[i] end
-    for _, name in ipairs(e.names or {}) do
+    for i, name in ipairs(shadow.names or {}) do
         local n = tostring(name or "")
         local low = n:lower()
         if n ~= "" and low ~= shadow_item and not low:find("^shadow of a legendary ", 1, false) then
             names[#names + 1] = n
+            local id = shadow.ids and tonumber(shadow.ids[i]) or nil
+            if id and id > 0 then ids[#ids + 1] = id end
         end
     end
     if #ids == 0 and #names == 0 then return nil end
     return {
-        item = names[1] or tostring(e.item or "Reward"),
+        item = names[1] or "Reward",
         ids = ids,
         names = names,
         slot = "Reward",
@@ -664,13 +667,20 @@ function M._don_reward_from_shadow(shadow)
     }
 end
 
-function M._note_don_shadow_exact(out)
+function M._note_don_shadow_exact(out, shadow)
     if tostring(out and out.slot or "") ~= "Shadow" then
         M._note_current_progression_exact(out)
         return
     end
-    local first_id = out.ids and tonumber(out.ids[1]) or nil
-    if first_id and first_id > 0 then M._note_progression_exact_id(out, first_id) end
+    shadow = type(shadow) == "table" and shadow or nil
+    local shadow_item = tostring((shadow and (shadow.item or shadow.name)) or out.item or ""):lower()
+    for i, name in ipairs((shadow and shadow.names) or {}) do
+        local low = tostring(name or ""):lower()
+        if low ~= "" and (low == shadow_item or low:find("^shadow of a legendary ", 1, false)) then
+            local id = shadow.ids and tonumber(shadow.ids[i]) or nil
+            if id and id > 0 then M._note_progression_exact_id(out, id) end
+        end
+    end
     M._note_progression_exact_name(out, out.item)
     local shadow_item = tostring(out.item or ""):lower()
     for _, name in ipairs(out.names or {}) do
@@ -695,7 +705,7 @@ local function expand_don_shadow_chain(list, class_bucket, out)
     local e = norm_entry_cached(reward)
     out.progression_id_match = true
     out.progression_prefer_later = true
-    M._note_don_shadow_exact(out)
+    M._note_don_shadow_exact(out, shadow)
     local id_seen, name_seen = seed_id_seen(out), seed_name_seen(out)
     add_ids(out, e.ids, id_seen)
     add_names(out, e.names, name_seen)
@@ -998,6 +1008,25 @@ function M._apply_progression_satisfied_status(entry, row)
         row.progression_satisfied_name = tostring(match or "")
     end
     return row
+end
+
+function M._progression_fallback_is_alias(entry, row)
+    if type(entry) ~= "table" or type(row) ~= "table" or not M._row_is_owned(row) then return false end
+    local exact_pairs = type(entry.progression_exact_pairs) == "table" and entry.progression_exact_pairs or nil
+    local exact_ids = type(entry.progression_exact_ids) == "table" and entry.progression_exact_ids or nil
+    local exact_names = type(entry.progression_exact_names) == "table" and entry.progression_exact_names or nil
+    if not exact_pairs and not exact_ids and not exact_names then return true end
+    local match_id = M._row_match_id(row)
+    local match_name = M._progression_norm_name(M._row_match_name(row))
+    if exact_pairs then
+        local names = match_id and exact_pairs[tonumber(match_id)] or nil
+        if names and match_name ~= "" and names[match_name] then return false end
+        if not match_id and match_name ~= "" and exact_names and exact_names[match_name] then return false end
+    else
+        if match_id and exact_ids and exact_ids[tonumber(match_id)] then return false end
+        if match_name ~= "" and exact_names and exact_names[match_name] then return false end
+    end
+    return match_id ~= nil or match_name ~= ""
 end
 
 function M._completed_entry_for_forsaken(entry, mold)
@@ -1604,7 +1633,8 @@ function M.evaluate_slot(list_id, snap, slot, category)
                 end
                 if status == "missing" and (entry.progression_id_match == true or M._EXPANDED_SLOT_FALLBACK_LISTS[tostring(list_id or "")]) then
                     local fallback = bis.evaluate_entry(entry, snap)
-                    if fallback and fallback.status and fallback.status ~= "missing" then
+                    if fallback and fallback.status and fallback.status ~= "missing"
+                        and M._progression_fallback_is_alias(entry, fallback) then
                         fallback.category = category
                         fallback = M._apply_sebilis_forsaken_status(list_id, entry, snap, fallback)
                         fallback = M._apply_sebilis_originator_status(list_id, entry, snap, fallback)
@@ -4673,6 +4703,9 @@ local function generated_source_for_slot(list_id, list, class_name, slot)
     if list_id == "don" and slot == "Scales" and list and list.template and list.template.Misc4 then
         return raw, "template", list.template, "Misc4"
     end
+    if list_id == "don" and slot == "2.75" then
+        return raw, "don_virtual", class_bucket, slot
+    end
     if class_bucket and source_bucket == class_bucket then return raw, "class", class_bucket, slot end
     if list and source_bucket == list.template then return raw, "template", list.template, slot end
     if list and source_bucket == list.visible then return raw, "visible", list.visible, slot end
@@ -4750,6 +4783,11 @@ local function generated_resolve_builtin_locator(loc, snap_class)
         local raw = shared_builtin_raw_entry(list_id, list, class_name, slot)
         if type(raw) ~= "table" then return nil, "no-don-spell" end
         return raw, nil, nil
+    end
+    if source_kind == "don_virtual" then
+        local bucket = class_name and list.classes and list.classes[class_name] or nil
+        local raw = M._don_virtual_raw_entry(list, bucket, class_name, slot)
+        return raw, raw and nil or "no-don-virtual-row", bucket
     end
     if source_kind == "class" then
         local bucket = class_name and list.classes and list.classes[class_name] or nil
@@ -5166,6 +5204,8 @@ local function paint_need_walk(snap, item_name, item_id, opts)
     local class_name = class_key(snap.class or '')
     local matched = false
     local link_norm = norm_item_key(item_name)
+    local jonas_bare_link = item_name:match("^%s*Jonas%s+Dagmire['`]s%s+(.+)%s*$")
+    local jonas_bare_link_norm = jonas_bare_link and norm_item_key(jonas_bare_link) or nil
     local trace_jonas = link_norm == norm_item_key("Jonas Dagmire's Little Finger Metacarpal")
         or link_norm == norm_item_key("Little Finger Metacarpal")
         or link_norm == norm_item_key("Jonas Dagmire's Thumb Distal Phalanx")
@@ -5322,6 +5362,17 @@ local function paint_need_walk(snap, item_name, item_id, opts)
                                 if bloom_rest and cell:find("fungal bloom of " .. bloom_rest, 1, true) then
                                     rough = true
                                 end
+                                if not rough and list_id == "jonas" and jonas_bare_link_norm
+                                    and cell:find(jonas_bare_link_norm, 1, true) then
+                                    rough = true
+                                end
+                                if not rough and list_id == "don" and (slot == "Misc4" or slot == "Scales") then
+                                    local epic = DON_SCALES_EPICS[class_key(class_name)]
+                                    if epic and ((item_id > 0 and tonumber(epic.id) == item_id)
+                                        or (link_norm ~= "" and norm_item_key(epic.name) == link_norm)) then
+                                        rough = true
+                                    end
+                                end
                             end
                         end
                         if not rough and item_id <= 0 then
@@ -5340,6 +5391,9 @@ local function paint_need_walk(snap, item_name, item_id, opts)
                                 expand_don_clicky_chain(list, bucket, entry)
                                 expand_don_shadow_chain(list, bucket, entry)
                                 M._expand_don_charm_chain(entry)
+                                expand_don_scales_chain(entry, class_name)
+                            elseif list_id == 'jonas' then
+                                expand_jonas_hand_chain(list, bucket, entry)
                             elseif list_id == 'veksar' then
                                 M._expand_veksar_progression_chains(list, bucket, entry)
                             elseif list_id == 'dsk' then

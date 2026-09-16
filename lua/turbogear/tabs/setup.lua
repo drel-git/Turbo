@@ -76,6 +76,23 @@ local function bank_label(snap)
     return "Bank: not synced yet - open a bank.", Theme.amber
 end
 
+local function age_from_seconds(age)
+    age = tonumber(age)
+    if not age then return "n/a" end
+    age = math.max(0, math.floor(age))
+    if age < 60 then return tostring(age) .. "s ago" end
+    if age < 3600 then return tostring(math.floor(age / 60)) .. "m ago" end
+    return tostring(math.floor(age / 3600)) .. "h ago"
+end
+
+local function bis_search_diag_for_key(key)
+    local ok, bs = pcall(require, 'bis_search')
+    if not ok or not bs or type(bs.cache_diag) ~= "function" then return nil end
+    local ok_diag, info = pcall(bs.cache_diag, key)
+    if ok_diag then return info end
+    return nil
+end
+
 local function parse_id_list(text, item_field)
     local ids = {}
     local seen = {}
@@ -1075,6 +1092,28 @@ function M.draw()
     -- preserved "Xh ago" row until bg persist + cache reload lands.
     local local_bank_text, local_bank_color = bank_label(select(1, views.source_snapshot("__self__")))
     col_text(local_bank_color, local_bank_text)
+    do
+        local pub = Engine.inventory_publish_diag
+        local gather = Engine.last_gather_diag
+        if type(pub) == "table" or type(gather) == "table" then
+            local pub_text = type(pub) == "table"
+                and string.format("publish %s/%s seq %s depth %s->%s",
+                    tostring(pub.reasonKind or pub.reason or "unknown"),
+                    age_from_seconds(pub.at and (os.time() - tonumber(pub.at)) or nil),
+                    tostring(pub.seq or "-"),
+                    tostring(pub.requestedDepth or "-"),
+                    tostring(pub.depth or "-"))
+                or "publish never"
+            local gather_text = type(gather) == "table"
+                and string.format("gather %s/%s depth %s result %s",
+                    tostring(gather.reason or "unknown"),
+                    age_from_seconds(gather.at and (os.time() - tonumber(gather.at)) or nil),
+                    tostring(gather.depth or "-"),
+                    tostring(gather.result or "-"))
+                or "gather never"
+            col_text(Theme.dim, "local inventory diag: " .. pub_text .. " | " .. gather_text)
+        end
+    end
     if Settings.peerDiscoveryEnabled ~= false then
         col_text(Theme.dim, "discovery: " .. tostring(peer_discovery.status()))
     end
@@ -1094,6 +1133,40 @@ function M.draw()
                 local line_color = (state and state.actorLive) and Theme.online or status_color(p.status)
                 col_text(line_color, string.format("  %s  [%s]  (%s, %s, inv %s, bank %s)",
                     p.name, tag, detail, responder, inv_age, bank_age))
+                local inv_diag = Store.inventory_diag and Store.inventory_diag(k) or nil
+                local bs_diag = bis_search_diag_for_key(k)
+                if inv_diag or bs_diag then
+                    local seq = inv_diag and tostring(inv_diag.seq or "-") or "-"
+                    local depth = inv_diag and tostring(inv_diag.depth or "-") or "-"
+                    local presence_age = inv_diag and (inv_diag.actorAge or inv_diag.lastSeenAge or inv_diag.discoveryAge) or nil
+                    local inv_age_diag = inv_diag and inv_diag.inventoryAge or nil
+                    local publish = inv_diag and string.format("%s/%s/%s->%s",
+                        tostring(inv_diag.publishReasonKind or inv_diag.publishReason or "none"),
+                        age_from_seconds(inv_diag.publishAge),
+                        tostring(inv_diag.publishRequestedDepth or "-"),
+                        tostring(inv_diag.publishDepth or "-")) or "none"
+                    local store_change = inv_diag and string.format("%s/%s",
+                        tostring(inv_diag.lastContentChangeSource or "none"),
+                        age_from_seconds(inv_diag.lastContentChangeAge)) or "none"
+                    local ingest = inv_diag and string.format("%s/%s/%s",
+                        tostring(inv_diag.lastInventoryIngestSource or "none"),
+                        tostring(inv_diag.lastInventoryIngestDepth or "-"),
+                        age_from_seconds(inv_diag.lastInventoryIngestAge)) or "none"
+                    local presence = inv_diag and string.format("%s/%s",
+                        tostring(inv_diag.lastPresenceIngestSource or "none"),
+                        age_from_seconds(inv_diag.lastPresenceIngestAge)) or "none"
+                    local bs_text = bs_diag and string.format("%d lists/%d slots latest %s%s",
+                        tonumber(bs_diag.listCount or 0) or 0,
+                        tonumber(bs_diag.slotCount or 0) or 0,
+                        age_from_seconds(bs_diag.latestAge),
+                        bs_diag.ignored and " ignored" or "") or "none"
+                    col_text(Theme.dim, string.format("     diag: pres %s inv %s seq %s depth %s eq %d bag %d bank %d | pub %s | ingest %s | Store %s | presence %s | bis_search %s",
+                        age_from_seconds(presence_age), age_from_seconds(inv_age_diag), seq, depth,
+                        tonumber(inv_diag and inv_diag.equipped or 0) or 0,
+                        tonumber(inv_diag and inv_diag.bags or 0) or 0,
+                        tonumber(inv_diag and inv_diag.bank or 0) or 0,
+                        publish, ingest, store_change, presence, bs_text))
+                end
                 ImGui.SameLine()
                 if themed_button("Mute##ign_" .. k, Theme.steel) then Store.set_ignored(p.name, true) end
                 if ImGui.IsItemHovered and ImGui.IsItemHovered() and ImGui.SetTooltip then

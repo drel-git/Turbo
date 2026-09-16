@@ -1,3 +1,12 @@
-# Maintainer-only. Keep local; do not publish on drel-git/Turbo.
-tools/
+# Maintainer-only helpers stay local by default; explicitly unignore only the
+# TurboGear catalog migration tools needed in a clean checkout.
+tools/*
+!tools/
+!tools/build_turbogear_catalog.lua
+!tools/check_turbogear_catalog.lua
+!tools/compare_turbogear_catalog_semantics.lua
+!tools/verify_turbogear_catalog.lua
+lua/tools/*
+!lua/tools/
+!lua/tools/generate_turbogear_builtin_announce_index.lua
 lua/tests/

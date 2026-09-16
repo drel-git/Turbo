@@ -1,3 +1,12 @@
+1.2.147
+TurboGear:
+- Reworked and hardened the BiS catalog pipeline and item matching.
+- Improved reliability of BiS ownership checks and linked-item announcements.
+- Fixed muted/ignored characters reappearing through cached All Known/BiS-search data.
+- Added inventory and peer synchronization diagnostics to help track stale character state.
+- Preserved inventory publish diagnostics across Store persistence/cache reloads.
+- Improved internal validation and consistency checks across TG data.
+
 1.2.146
 TurboGear:
 - Fixed Ruined Shadowy Sebilis armor announce detection

@@ -20,7 +20,7 @@ jobs:
 
       - name: Build suite zip
         run: |
-          zip -r "Turbo.Suite.${{ github.event.release.tag_name }}.zip" lua Macros config README.md LICENSE
+          zip -r "Turbo.Suite.${{ github.event.release.tag_name }}.zip" lua Macros config README.md LICENSE -x "lua/tools/*" "lua/tests/*"
 
       - name: Attach to release
         env:
